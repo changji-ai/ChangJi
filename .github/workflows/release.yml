@@ -1664,7 +1664,28 @@ jobs:
       - name: Create the Release (stable)
         if: needs.meta.outputs.channel == 'release'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # ⚠️ **`GITHUB_TOKEN` gets 403 on POST /releases here, and why is
+          # not established.** Everything that should make it work is in place:
+          # the repository's default workflow permission is `write` (checked),
+          # this job declares `contents: write` (checked, in the very commit
+          # that failed), there are no rulesets, no branch protection, the repo
+          # is not archived and Actions is unrestricted. In the same script the
+          # token's `DELETE .../git/refs/tags/beta` came back 422 "Reference
+          # does not exist" — it reached the API — while `POST .../releases`
+          # came back
+          #     HTTP 403: Resource not accessible by integration
+          # Run #18 on 2026-09-22 at 09:51Z, two and a half hours after the
+          # permission was raised to `write`.
+          #
+          # A personal access token for the account that owns this repository
+          # creates releases here without complaint (verified by making a draft
+          # release and deleting it). So the publish step uses that when it is
+          # set, and falls back to `GITHUB_TOKEN` when it is not — a fork has
+          # no secret and should still get as far as it can.
+          #
+          # This is a workaround, not a diagnosis. If the 403 ever explains
+          # itself, drop CHANGJI_RELEASE_TOKEN and this comment with it.
+          GH_TOKEN: ${{ secrets.CHANGJI_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
           # The resolved ref, not the raw input: on a push the input is
           # empty while what was actually used is the same-name pairing (or
           # the fallback). The notes have to name the version that went in.
@@ -1717,7 +1738,7 @@ jobs:
       - name: Create the beta prerelease
         if: needs.meta.outputs.channel == 'beta'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.CHANGJI_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
           # The resolved ref, not the raw input: on a push the input is
           # empty while what was actually used is the same-name pairing (or
           # the fallback). The notes have to name the version that went in.
