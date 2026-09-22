@@ -871,24 +871,17 @@ void run(const config::Settings& settings, const Options& opts) {
         j["me"]["vramUsed"] = load.gpus.empty() ? 0.0 : load.gpus[0].vram_used_gb;
         j["me"]["vramTotal"] = load.gpus.empty() ? 0.0 : load.gpus[0].vram_total_gb;
 
-        // **哪几台已经在机器表上了**（`onTable`）。设置页上配对的那几台
-        // 和机器表摆在一起，这一格决定那一行右边写「拿它来算」还是
-        // 「已经在表上」。
+        // **这一台在机器表上会长什么地址。**
         //
-        // ⚠️ **这句话在引擎这头判，不在界面那头拼地址比字符串**
-        //（CLAUDE.md 第八条 + 第十一条）：地址怎么拼只有 `their_url` 一处
-        // 说了算，界面只认这个布尔。
-        const auto s = config::runtime().snapshot();
+        // 设置页把机器表和局域网上配对的那几台**接成一张表**（一台机器一行），
+        // 而"这一行和那一台是同一台"靠的就是这条地址。
+        //
+        // ⚠️ **地址在这头拼，界面只拿两个字符串对一下。** 界面那头照着
+        // 主机名和端口自己拼一条的话，就是同一件事两处各写一遍
+        //（CLAUDE.md 第八条）——哪天末尾那个点或者端口的处理改了，同一台
+        // 机器就会在那张表上分成两行，而两行谁也不说自己是另一行。
         for (auto& p : j["peers"]) {
-            const std::string url =
-                lan::Sense::instance().their_url(p.value("id", std::string()));
-            bool on_table = false;
-            if (!url.empty()) {
-                for (const auto& n : s.peer.nodes) {
-                    if (n.url == url) { on_table = true; break; }
-                }
-            }
-            p["onTable"] = on_table;
+            p["url"] = lan::Sense::instance().their_url(p.value("id", std::string()));
         }
         return j;
     };
