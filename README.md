@@ -1,5 +1,7 @@
 # changji · 场记
 
+**English** · [简体中文](README.zh-CN.md)
+
 **Say what film you want. It writes the chapters, breaks them into shots, draws
 every first frame, renders the video, speaks the lines, and cuts the result into
 one film — on your own machine, out of one binary.**
@@ -10,7 +12,7 @@ the final cut. The name is the Chinese for *script supervisor* — the person on
 crew who keeps the shot list, watches continuity between takes, and records the
 state of every setup. That is the job this software does.
 
-![The conversation on the left, the manuscript on the right](docs/screenshots/story.jpg)
+![The conversation on the left, the manuscript on the right](docs/screenshots/en/story.jpg)
 
 **One binary.** Interface, HTTP API, orchestration, image generation, video
 generation, speech and the language model all live in one process. There is no
@@ -81,9 +83,9 @@ Speech works the same way: in-process, or an HTTP service you already run.
 ### 5. Say what you want
 
 The desktop app is one conversation and one canvas. You talk; the canvas shows
-what changed. The canvas has five panes — Story, Script, Shots, Cast &
-Locations, Film — and each is editable: fix a line of dialogue, swap a
-character's reference image, re-shoot one shot.
+what changed. The canvas has five panes — Story, Cast & Locations, Script,
+Shots, Film — and each is editable: fix a line of dialogue, swap a character's
+reference image, re-shoot one shot.
 
 The conversation is an agent with tools on the engine side, so "write the first
 three chapters", "which shots still have no first frame", "re-render sh004" and
@@ -105,7 +107,7 @@ exactly this reason.
 
 ### The shot table is the hub
 
-![Every shot in the chapter, with its duration, its line and its state](docs/screenshots/shots.jpg)
+![Every shot in the chapter, with its duration, its line and its state](docs/screenshots/en/shots.jpg)
 
 Every stage reads and writes one structured shot table. No stage hands free
 text to the next one. A shot carries its characters, its location, its camera
@@ -115,7 +117,7 @@ query, not an archaeology dig through filenames.
 
 ### Appearance is assembled by code, not written by the model
 
-![The cast and the locations, each with reference images](docs/screenshots/cast.jpg)
+![The cast and the locations, each with reference images](docs/screenshots/en/cast.jpg)
 
 The storyboard schema has **no field** for a face, a hairstyle or an outfit.
 The model can only name a character id and what changes in this shot. The
@@ -156,7 +158,7 @@ only those places.
 
 ### One film, one file
 
-![The player, with the chapter's shots along the bottom](docs/screenshots/film.jpg)
+![The player, with the chapter's shots along the bottom](docs/screenshots/en/film.jpg)
 
 A chapter is as long as its content needs; it is not padded to fit a slot. When
 the chapters are shot, they are joined in order into one film. Chapters with no
@@ -191,7 +193,7 @@ Chinese.
 
 ## How a chapter gets made
 
-![The script, with beats, scene headings and dialogue](docs/screenshots/script.jpg)
+![The script, with beats, scene headings and dialogue](docs/screenshots/en/script.jpg)
 
 | Stage | In | Out |
 |---|---|---|
@@ -388,7 +390,7 @@ tools/              code generation (prompts, web UI, East Asian widths), a fake
 patches/            the leejet/ggml extension patches and the script that applies them
 verify/             the up-front verification project (one-off; conclusions in RESULTS.md)
 i18n/               translation tables, baked into the binary
-docs/screenshots/   the pictures in this file
+docs/screenshots/   the pictures in the two READMEs (en/ and zh/)
 ```
 
 ### What is in this repository, and what is not
