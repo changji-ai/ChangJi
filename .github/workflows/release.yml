@@ -652,8 +652,29 @@ jobs:
           security set-keychain-settings -lut 21600 "$KEYCHAIN"
           security unlock-keychain -p "$KPASS" "$KEYCHAIN"
           printf '%s' "$CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
-          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" \
-            -P "${CERT_PW:-}" -T /usr/bin/codesign
+          # **Say which secret is wrong.** What `security` prints on a bad
+          # password is
+          #     security: SecKeychainItemImport: MAC verification failed
+          #     during PKCS12 import (wrong password?)
+          # which does not name a secret, and the most likely cause by far is
+          # that MACOS_CERT_P12 was set and MACOS_CERT_PW was not — a half-set
+          # pair. Half-configured signing should be loud, not silently
+          # unsigned, so this still fails the cell; it just says what to fix.
+          if ! security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" \
+                 -P "${CERT_PW:-}" -T /usr/bin/codesign; then
+            rm -f "$RUNNER_TEMP/cert.p12"
+            echo "::error::Could not import the certificate into the keychain."
+            if [ -z "${CERT_PW:-}" ]; then
+              echo "MACOS_CERT_PW is empty while MACOS_CERT_P12 is set. Unless the"
+              echo "p12 really has no password, that is the missing half of the pair."
+            else
+              echo "MACOS_CERT_PW does not open MACOS_CERT_P12, or the p12 is not a"
+              echo "valid PKCS#12 file. Check both locally first:"
+            fi
+            echo "  bash tools/setup_signing_secrets.sh"
+            echo "It verifies the password against the file before uploading anything."
+            exit 1
+          fi
           rm -f "$RUNNER_TEMP/cert.p12"
           # Without set-key-partition-list, codesign blocks on a GUI password
           # prompt that nobody is there to answer, and the job hangs until it
