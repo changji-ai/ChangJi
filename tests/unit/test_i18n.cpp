@@ -43,6 +43,7 @@
 #include "http/prompt_peek.hpp"
 #include "setup/catalog.hpp"
 #include "util/say.hpp"
+#include "desktop_sources.hpp"
 
 namespace fs = std::filesystem;
 
@@ -348,6 +349,7 @@ std::string longest_translation(const std::string& ts) {
 }  // namespace
 
 TEST_CASE("多语言 · 三处名单对得上") {
+    if (!changji_test::desktop_sources()) return;
     const std::vector<std::string> langs = langs_from_script();
     CHECK(langs.size() > 1);
 
@@ -373,6 +375,7 @@ TEST_CASE("多语言 · 三处名单对得上") {
 }
 
 TEST_CASE("多语言 · 界面上每一句都在名单里，而且都翻了") {
+    if (!changji_test::desktop_sources()) return;
     // 界面那一头：`qsTr()` / `tr()` 的原话。
     std::set<std::string> said;
     const fs::path desk = desk_dir();
@@ -413,6 +416,7 @@ TEST_CASE("多语言 · 界面上每一句都在名单里，而且都翻了") {
 }
 
 TEST_CASE("多语言 · 编出来的 .qm 跟得上 .ts") {
+    if (!changji_test::desktop_sources()) return;
     // 翻完忘了 `i18n.sh release` 的话，`.ts` 是新的而界面上一个字没变
     // ——**两个文件都在、都不小**，看不出哪儿不对。
     const fs::path i18n = desk_dir() / "i18n";
@@ -803,6 +807,7 @@ bool is_log_line(const std::string& l) {
 }  // namespace
 
 TEST_CASE("多语言 · 界面上不许有没包起来的中文") {
+    if (!changji_test::desktop_sources()) return;
     const fs::path desk = desk_dir();
     int bad = 0;
     for (const auto& e : fs::recursive_directory_iterator(desk)) {
@@ -940,6 +945,7 @@ TEST_CASE("多语言 · 十一种语言的场次头都切得开") {
 // 就这么说），设定改成「設定集 / 設定資料 / 설정집」（动画圈的说法，正是
 // "人物场景那一册"）。
 TEST_CASE("多语言 · 并排摆着的名字不许撞") {
+    if (!changji_test::desktop_sources()) return;
     const fs::path desk = desk_dir();
     for (const std::string& lang : langs_from_script()) {
         CAPTURE(lang);
@@ -994,6 +1000,7 @@ TEST_CASE("多语言 · 并排摆着的名字不许撞") {
 // 一个概念一个词
 
 TEST_CASE("多语言 · 同一件东西不许有两个叫法") {
+    if (!changji_test::desktop_sources()) return;
     // **两个词说一件事，看上去像两件事。** 2026-09-22 量出来的样子：日语的
     // 「镜头」在引擎表里 ショット 44 处、カット 33 处，韩语 숏 49 处、
     // 컷 31 处——而**界面那半截各只用一个**（ja 全是 ショット，ko 全是 컷）。

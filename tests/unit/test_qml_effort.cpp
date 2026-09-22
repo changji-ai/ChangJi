@@ -32,6 +32,7 @@
 #include <fstream>
 #include <set>
 #include <string>
+#include "desktop_sources.hpp"
 
 namespace fs = std::filesystem;
 
@@ -66,6 +67,7 @@ std::set<std::string> quoted_between(const std::string& hay,
 }  // namespace
 
 TEST_CASE("「想多久」那几档：那张表、存盘那道闸、界面上那几个词，说的是同一套") {
+    if (!changji_test::desktop_sources()) return;
     // 那一份：`inline constexpr const char* kThinkTiers[] = {…};`
     const std::string th = slurp(fs::path{CHANGJI_SRC_DIR} / "llm" / "thinking.hpp");
     const std::set<std::string> tiers = quoted_between(th, "kThinkTiers[] = {", "}");

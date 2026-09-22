@@ -195,6 +195,7 @@ jobs:
       # pointing into that repo; without it, that test reports how many it
       # skipped and checks the rest.
       - name: Check out the product repo (optional here)
+        id: product
         continue-on-error: true
         uses: actions/checkout@v4
         with:
@@ -232,7 +233,16 @@ jobs:
       - name: Build
         run: cmake --build build --target changji_tests --parallel
 
+      # **`CHANGJI_REQUIRE_DESKTOP` is set exactly when the checkout above
+      # worked.** Sixteen test cases read the desktop shell's QML and Qt
+      # translations, which live in that repo, and they stand down on their own
+      # when it is absent. That is right for a fork — and wrong here, because a
+      # checkout that silently stopped working would take those sixteen with it
+      # and the run would still be green. With this set, their absence is a
+      # failure that names the reason.
       - name: Run
+        env:
+          CHANGJI_REQUIRE_DESKTOP: ${{ steps.product.outcome == 'success' && '1' || '' }}
         run: ctest --test-dir build --output-on-failure
 
   # ---- Desktop shell: it has to compile on all three platforms ----

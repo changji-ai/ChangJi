@@ -21,6 +21,7 @@
 #include "models/project.hpp"
 #include "models/story.hpp"
 #include "util/paths.hpp"
+#include "desktop_sources.hpp"
 
 namespace fs = std::filesystem;
 
@@ -131,6 +132,7 @@ TEST_CASE("少一份回包也算得出来，不抛") {
 // 做法和 `test_enums.cpp` 那条一样（CLAUDE.md 第八条：收不动就让它会响）：
 // 直接读源码。区别是这一条跨语言——读的是 QML。
 TEST_CASE("图标条那几格：桌面端画得出图标、开得出面板，一格都不许漏") {
+    if (!changji_test::desktop_sources()) return;
     const auto slots = http::rail_present(json::object(), json::object(), json::object());
     REQUIRE(!slots.empty());
 

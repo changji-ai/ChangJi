@@ -26,6 +26,7 @@
 #include <fstream>
 #include <string>
 #include <vector>
+#include "desktop_sources.hpp"
 
 namespace fs = std::filesystem;
 
@@ -64,6 +65,7 @@ struct Bare {
 }  // namespace
 
 TEST_CASE("桌面端的 QML：铺满圆角块的图和视频，方角得自己切掉") {
+    if (!changji_test::desktop_sources()) return;
     const fs::path dir{CHANGJI_DESKTOP_QML_DIR};
     REQUIRE_MESSAGE(fs::is_directory(dir), "读不到 " << dir.string());
 

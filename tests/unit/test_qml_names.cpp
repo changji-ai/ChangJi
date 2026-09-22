@@ -31,6 +31,7 @@
 #include <set>
 #include <string>
 #include <vector>
+#include "desktop_sources.hpp"
 
 namespace fs = std::filesystem;
 
@@ -73,6 +74,7 @@ const std::map<std::string, std::vector<std::string>>& taken() {
 }  // namespace
 
 TEST_CASE("桌面端的 QML：文件名不许盖掉 import 进来的 Qt 类型") {
+    if (!changji_test::desktop_sources()) return;
     const fs::path dir{CHANGJI_DESKTOP_QML_DIR};
     REQUIRE_MESSAGE(fs::is_directory(dir), "读不到 " << dir.string());
 

@@ -30,6 +30,7 @@
 #include <set>
 #include <string>
 #include <vector>
+#include "desktop_sources.hpp"
 
 namespace fs = std::filesystem;
 
@@ -58,6 +59,7 @@ std::vector<std::string> read_lines(const fs::path& p) {
 }  // namespace
 
 TEST_CASE("小图标：一个实例只造用得着的那一个，而且每个都接上了线") {
+    if (!changji_test::desktop_sources()) return;
     const fs::path file = fs::path{CHANGJI_DESKTOP_QML_DIR} / "SlotIcon.qml";
     REQUIRE_MESSAGE(fs::exists(file), "读不到 " << file.string());
     const auto lines = read_lines(file);

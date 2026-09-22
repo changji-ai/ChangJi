@@ -24,6 +24,7 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include "desktop_sources.hpp"
 
 namespace fs = std::filesystem;
 
@@ -70,6 +71,7 @@ int brace_delta(const std::string& line) {
 }  // namespace
 
 TEST_CASE("桌面端的 QML：显示文字的地方一律写明 textFormat") {
+    if (!changji_test::desktop_sources()) return;
     const fs::path dir{CHANGJI_DESKTOP_QML_DIR};
     REQUIRE_MESSAGE(fs::is_directory(dir), "读不到 " << dir.string());
 
@@ -138,6 +140,7 @@ TEST_CASE("桌面端的 QML：显示文字的地方一律写明 textFormat") {
 // 真要强调，换个说法或者用「」——这一屏上本来也没有加粗这一档。
 
 TEST_CASE("桌面端的 QML：摆给人看的字里别写 Markdown 记号") {
+    if (!changji_test::desktop_sources()) return;
     const fs::path dir{CHANGJI_DESKTOP_QML_DIR};
     REQUIRE_MESSAGE(fs::is_directory(dir), "读不到 " << dir.string());
 

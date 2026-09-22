@@ -30,6 +30,7 @@
 #include <fstream>
 #include <string>
 #include <vector>
+#include "desktop_sources.hpp"
 
 namespace fs = std::filesystem;
 
@@ -76,6 +77,7 @@ bool has(const std::string& hay, const std::string& needle) {
 }  // namespace
 
 TEST_CASE("桌面端的 QML：永远跑的动画要说清什么时候跑，而且别靠 parent") {
+    if (!changji_test::desktop_sources()) return;
     const fs::path dir{CHANGJI_DESKTOP_QML_DIR};
     REQUIRE_MESSAGE(fs::is_directory(dir), "读不到 " << dir.string());
 

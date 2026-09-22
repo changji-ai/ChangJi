@@ -29,6 +29,7 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include "desktop_sources.hpp"
 
 namespace fs = std::filesystem;
 
@@ -61,6 +62,7 @@ int words_in(const std::string& hay, const std::string& name) {
 }  // namespace
 
 TEST_CASE("桌面端的 QML：声明出来的属性得有人读") {
+    if (!changji_test::desktop_sources()) return;
     const fs::path qml{CHANGJI_DESKTOP_QML_DIR};
     REQUIRE_MESSAGE(fs::is_directory(qml), "读不到 " << qml.string());
 

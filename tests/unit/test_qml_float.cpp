@@ -21,6 +21,7 @@
 #include <fstream>
 #include <string>
 #include <vector>
+#include "desktop_sources.hpp"
 
 namespace fs = std::filesystem;
 
@@ -55,6 +56,7 @@ struct Bare {
 }  // namespace
 
 TEST_CASE("桌面端的 QML：挂在身子外面的牌子必须是 Floater") {
+    if (!changji_test::desktop_sources()) return;
     const fs::path dir{CHANGJI_DESKTOP_QML_DIR};
     REQUIRE_MESSAGE(fs::is_directory(dir), "读不到 " << dir.string());
 
@@ -123,6 +125,7 @@ TEST_CASE("桌面端的 QML：挂在身子外面的牌子必须是 Floater") {
 // 刚写完的那段）。2026-09-21 之前它一直是挂底下的，谁都以为"这一排本来就没
 // 牌子"。
 TEST_CASE("桌面端的 QML：回话底下那一排的牌子挂在上面") {
+    if (!changji_test::desktop_sources()) return;
     const fs::path f = fs::path{CHANGJI_DESKTOP_QML_DIR} / "FootKey.qml";
     std::ifstream in(f);
     REQUIRE_MESSAGE(in.good(), "读不到 " << f.string());
