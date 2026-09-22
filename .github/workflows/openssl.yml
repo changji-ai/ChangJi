@@ -1,0 +1,196 @@
+# Static OpenSSL: **shared by the release pipeline and the desktop pipeline.**
+#
+# It is a reusable workflow (`workflow_call`) because it has two callers and
+# because it is **a bundle of things that are easy to copy wrong**: the pinned
+# version, the sha256 check, the six per-platform Configure invocations, and
+# the "static libraries only" assertion. Copy it into a second yml and the day
+# somebody bumps the version they will bump one of the two copies — and the
+# packages built from the other one still ship.
+#
+# The passage below (why we build our own instead of using the runner's) was
+# moved here from release.yml, unchanged.
+#
+# ---
+#
+# **Why build our own instead of linking the one already on the runner.**
+#
+# The runners do have OpenSSL, and linking against it does compile — the
+# resulting package even runs fine on the runner. On a user's machine it is
+#
+#     dyld: Library not loaded: /opt/homebrew/opt/openssl@3/lib/libssl.3.dylib
+#
+# because that is a Homebrew path and only the build machine has it. brotli had
+# the identical problem; both of those are now fetched and linked statically
+# (see cpp/CMakeLists.txt). OpenSSL is the one that cannot be: it is not a
+# CMake project (perl Configure + make/nmake), so it does not fit into
+# FetchContent. Hence this job, which builds a static copy once and hands it to
+# every build target.
+#
+# **Version pinned, sha256 verified.** This library goes into the binaries we
+# ship. Downloading a tampered archive would mean shipping a backdoor with our
+# own hands.
+#
+# **Cached.** A cold build is three to five minutes on Unix; on Windows nmake
+# is single-threaded and it is twenty minutes and up. On a cache hit this job
+# finishes in seconds. Only a version bump forces a rebuild.
+
+name: Static OpenSSL
+
+on:
+  workflow_call:
+    inputs:
+      keys:
+        description: 'Which targets to build, as a JSON array; omit for all six'
+        type: string
+        required: false
+        default: '["linux-x64","linux-arm64","macos-arm64","macos-x64","windows-x64","windows-arm64"]'
+
+jobs:
+  # Which targets this run builds.
+  #
+  # ⚠️ **You cannot test `matrix.key` in a job-level `if`.** GitHub's context
+  # availability table allows only `github / needs / vars / inputs` in
+  # `jobs.<id>.if` — **`matrix` is not there.** Writing it is not an error; the
+  # expression is simply always false and all six cells are skipped. So the
+  # matrix is computed here and the job below just follows it.
+  #
+  # The table of "which target on which runner, and what Configure calls it"
+  # exists **only here**. Callers pass names.
+  pick:
+    name: Pick the targets
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.p.outputs.matrix }}
+    steps:
+      - id: p
+        env:
+          KEYS: ${{ inputs.keys }}
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os
+          table = {
+              "linux-x64":     {"runner": "ubuntu-22.04",     "target": "linux-x86_64"},
+              "linux-arm64":   {"runner": "ubuntu-22.04-arm", "target": "linux-aarch64"},
+              "macos-arm64":   {"runner": "macos-15",         "target": "darwin64-arm64-cc"},
+              "macos-x64":     {"runner": "macos-15-intel",   "target": "darwin64-x86_64-cc"},
+              "windows-x64":   {"runner": "windows-2022",     "target": "VC-WIN64A",    "vcarch": "x64"},
+              "windows-arm64": {"runner": "windows-11-arm",   "target": "VC-WIN64-ARM", "vcarch": "arm64"},
+          }
+          want = json.loads(os.environ["KEYS"])
+          bad = [k for k in want if k not in table]
+          assert not bad, f"unknown target(s): {bad} (known: {sorted(table)})"
+          rows = [dict(key=k, **table[k]) for k in want]
+          print("matrix=" + json.dumps({"include": rows}))
+          PY
+          cat "$GITHUB_OUTPUT"
+
+  openssl:
+    name: Static OpenSSL (${{ matrix.key }})
+    needs: pick
+    runs-on: ${{ matrix.runner }}
+    env:
+      OPENSSL_VER: '3.5.8'
+      OPENSSL_SHA256: 'a8f84a39918ec6415ce765d9b429d313ba97b8143169c172e734b9514464f5b2'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.pick.outputs.matrix) }}
+    steps:
+      # The version is part of the cache key, so a bump is simply a different
+      # key — nothing to purge by hand.
+      - name: Cache
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: openssl-prefix
+          key: openssl-${{ matrix.key }}-${{ env.OPENSSL_VER }}-1
+
+      # no-apps / no-docs / no-tests: all we want is libssl.a and libcrypto.a,
+      # and those three account for most of the build time.
+      # --openssldir=/etc/ssl: a static library carries no root certificates,
+      # so it has to be told where the system store is (/etc/ssl/certs on
+      # Linux, /etc/ssl/cert.pem on macOS).
+      - name: Build (Unix)
+        if: runner.os != 'Windows' && steps.cache.outputs.cache-hit != 'true'
+        run: |
+          curl -fL --retry 3 -o openssl.tar.gz \
+            "https://github.com/openssl/openssl/releases/download/openssl-$OPENSSL_VER/openssl-$OPENSSL_VER.tar.gz"
+          echo "$OPENSSL_SHA256  openssl.tar.gz" | shasum -a 256 -c -
+          tar xzf openssl.tar.gz
+          cd "openssl-$OPENSSL_VER"
+          # The macOS deployment target has to match the main project (13.3),
+          # otherwise linking produces a wall of "built for newer macOS version
+          # than being linked".
+          EXTRA=""
+          if [ "$RUNNER_OS" = "macOS" ]; then EXTRA="-mmacosx-version-min=13.3"; fi
+          ./Configure "${{ matrix.target }}" \
+            no-shared no-tests no-docs no-apps no-legacy \
+            --prefix="$GITHUB_WORKSPACE/openssl-prefix" \
+            --libdir=lib \
+            --openssldir=/etc/ssl \
+            $EXTRA
+          make -j"$(getconf _NPROCESSORS_ONLN)"
+          make install_sw
+
+      # **Windows needs vcvarsall.bat first.** Unlike the build jobs, this one
+      # cannot lean on the VS generator to find the toolchain for it: nmake and
+      # cl have to be on PATH. That environment lives only inside that one cmd
+      # process, so configure, build and install all run in a single `cmd /c`.
+      #
+      # no-asm: the x64 assembly needs NASM and the arm64 assembly needs
+      # armasm64. The runners may not have them, and installing them is one
+      # more download URL that can rot. Pure-C OpenSSL is slower, but we make
+      # the occasional https request — the difference is lost in the noise.
+      - name: Build (Windows)
+        if: runner.os == 'Windows' && steps.cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          curl.exe -fL --retry 3 -o openssl.tar.gz `
+            "https://github.com/openssl/openssl/releases/download/openssl-$env:OPENSSL_VER/openssl-$env:OPENSSL_VER.tar.gz"
+          if ($LASTEXITCODE -ne 0) { throw "failed to download the OpenSSL source" }
+          $got = (Get-FileHash openssl.tar.gz -Algorithm SHA256).Hash.ToLower()
+          if ($got -ne $env:OPENSSL_SHA256) { throw "sha256 mismatch: $got" }
+          tar xzf openssl.tar.gz
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -products * -property installationPath
+          $vcvars = Join-Path $vs "VC\Auxiliary\Build\vcvarsall.bat"
+          if (-not (Test-Path $vcvars)) { throw "vcvarsall.bat not found at $vcvars" }
+          $prefix = "$env:GITHUB_WORKSPACE\openssl-prefix"
+          $src = "openssl-$env:OPENSSL_VER"
+          cmd /c "`"$vcvars`" ${{ matrix.vcarch }} && cd $src && perl Configure ${{ matrix.target }} no-shared no-tests no-docs no-apps no-legacy no-asm --prefix=`"$prefix`" --openssldir=`"$prefix\ssl`" && nmake && nmake install_sw"
+          if ($LASTEXITCODE -ne 0) { throw "OpenSSL did not build (exit code $LASTEXITCODE)" }
+
+      # **Static libraries only — and this step actually checks.**
+      #
+      # It used to be a bare `ls -la` under a comment claiming it verified
+      # exactly this. A comment is not a guard: had `no-shared` ever stopped
+      # taking effect, the step would still have been green and the shared
+      # libraries would have gone straight into the shipped binaries' link
+      # line, which is the failure mode this whole file exists to prevent.
+      - name: Static libraries only
+        shell: bash
+        run: |
+          ls -la openssl-prefix/lib
+          shared=$(find openssl-prefix -name '*.dylib' -o -name '*.so' \
+                   -o -name '*.so.*' -o -name '*.dll' | sort)
+          if [ -n "$shared" ]; then
+            echo "::error::Shared libraries came out of a no-shared build:"
+            echo "$shared"
+            echo "Linking these would reproduce the exact dyld/ld.so failure"
+            echo "this job exists to avoid — it only shows up on a user's machine."
+            exit 1
+          fi
+          # MSVC names them .lib, everyone else .a. Check that each one is
+          # there under whichever name this platform uses — an empty lib/
+          # directory would otherwise sail through the loop above.
+          for want in libssl libcrypto; do
+            ls "openssl-prefix/lib/$want".a "openssl-prefix/lib/$want".lib \
+               2>/dev/null | grep -q . || {
+              echo "::error::$want is missing from openssl-prefix/lib"
+              exit 1
+            }
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: openssl-${{ matrix.key }}
+          path: openssl-prefix

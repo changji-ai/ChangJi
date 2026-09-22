@@ -1,0 +1,85 @@
+# Web UI: build it, then bake it into a header. **Shared by the release
+# pipeline and the desktop pipeline.**
+#
+# It is a reusable workflow (`workflow_call`) because it has two callers. The
+# desktop pipeline needs it too — the engine inside that `.app` still serves
+# the same web UI on its own port (on machines without the desktop shell, the
+# web UI *is* the whole face of the product).
+#
+# ⚠️ **Why it is rebuilt every single run**: `bundled_webapp.inc.hpp` is
+# checked in, so the build would succeed without regenerating it — **but then
+# what ships is whatever the UI looked like the last time somebody remembered
+# to run gen_webapp.py by hand.** The symptom is "the UI is the old one" while
+# the version string, the HTTP API and the binary are all new. Nothing
+# anywhere reports an error.
+
+name: Web UI
+
+on:
+  workflow_call:
+
+jobs:
+  webapp:
+    name: Web UI (build + bake into a header)
+    runs-on: ubuntu-24.04
+    steps:
+      # ⚠️ **Two checkouts, and the order matters.**
+      #
+      # This repository holds the engine only. The web UI, the desktop shell
+      # and the brand assets live in the private product repository, so the
+      # packaging pipeline pulls that one in as well.
+      #
+      # Layout that every path in these workflow files assumes:
+      #
+      #   changji/            <- the private product repo (webapp/, desktop/, brand/)
+      #   changji/cpp/        <- THIS repo, laid on top of the stale copy in there
+      #
+      # The product repo also carries a copy of `cpp/`. It is whatever was last
+      # committed over there, which is not necessarily this commit — so it gets
+      # removed and replaced. Skipping that step builds the wrong core, and
+      # nothing about the build output says so.
+      - name: Check out the product repo
+        uses: actions/checkout@v4
+        with:
+          repository: integemjack/changji
+          token: ${{ secrets.CHANGJI_PRODUCT_TOKEN }}
+          path: changji
+
+      - name: Lay this repo's core over changji/cpp
+        run: rm -rf changji/cpp
+
+      - uses: actions/checkout@v4
+        with:
+          path: changji/cpp
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: changji/webapp/package-lock.json
+
+      - name: Install dependencies
+        working-directory: changji/webapp
+        run: npm ci
+
+      # The front-end tests run here: this is the only job that touches the
+      # web UI at all, and it finishes far sooner than the six C++ builds.
+      # A broken UI should not take half an hour to surface.
+      - name: Test
+        working-directory: changji/webapp
+        run: npm test
+
+      # The client's build script is `eslint src && vite build`, so a lint
+      # failure means no bundle.
+      - name: Build
+        working-directory: changji/webapp
+        run: npm run build
+
+      - name: Bake into a header
+        run: python3 changji/cpp/tools/gen_webapp.py
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bundled-webapp
+          path: changji/cpp/src/http/bundled_webapp.inc.hpp
+          retention-days: 1
