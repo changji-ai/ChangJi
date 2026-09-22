@@ -37,8 +37,12 @@ int scaled(int v, double k) { return std::max(1, static_cast<int>(std::lround(v 
 }  // namespace
 
 WatermarkPlan stage_watermark(const fs::path& image_path, int target_w,
-                              int target_h) {
-    const int shorter = std::min(target_w, target_h);
+                              int target_h, int upscale) {
+    const int up = std::max(1, upscale);
+    // 放大过的画面：按**放大前**的短边算好，再乘回去。直接拿最终尺寸算的话
+    // 补出来的比被一起放大的那个旧水印小（32px 下限不是按比例走的），
+    // 旧的会从左上角露出来。
+    const int shorter = std::min(target_w, target_h) / up;
     if (shorter <= 0) return {};
 
     const bool portrait = target_h > target_w;
@@ -66,14 +70,14 @@ WatermarkPlan stage_watermark(const fs::path& image_path, int target_w,
     }
 
     const int mark_h =
-        std::max(kMinMarkH, static_cast<int>(std::lround(shorter * kMarkRatio)));
+        std::max(kMinMarkH, static_cast<int>(std::lround(shorter * kMarkRatio))) * up;
     const double k = static_cast<double>(mark_h) / bundled::kWatermarkBaseMarkH;
 
     WatermarkPlan plan;
     plan.image = dest;
     plan.width = scaled(src_w, k);
     plan.height = scaled(src_h, k);
-    plan.margin = static_cast<int>(std::lround(shorter * kMarginRatio));
+    plan.margin = static_cast<int>(std::lround(shorter * kMarginRatio)) * up;
     return plan;
 }
 

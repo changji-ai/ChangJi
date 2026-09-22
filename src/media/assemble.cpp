@@ -180,6 +180,9 @@ std::vector<std::string> normalize_args(const fs::path& src, int target_w,
                      "setsar=1,fps=" + std::to_string(config.fps);
     // 后期链接在缩放补边**后面**：遮幅、颗粒都要按最终尺寸算。
     if (!opt.extra_vf.empty()) vf += "," + opt.extra_vf;
+    // 补那一层（绝大多数情况是空的，见 NormalizeOptions::watermark）。
+    // 接在后期链**后面**：补的理由之一就是遮幅会裁掉水印，排在它前面等于白补。
+    vf = with_watermark(vf, opt.watermark);
 
     std::vector<std::string> args = {"-y", "-i", paths::to_utf8(src)};
     if (opt.keep_audio && !opt.source_has_audio) {
@@ -514,6 +517,14 @@ std::vector<std::string> burn_args(const fs::path& video,
     };
 }
 
+int assembly_watermark_upscale(const config::LookConfig& look,
+                               const config::UpscaleConfig& upscale,
+                               int target_w, int target_h) {
+    if (look.enabled() && look.letterbox > 0.0 && target_w > target_h) return 1;
+    if (upscale.enabled()) return std::max(1, upscale.scale);
+    return 0;
+}
+
 std::string escape_filter_path(const fs::path& path) {
     std::string text = fwd(path);
     std::string out;
@@ -625,6 +636,19 @@ fs::path Assembler::assemble(const Timeline& timeline,
         extra_vf = look_filters(finish_->look, tw, th, finish_->project_root);
     }
 
+    // ---- 补水印 ----
+    //
+    // 平时不补（回 0）：水印在单镜出片那一步就烧好了。判据和理由都在
+    // `assembly_watermark_upscale` 上。
+    WatermarkPlan watermark;
+    if (finish_) {
+        const int up = assembly_watermark_upscale(finish_->look,
+                                                  finish_->upscale, tw, th);
+        if (up > 0) {
+            watermark = stage_watermark(work / "cj_watermark.png", tw, th, up);
+        }
+    }
+
     std::vector<fs::path> normalized;
     for (std::size_t i = 0; i < timeline.entries.size(); ++i) {
         char name[32];
@@ -659,6 +683,7 @@ fs::path Assembler::assemble(const Timeline& timeline,
         }
 
         NormalizeOptions opt;
+        opt.watermark = watermark;      // 平时是空的，见上
         if (finish_) {
             opt.extra_vf = extra_vf;
             opt.keep_audio = finish_->sound.ambient;

@@ -23,6 +23,7 @@
 
 #include "config/settings.hpp"
 #include "media/ffmpeg.hpp"
+#include "media/watermark.hpp"
 #include "media/subtitles.hpp"
 #include "models/project.hpp"
 #include "models/shot.hpp"
@@ -122,6 +123,14 @@ struct NormalizeOptions {
     bool source_has_audio = false;
     /// 编码时 `-tune grain`：不加的话 x264 把颗粒当噪声抹掉，白做。
     bool tune_grain = false;
+    /// **补**一层角标。空 = 不补（默认，也是绝大多数情况）。
+    ///
+    /// 水印本来是单镜出片那一步烧的（`infer::encode_args`），一路 `-c copy`
+    /// 带到成片，这儿什么都不用做。有两种后期会把那个烧好的毁掉，只有那时
+    /// 才补：**遮幅**把它整个裁掉，**放大**让它过一遍超分。
+    ///
+    /// ⚠️ 别改成无条件补——那就是两个角标叠在一起。
+    WatermarkPlan watermark;
 };
 
 std::vector<std::string> normalize_args(const std::filesystem::path& src,
@@ -198,6 +207,21 @@ std::vector<std::string> burn_args(const std::filesystem::path& video,
                                    const std::filesystem::path& ass_path,
                                    const config::AssemblyConfig& config,
                                    const std::filesystem::path& dest);
+
+/// 装配要不要**补**一层角标，补的话按几倍算。
+///
+/// 回 0 = 不补（绝大多数情况）。水印在单镜出片那一步就烧好了，这一整条链
+/// 是 `-c copy`，它自己会到成片上——补是给两种会毁掉它的后期兜底的：
+///
+/// · **遮幅**把右下角那块整个裁掉，旧的不在了 → 回 1，补标准尺寸的。
+///   竖屏项目不遮幅（`look_filters` 里判了画幅），所以这里也要判。
+/// · **放大**让水印过一遍超分，旧的还在、而且跟着放大了 → 回放大倍数，
+///   补的那层照那个倍数算才盖得住（差别见 `stage_watermark`）。
+///
+/// 两个都开算遮幅那一档：旧的先被放大、再被裁掉，还是没了。
+int assembly_watermark_upscale(const config::LookConfig& look,
+                               const config::UpscaleConfig& upscale,
+                               int target_w, int target_h);
 
 /// 把路径转成 ffmpeg 滤镜能接受的形式。
 ///

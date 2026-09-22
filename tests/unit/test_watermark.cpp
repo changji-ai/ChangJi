@@ -104,7 +104,7 @@ TEST_CASE("水印：单镜不给就一个字都不多") {
     CHECK(arg_value(same, "-vf").empty());
 }
 
-TEST_CASE("装配那一步不再加水印") {
+TEST_CASE("装配那一步默认不加水印") {
     // 2026-09-22 起水印在单镜那一层烧。装配是 `-c copy` 往下走的，这儿再加
     // 一层就是**两个角标**——同一章里镜头尺寸不一致时还会错位重影。
     config::AssemblyConfig cfg;
@@ -116,6 +116,62 @@ TEST_CASE("装配那一步不再加水印") {
     CHECK_FALSE(has(vf, "overlay"));
     CHECK_FALSE(has(vf, "cjwm"));
     CHECK_FALSE(has(vf, "movie="));
+}
+
+TEST_CASE("装配补水印：只给会毁掉它的那两种后期兜底") {
+    config::LookConfig look;      // 默认 film，letterbox = 0
+    config::UpscaleConfig up;     // 默认 command 空 = 不放大
+
+    SUBCASE("什么都没开：不补") {
+        CHECK(media::assembly_watermark_upscale(look, up, 1920, 1080) == 0);
+    }
+    SUBCASE("遮幅：补标准尺寸的（旧的被裁掉了，不用管盖不盖得住）") {
+        look.letterbox = 2.39;
+        CHECK(media::assembly_watermark_upscale(look, up, 1920, 1080) == 1);
+    }
+    SUBCASE("竖屏不遮幅，所以也不补") {
+        // look_filters 里 `target_w > target_h` 才遮。这儿的判据要跟它一致，
+        // 不然竖屏项目会白补一层——而那就是两个角标。
+        look.letterbox = 2.39;
+        CHECK(media::assembly_watermark_upscale(look, up, 1080, 1920) == 0);
+    }
+    SUBCASE("look 整个关掉：遮幅也不生效，不补") {
+        look.preset = "off";
+        look.letterbox = 2.39;
+        CHECK(media::assembly_watermark_upscale(look, up, 1920, 1080) == 0);
+    }
+    SUBCASE("放大：按倍数补，才盖得住被一起放大的那个") {
+        up.command = "esrgan %{in} %{out}";
+        up.scale = 2;
+        CHECK(media::assembly_watermark_upscale(look, up, 3840, 2160) == 2);
+        up.scale = 4;
+        CHECK(media::assembly_watermark_upscale(look, up, 3840, 2160) == 4);
+    }
+    SUBCASE("两个都开：算遮幅那一档") {
+        // 旧的先被放大、再被裁掉，还是没了——补标准尺寸的就行
+        look.letterbox = 2.39;
+        up.command = "esrgan %{in} %{out}";
+        up.scale = 2;
+        CHECK(media::assembly_watermark_upscale(look, up, 3840, 2160) == 1);
+    }
+}
+
+TEST_CASE("补的那层要盖得住被放大的旧水印") {
+    const fs::path dir = temp_root("放大");
+
+    // 832×480 的镜头放大 2 倍。旧水印是按 480 短边烧的（下限顶到 32），
+    // 跟着放大就是 64；按最终的 960 短边算只有 53——小 17%，旧的会露边。
+    const auto fit = media::stage_watermark(dir / "u.png", 1664, 960, 2);
+    const auto std_ = media::stage_watermark(dir / "s.png", 1664, 960);
+    CHECK(mark_height_of(fit, false) == 64);
+    CHECK(mark_height_of(std_, false) == 53);
+    CHECK(fit.width > std_.width);
+    // 边距也要跟着乘，不然位置对不齐
+    CHECK(fit.margin == 14 * 2);
+
+    // 短边够大时两者自然相等（下限不再起作用），差 1px 是取整
+    const auto big = media::stage_watermark(dir / "b.png", 3840, 2160, 2);
+    CHECK(mark_height_of(big, false) == 118);
 }
 
 TEST_CASE("水印：标签不和 look 的 split/blend 撞") {
