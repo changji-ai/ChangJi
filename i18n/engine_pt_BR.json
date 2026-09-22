@@ -341,6 +341,7 @@
   "写不了字幕文件：%1": "não dá para escrever o arquivo de legendas: %1",
   "写不了拼接清单：%1": "não dá para escrever a lista de concatenação: %1",
   "写不了文件：%1": "não dá para escrever o arquivo: %1",
+  "写不了水印图：%1": "não dá para escrever a imagem da marca d’água: %1",
   "写不了：%1": "não dá para escrever: %1",
   "写临时文件时出错：": "Erro ao escrever o arquivo temporário: ",
   "写作榜 %1": "banco de escrita %1",
@@ -787,6 +788,7 @@
     "one": " É %n byte a mais — esta cópia está estragada, apague o .part e baixe de novo.",
     "other": " São %n bytes a mais — esta cópia está estragada, apague o .part e baixe de novo."
   },
+  "水印图没写完：%1": "a imagem da marca d’água não terminou de ser escrita: %1",
   "池里有个 local 槽，却没给怎么在本机跑": "o pool tem uma vaga local, mas ninguém disse como rodar nesta máquina",
   "没到 %1——上面写着是哪几镜没进去。": " Menos que %1 — acima está escrito quais planos não entraram.",
   "没填 llm.command：要跑哪个程序（比如 claude 或 codex）": "llm.command está vazio: qual programa deve rodar (claude ou codex, por exemplo)",

@@ -341,6 +341,7 @@
   "写不了字幕文件：%1": "can’t write the subtitle file: %1",
   "写不了拼接清单：%1": "can’t write the concat list: %1",
   "写不了文件：%1": "can’t write the file: %1",
+  "写不了水印图：%1": "can’t write the watermark image: %1",
   "写不了：%1": "can’t write: %1",
   "写临时文件时出错：": "Error while writing the temp file: ",
   "写作榜 %1": "writing bench %1",
@@ -787,6 +788,7 @@
     "one": " That’s %n byte more than it should be — this copy is broken, delete the .part and download again.",
     "other": " That’s %n bytes more than it should be — this copy is broken, delete the .part and download again."
   },
+  "水印图没写完：%1": "the watermark image didn’t finish writing: %1",
   "池里有个 local 槽，却没给怎么在本机跑": "the pool has a local slot but wasn’t told how to run on this machine",
   "没到 %1——上面写着是哪几镜没进去。": " Short of %1 — the note above says which shots didn’t make it.",
   "没填 llm.command：要跑哪个程序（比如 claude 或 codex）": "llm.command is empty: which program should run (claude or codex, say)",

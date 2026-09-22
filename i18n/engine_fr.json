@@ -341,6 +341,7 @@
   "写不了字幕文件：%1": "impossible d’écrire le fichier de sous-titres : %1",
   "写不了拼接清单：%1": "impossible d’écrire la liste de concaténation : %1",
   "写不了文件：%1": "impossible d’écrire le fichier : %1",
+  "写不了水印图：%1": "impossible d’écrire l’image du filigrane : %1",
   "写不了：%1": "impossible d’écrire : %1",
   "写临时文件时出错：": "Erreur en écrivant le fichier temporaire : ",
   "写作榜 %1": "banc d’écriture %1",
@@ -787,6 +788,7 @@
     "one": " Soit %n octet de trop — cette copie est abîmée, supprime le .part et retélécharge.",
     "other": " Soit %n octets de trop — cette copie est abîmée, supprime le .part et retélécharge."
   },
+  "水印图没写完：%1": "l’image du filigrane n’a pas fini de s’écrire : %1",
   "池里有个 local 槽，却没给怎么在本机跑": "le pool a une place local, mais on ne lui a pas dit comment tourner sur cette machine",
   "没到 %1——上面写着是哪几镜没进去。": " En dessous de %1 — ci-dessus figurent les plans qui ne sont pas passés.",
   "没填 llm.command：要跑哪个程序（比如 claude 或 codex）": "llm.command est vide : quel programme lancer (claude ou codex, par exemple)",

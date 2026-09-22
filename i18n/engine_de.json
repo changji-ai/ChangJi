@@ -341,6 +341,7 @@
   "写不了字幕文件：%1": "die Untertiteldatei lässt sich nicht schreiben: %1",
   "写不了拼接清单：%1": "die Concat-Liste lässt sich nicht schreiben: %1",
   "写不了文件：%1": "die Datei lässt sich nicht schreiben: %1",
+  "写不了水印图：%1": "das Wasserzeichenbild lässt sich nicht schreiben: %1",
   "写不了：%1": "lässt sich nicht schreiben: %1",
   "写临时文件时出错：": "Fehler beim Schreiben der temporären Datei: ",
   "写作榜 %1": "Schreib-Benchmark %1",
@@ -787,6 +788,7 @@
     "one": " Das sind %n Byte zu viel — diese Kopie ist kaputt, lösch die .part und lad neu.",
     "other": " Das sind %n Bytes zu viel — diese Kopie ist kaputt, lösch die .part und lad neu."
   },
+  "水印图没写完：%1": "das Wasserzeichenbild wurde nicht fertig geschrieben: %1",
   "池里有个 local 槽，却没给怎么在本机跑": "der Pool hat einen local-Platz, aber niemand hat ihm gesagt, wie auf dieser Maschine gelaufen wird",
   "没到 %1——上面写着是哪几镜没进去。": " Weniger als %1 — oben steht, welche Shots es nicht hineingeschafft haben.",
   "没填 llm.command：要跑哪个程序（比如 claude 或 codex）": "llm.command ist leer: welches Programm laufen soll (claude oder codex zum Beispiel)",

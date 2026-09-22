@@ -178,6 +178,9 @@ std::vector<std::string> normalize_args(const fs::path& src, int target_w,
                      "setsar=1,fps=" + std::to_string(config.fps);
     // 后期链接在缩放补边**后面**：遮幅、颗粒都要按最终尺寸算。
     if (!opt.extra_vf.empty()) vf += "," + opt.extra_vf;
+    // 水印再接在后期链后面，理由见 with_watermark 上那段：遮幅会把它裁掉，
+    // 柔化会糊掉它，调色会把白的改成奶油色。
+    vf = with_watermark(vf, opt.watermark);
 
     std::vector<std::string> args = {"-y", "-i", paths::to_utf8(src)};
     if (opt.keep_audio && !opt.source_has_audio) {
@@ -616,6 +619,15 @@ fs::path Assembler::assemble(const Timeline& timeline,
         extra_vf = look_filters(finish_->look, tw, th, finish_->project_root);
     }
 
+    // ---- 水印 ----
+    //
+    // ⚠️ **在 `if (finish_)` 外面。** 后期那一套是可选的（`finish_` 为空的
+    // 调用路径是有的），水印不是——挂进那个条件里，表现就是"某些片子静悄悄
+    // 没有角标"，而谁都不会报错。
+    //
+    // 按 tw/th 算：放大那一步已经把它们乘过了，水印要跟着**最终**尺寸走。
+    const WatermarkPlan watermark = stage_watermark(work, tw, th);
+
     std::vector<fs::path> normalized;
     for (std::size_t i = 0; i < timeline.entries.size(); ++i) {
         char name[32];
@@ -650,6 +662,7 @@ fs::path Assembler::assemble(const Timeline& timeline,
         }
 
         NormalizeOptions opt;
+        opt.watermark = watermark;      // 见上：不归 finish_ 管
         if (finish_) {
             opt.extra_vf = extra_vf;
             opt.keep_audio = finish_->sound.ambient;
