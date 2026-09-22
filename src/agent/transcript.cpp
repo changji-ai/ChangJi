@@ -25,6 +25,7 @@ json to_json(const Turn& t) {
     if (!t.tool_name.empty()) j["tool_name"] = t.tool_name;
     if (!t.tool_id.empty()) j["tool_id"] = t.tool_id;
     if (!t.episode.empty()) j["episode"] = t.episode;
+    if (!t.thinking.empty()) j["thinking"] = t.thinking;
     if (!t.tool_calls.is_null() && !t.tool_calls.empty()) j["tool_calls"] = t.tool_calls;
     return j;
 }
@@ -37,6 +38,7 @@ Turn turn_from_json(const json& j) {
     t.tool_name = j.value("tool_name", "");
     t.tool_id = j.value("tool_id", "");
     t.episode = j.value("episode", "");
+    t.thinking = j.value("thinking", "");
     if (j.contains("tool_calls")) t.tool_calls = j.at("tool_calls");
     return t;
 }

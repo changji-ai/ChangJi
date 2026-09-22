@@ -262,9 +262,29 @@ void run_round(const std::string& project, const std::string& chat,
     // 已经开口了没有。**一轮里只改一次口**，不是每个字都去设一遍。
     bool speaking = false;
 
+    // 这一句话说出口之前它想了什么。**攒在这儿，落在那条 `Turn` 上**
+    //（见 transcript.hpp 上那段：一轮跑完账本就退休了，只走
+    // `/api/task/thinking` 的话这几千字再也问不出来）。
+    //
+    // ⚠️ **一轮里要清好几次。** 一次代理对话是"想→调工具→再想→说"，
+    // 每一段思考归它后面那一条 assistant，不清的话第二条会把第一条的思考
+    // 也扛上，越滚越长。
+    std::string thought;
+
     agent::LoopHooks hooks;
-    hooks.on_turn = [&](const agent::Turn& t) {
+    hooks.on_turn = [&](const agent::Turn& one) {
         const std::string where = moved_to.empty() ? project : moved_to;
+        agent::Turn t = one;
+        // 只有场记说的话挂思考。工具回的那条、引擎插的那句都不是它想的。
+        //
+        // ⚠️ **正文是空的那一条不收账**（那种 assistant 只带 tool_calls，
+        // 界面上根本不摆）。收了的话那几段思考跟着一条看不见的行落库，
+        // 而人看见的那句回话底下写着「想了 0 字」——它明明想了两分钟。
+        // 留着继续攒，归后面那条真说了话的。
+        if (t.role == "assistant" && !t.text.empty()) {
+            t.thinking = std::move(thought);
+            thought.clear();
+        }
         agent::append_turn(dir_for(where), t, chat);
         push_turn(where, chat, t);
     };
@@ -305,6 +325,18 @@ void run_round(const std::string& project, const std::string& chat,
     // 这儿再数一遍就是第二个计数器（CLAUDE.md 第八条）。
     hooks.on_thinking = [&](const std::string& piece) {
         act.task().append_thinking(piece);
+        // 攒着，等这一句说完落到那条 `Turn` 上（见上面 `thought`）。
+        thought += piece;
+        // **从头上截。** 留最近那一截——人回头翻的是"它最后是怎么想的"。
+        if (thought.size() > agent::kThinkingKeep) {
+            thought.erase(0, thought.size() - agent::kThinkingKeep);
+        }
+        // **一段一段推上去**，和正文那条 `delta` 一个形状：界面不等这一轮
+        // 结束就能把它摆出来，而一个爱想的模型能想上几分钟。
+        //
+        // ⚠️ **推的是增量不是全文。** 推全文的话，想到第五千字时每一段都要
+        // 把前面五千字再发一遍——那条通道会被同一份东西塞满。
+        push({{"event", "thinking"}, {"text", piece}});
     };
 
     try {

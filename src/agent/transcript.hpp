@@ -12,9 +12,23 @@
 //   · 进程被杀在半路，坏的只有最后那一行，前面的照样读得出来。整份 JSON
 //     被截断的话，那是**整条对话都打不开**。
 //
-// 思考不落这儿：一次写作的思考几千字，而这份文件是要整条读回来的。
-// 思考照旧走 `llm_log/` 和 `/api/task/thinking`。
+// ⚠️ **思考现在落这儿了**（2026-09-22 改的）。这儿原来写着「思考不落这儿：
+// 一次写作的思考几千字，而这份文件是要整条读回来的」——用户要"思考的内容
+// 要持久保留"，而那条路（`/api/task/thinking`）**只在这件活还活着的时候
+// 有答案**：一轮跑完，账本上那一行退休，想过的那几千字就再也问不出来了。
+//
+// 为什么跟着这一行走、不另起一个文件：**分叉、删对话、拷项目目录**这三件
+// 事眼下都是"一行一条、整份搬走"的语义（见 `fork` / `list_chat_ids`）。
+// 思考单独放一份的话，这三处各要多认一次它，而漏掉的那一处就是"分叉出来
+// 的对话里思考不见了"或者"删了对话盘上还留着一堆孤儿"。
+//
+// 代价用上限挡住：`kThinkingKeep` 只留最后那一截（见下）。这份文件是整条
+// 读回来的，而一次代理对话的思考一两千字，几十轮也就几百 KB。
+//
+// 发给模型的那一串里**不带它**（`loop.cpp` 只读 role/text/tool_*）：
+// 它是给人看的记录，不是上下文。
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <string>
@@ -23,6 +37,13 @@
 #include <nlohmann/json.hpp>
 
 namespace changji::agent {
+
+/// 一条里最多留多少**字节**的思考。
+///
+/// 超了从**头上**截，留最近那一截——人回头翻的是"它最后是怎么想的"，
+/// 而开头那几句多半是复述任务。和 `pipeline::Task::append_thinking` 的
+/// 上限是同一个形状，只是这儿小得多：那份活在内存里，这份要整条读回来。
+inline constexpr std::size_t kThinkingKeep = 24 * 1024;
 
 /// 对话里的一条。
 ///
@@ -40,6 +61,11 @@ struct Turn {
     /// role == "tool" 时：这条回的是哪一次调用。
     std::string tool_name;
     std::string tool_id;
+
+    /// role == "assistant" 时：**说这句话之前它想了什么**。没想就是空的。
+    ///
+    /// 长度上限见 `kThinkingKeep`（超了从头上截）。
+    std::string thinking;
 
     /// role == "assistant" 且它要调工具时，原样存着（[{id,name,arguments}]）。
     nlohmann::json tool_calls;
