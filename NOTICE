@@ -1,0 +1,29 @@
+changji (场记)
+Copyright 2026 ChangJi AI
+
+Licensed under the Apache License, Version 2.0. See LICENSE for the full
+text.
+
+This product builds against third-party components that are fetched at
+configure time and are NOT redistributed in this repository. Each one
+carries its own license, and a binary built from this source contains
+their code:
+
+  nlohmann/json            MIT
+  marzer/tomlplusplus      MIT
+  yhirose/cpp-httplib      MIT
+  CrowCpp/Crow             BSD-3-Clause
+  chriskohlhoff/asio       Boost Software License 1.0
+  google/brotli            MIT
+  madler/zlib              zlib
+  doctest/doctest          MIT           (tests only)
+  leejet/stable-diffusion.cpp  MIT       (CHANGJI_SD, on by default)
+  ggml-org/llama.cpp       MIT           (CHANGJI_LLAMA)
+  OpenSSL                  Apache-2.0    (CHANGJI_SSL, on by default)
+
+ffmpeg is invoked as an external program and is not linked in; it is
+neither bundled nor distributed by this project.
+
+The generative models this software drives are not part of it and are not
+covered by this license. They are downloaded separately and each has its
+own terms, some of which forbid commercial use.
