@@ -50,9 +50,17 @@ bool product_present() {
            fs::is_directory(product_root() / "desktop");
 }
 
-/// The top-level directories of this repository. Used to recognise the
-/// repo-relative paths that cloud-tool.yml writes (`tools/autodl_gui.py`), and
-/// derived from the tree rather than listed by hand so it cannot go stale.
+/// The top-level directories of this repository. Used to recognise paths
+/// written relative to this repo's root rather than to the workspace.
+///
+/// cloud-tool.yml was the one workflow that wrote them that way, and it was
+/// removed on 2026-09-22 when that tool stopped being packaged by CI — so
+/// right now nothing exercises this branch. It stays because the next workflow
+/// that needs no product checkout will write paths the same way, and a check
+/// that silently stops recognising a spelling is worse than one that
+/// recognises a spelling nobody uses yet.
+///
+/// Derived from the tree rather than listed by hand, so it cannot go stale.
 const std::set<std::string>& top_level() {
     static const std::set<std::string> dirs = [] {
         std::set<std::string> d;

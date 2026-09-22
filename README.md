@@ -175,12 +175,11 @@ the product repository has none.
 | `desktop.yml` | The desktop app: three platforms, packaged, signed, notarised, and **actually opened** before publishing |
 | `webapp.yml` | Build the web UI and bake it into a header (`workflow_call`; both lines use it) |
 | `openssl.yml` | The pinned static OpenSSL (`workflow_call`; both lines use it) |
-| `cloud-tool.yml` | The GPU-rental tool, which is entirely inside this repository |
 | `install.sh` | The one-line installer, which downloads from this repository's Releases |
 
-Every pipeline except `cloud-tool.yml` checks out the private product
-repository as `changji/` and lays this repository over `changji/cpp`, because
-the web UI, the desktop shell and the brand assets live there. That needs a
+Every pipeline checks out the private product repository as `changji/` and
+lays this repository over `changji/cpp`, because the web UI, the desktop shell
+and the brand assets live there. That needs a
 `CHANGJI_PRODUCT_TOKEN` secret. `tools/setup_signing_secrets.sh` sets it
 together with the five macOS signing secrets, verifying each one locally before
 it uploads anything.
@@ -211,7 +210,7 @@ tests/
 └── golden/         the golden corpus, exported from the Python side back then and **frozen in version control**
 
 prompts.toml        **every prompt** (for the LLM and for image generation). Generated into the binary at build time; edit prompts here
-tools/              code generation (prompts, web UI, East Asian widths), a fake LLM, and the GPU-rental tool
+tools/              code generation (prompts, web UI, East Asian widths), a fake LLM, and the GPU-rental tool (built by hand, not by CI)
 patches/            the leejet/ggml extension patches and the script that applies them
 verify/             the up-front verification project (one-off; conclusions in RESULTS.md)
 i18n/               translation tables for eleven languages, baked into the binary
