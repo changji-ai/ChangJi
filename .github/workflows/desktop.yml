@@ -223,7 +223,9 @@ jobs:
   openssl:
     uses: ./.github/workflows/openssl.yml
     with:
-      keys: '["linux-x64","linux-arm64","macos-arm64","macos-x64","windows-x64","windows-arm64"]'
+      # windows-arm64 不在里头：那两格停了（见下面矩阵里那段）。引擎那条线
+      # 还在编它，所以那一档的缓存照样有人用。
+      keys: '["linux-x64","linux-arm64","macos-arm64","macos-x64","windows-x64"]'
 
   build:
     name: Package ${{ matrix.target }}
@@ -284,11 +286,31 @@ jobs:
           - { target: windows-x64-cuda,   runner: windows-2022,     gpu: cuda,   qthost: windows,       qtarch: win64_msvc2022_64,    ssl: windows-x64,   vsarch: x64 }
           - { target: windows-x64-vulkan, runner: windows-2022,     gpu: vulkan, qthost: windows,       qtarch: win64_msvc2022_64,    ssl: windows-x64,   vsarch: x64 }
 
-          # arm64 Windows must use clang-cl: llama.cpp's ggml-cpu CMakeLists
-          # says outright "MSVC is not supported for ARM, use clang" and stops
-          # at configure time.
-          - { target: windows-arm64,        runner: windows-11-arm, gpu: cpu,    qthost: windows_arm64, qtarch: win64_msvc2022_arm64, ssl: windows-arm64, vsarch: ARM64, toolset: ClangCL }
-          - { target: windows-arm64-vulkan, runner: windows-11-arm, gpu: vulkan, qthost: windows_arm64, qtarch: win64_msvc2022_arm64, ssl: windows-arm64, vsarch: ARM64, toolset: ClangCL }
+          # ⚠️ **Windows on ARM is off, 2026-09-22 — the app crashes on open.**
+          #
+          # These two cells got all the way through: it compiled, windeployqt
+          # collected Qt, the installer was written. Then the package refused
+          # to start:
+          #     it does not open outside the build tree (exit code -1073741819)
+          # `-1073741819` is `0xC0000005`, an access violation. So the failure
+          # is the product, not the pipeline, and shipping the package would
+          # hand somebody an installer whose app dies on the first double-click.
+          #
+          # Finding out why needs a crash dump from an arm64 Windows machine,
+          # which CI does not provide. **Turned off rather than left red**, on
+          # the user's call: a permanently red cell stops meaning anything, and
+          # a green pipeline that ships a dead package is worse.
+          #
+          # The arm64 Windows **engine** package is unaffected and still built
+          # by release.yml — it has no Qt and no window.
+          #
+          # To bring them back, uncomment; everything else is still in place
+          # (Qt has win64_msvc2022_arm64, LunarG has the /warm/ SDK, and
+          # clang-cl is required because llama.cpp's ggml-cpu says outright
+          # "MSVC is not supported for ARM, use clang").
+          #
+          # - { target: windows-arm64,        runner: windows-11-arm, gpu: cpu,    qthost: windows_arm64, qtarch: win64_msvc2022_arm64, ssl: windows-arm64, vsarch: ARM64, toolset: ClangCL }
+          # - { target: windows-arm64-vulkan, runner: windows-11-arm, gpu: vulkan, qthost: windows_arm64, qtarch: win64_msvc2022_arm64, ssl: windows-arm64, vsarch: ARM64, toolset: ClangCL }
 
           - { target: linux-x64,          runner: ubuntu-22.04,     gpu: cpu,    qthost: linux,         qtarch: linux_gcc_64,         ssl: linux-x64 }
           - { target: linux-x64-cuda,     runner: ubuntu-22.04,     gpu: cuda,   qthost: linux,         qtarch: linux_gcc_64,         ssl: linux-x64 }
