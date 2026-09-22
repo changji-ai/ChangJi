@@ -29,9 +29,10 @@
 // 用的是同一份，不是各写一遍。装的是 `libavahi-compat-libdnssd-dev`，
 // CMake 那头探得到才开（探不到就退回"这个平台还没接"，照实说）。
 //
-// Windows 还没接：那边要么装 Apple 的 Bonjour SDK（一个额外的安装包），
-// 要么走 Win10 自带的 `DnsServiceRegister` 那套——那是另一套 API，
-// 得另写一份。做半套比不做更糟，先空着。
+// **Windows 走的是另一套**（2026-09-23 接上）：Win10 1703 起系统自带的
+// `DnsService*`（`windns.h` / `dnsapi.lib`），不是 Apple 的 Bonjour SDK。
+// 那一族函数名和这边完全不同，所以是**另一份实现**（本文件底下
+// `CHANGJI_HAS_WINDNS` 那一段），不是同一份代码两个平台共用。
 #if defined(CHANGJI_HAS_DNSSD)
 #include <dns_sd.h>
 // ⚠️ **`htons` / `ntohs` 要自己带进来。** macOS 上 `<dns_sd.h>` 顺手就把
@@ -40,6 +41,18 @@
 #include <arpa/inet.h>
 #include <sys/select.h>
 #include <unistd.h>
+#endif
+
+#if defined(CHANGJI_HAS_WINDNS)
+#ifndef NOMINMAX
+#define NOMINMAX   // windows.h 里的 min/max 宏会把 std::min 一族打烂
+#endif
+#include <windows.h>
+#include <windns.h>
+#include <atomic>
+#include <cstdint>
+#include <deque>
+#include <set>
 #endif
 
 namespace fs = std::filesystem;
@@ -61,14 +74,34 @@ std::int64_t now_ms() {
 
 /// 这台机器说给人看的名字。取主机名，取不到就退一个中性的。
 std::string host_name() {
-    char buf[256] = {0};
 #if defined(__APPLE__) || defined(__linux__)
+    char buf[256] = {0};
     if (::gethostname(buf, sizeof(buf) - 1) == 0 && buf[0] != '\0') {
         std::string s(buf);
         // macOS 上主机名常常是 `xxx.local`，摆在界面上那个后缀是噪声。
         const auto dot = s.find(".local");
         if (dot != std::string::npos) s.resize(dot);
         return s;
+    }
+#elif defined(CHANGJI_HAS_WINDNS)
+    // Windows 上取这台机器的名字。
+    //
+    // ⚠️ **不走 `gethostname`。** 那一个在 winsock 里，要先 `WSAStartup`
+    // 才回得出东西——而这儿是进程刚起来、谁都还没初始化网络的时候。
+    // `GetComputerNameEx` 不挑这些，而且直接给 DNS 那一档的名字（不是
+    // NetBIOS 那个全大写的）。
+    wchar_t wide[256] = {0};
+    DWORD n = static_cast<DWORD>(sizeof(wide) / sizeof(wide[0]));
+    if (::GetComputerNameExW(ComputerNameDnsHostname, wide, &n) != 0 &&
+        wide[0] != L'\0') {
+        const int len = ::WideCharToMultiByte(CP_UTF8, 0, wide, -1, nullptr, 0,
+                                              nullptr, nullptr);
+        if (len > 1) {
+            std::string out(static_cast<size_t>(len - 1), '\0');
+            ::WideCharToMultiByte(CP_UTF8, 0, wide, -1, out.data(), len, nullptr,
+                                  nullptr);
+            return out;
+        }
     }
 #endif
     return SAY("一台机器");
@@ -363,6 +396,450 @@ void Sense::start() {
     });
 }
 
+void Sense::stop() {
+    if (!running_ || guts_ == nullptr) return;
+    running_ = false;
+    auto* g = guts_.get();
+    const char b = 1;
+    if (g->wake[1] >= 0) { [[maybe_unused]] auto n = ::write(g->wake[1], &b, 1); }
+    asking_ = false;
+    if (asker_.joinable()) asker_.join();
+    if (g->spin.joinable()) g->spin.join();
+    if (g->wake[0] >= 0) ::close(g->wake[0]);
+    if (g->wake[1] >= 0) ::close(g->wake[1]);
+    guts_.reset();
+    // **表清空**：关掉之后还摆着一屏"在线"的机器是假的。权限不清
+    //（那是给出去的承诺，和这会儿谁在线没关系）。
+    std::lock_guard<std::mutex> lk(mu_);
+    PeerBook fresh;
+    fresh.load_grants(book_.grants_json());
+    book_ = fresh;
+}
+
+#elif defined(CHANGJI_HAS_WINDNS)
+
+// ---- Windows 那一份：系统自带的 DNS-SD ----
+//
+// 走 `windns.h` 里 `DnsService*` 那一族（Win10 1703 起，`dnsapi.lib`），
+// **不是 Apple 的 Bonjour SDK**——那条路要人另装一个安装包、还要那个服务
+// 一直开着，而"拷过去就能跑"是这个包的立项理由之一。理由全文在
+// cpp/CMakeLists.txt 那一段探测上头。
+//
+// ⚠️ **和上面苹果 / Avahi 那一份不是一套模型，没法共用代码。**
+// 那头是"给我一个 fd，有事我通知你"；这头是**回调式**：发一次请求，系统在
+// 它自己的线程池上回调。三处跟着不一样：
+//
+//   一、没有 fd 可 `select`，叫停靠一个事件（`quit`）。
+//   二、回调在**别人的线程**上跑，碰 `book_` 一律上锁。
+//   三、**浏览报不出"走了"这件事。** 苹果那头 remove 是一条回调；这头
+//       `DnsServiceBrowse` 只管报"现在有这么几条"。所以这儿是**一轮一轮
+//       地照相**：开一次浏览收几秒、停掉、和上一轮比——上一轮在、这一轮
+//       不在的，就是走了。
+//
+// ⚠️ **端口是主机序，不是网络序。** 苹果那套收发都要自己 `htons`/`ntohs`，
+// 这套不用：`wPort` 进出都是主机序。照着上面那份抄一个 `ntohs` 过来的话，
+// 8080 会变成 36895——而那个数看着也挺像个端口号。
+
+namespace {
+
+/// UTF-8 → UTF-16。这套 API 从头到尾只认宽字符。
+std::wstring widen(const std::string& s) {
+    if (s.empty()) return {};
+    const int n = ::MultiByteToWideChar(CP_UTF8, 0, s.c_str(),
+                                        static_cast<int>(s.size()), nullptr, 0);
+    if (n <= 0) return {};
+    std::wstring w(static_cast<size_t>(n), L'\0');
+    ::MultiByteToWideChar(CP_UTF8, 0, s.c_str(), static_cast<int>(s.size()),
+                          w.data(), n);
+    return w;
+}
+
+/// UTF-16 → UTF-8。
+std::string narrow(const wchar_t* w) {
+    if (w == nullptr || *w == L'\0') return {};
+    const int n = ::WideCharToMultiByte(CP_UTF8, 0, w, -1, nullptr, 0, nullptr,
+                                        nullptr);
+    if (n <= 1) return {};
+    std::string s(static_cast<size_t>(n - 1), '\0');
+    ::WideCharToMultiByte(CP_UTF8, 0, w, -1, s.data(), n, nullptr, nullptr);
+    return s;
+}
+
+/// 记录里那个名字转成宽字符。
+///
+/// ⚠️ **两个重载都要。** `DNS_RECORD` 是跟着 `UNICODE` 这个宏走的别名：
+/// 定义了是 `DNS_RECORDW`（名字是 `wchar_t*`），没定义是 `DNS_RECORDA`
+/// （`char*`）。而这个目标定没定 `UNICODE` 不归这个文件管——上游哪天
+/// 加一句就换了一个类型，而换过去之后这儿是**编译错**，不是悄悄坏掉。
+/// 两个重载摆在这儿，两种都接得住。
+std::wstring to_w(const wchar_t* s) { return s != nullptr ? std::wstring(s) : std::wstring(); }
+std::wstring to_w(const char* s) { return widen(s != nullptr ? std::string(s) : std::string()); }
+
+/// 一次「问细节」要带着的东西。
+struct WinAsk {
+    std::wstring name;              ///< 网上那个实例全名（**要可写**，见下）
+    std::uint64_t gen = 0;          ///< 哪一轮开出去的
+    DNS_SERVICE_CANCEL cancel{};
+};
+
+/// 回调那一头要用到的东西。**整个进程只有这一份，而且从不释放。**
+///
+/// ⚠️ **这是有意的，不是懒。** 那几个回调跑在系统的线程池上，而
+/// `DnsServiceBrowseCancel` / `DnsServiceResolveCancel` 之后**还可能再回来
+/// 一次**（文档没说不会）。把上下文挂在 `Guts` 上的话，关掉那一下
+/// `Guts` 一析构，晚到的那一次回调写的就是已经还回去的内存——而那种崩溃
+/// 是随机的、隔几天才出一次。所以：上下文活在这儿，关掉只是把 `live`
+/// 放倒；回调先看这一面旗，倒了就什么都不做。
+///
+/// `asks` 同理**只进不出**。一次会话里网段上有几台就几条，几十个字节一条。
+struct WinShare {
+    std::mutex lk;
+    std::atomic<bool> live{false};
+    std::atomic<std::uint64_t> gen{0};
+    /// 这一轮照下来看见了哪几个实例（全名）。
+    std::set<std::wstring> shot;
+    /// 实例名 → 对面自报的 id。**走的那一下只给得出实例名**，这张表是桥。
+    std::map<std::wstring, std::string> by_instance;
+    /// 问出去还没回来的那几条。**从不清空**，见上面那段。
+    std::deque<WinAsk> asks;
+};
+
+WinShare& win_share() {
+    static WinShare one;
+    return one;
+}
+
+/// 问细节最多同时挂这么多条。挂到这个数就不再往外问了——正常网段上几十
+/// 台顶天，到这个数只能是有人在刷，再问下去就是拿内存换噪声。
+constexpr size_t kAskCap = 2048;
+
+}  // namespace
+
+struct Sense::Guts {
+    /// 往外报那一条。**撤的时候要拿同一份 request 去撤**，所以整份留着。
+    DNS_SERVICE_REGISTER_REQUEST reg{};
+    DNS_SERVICE_INSTANCE* reg_inst = nullptr;
+    /// 报出去那一下是异步的，等它回话。
+    HANDLE reg_done = nullptr;
+    std::atomic<DWORD> reg_status{ERROR_SUCCESS};
+    bool reg_sent = false;
+    /// 叫停。**手动复位**——一置上，所有在等的地方一起醒。
+    HANDLE quit = nullptr;
+    std::thread spin;
+};
+
+bool Sense::supported() { return true; }
+
+Sense::~Sense() { stop(); }
+
+Sense& Sense::instance() {
+    static Sense one;
+    return one;
+}
+
+void Sense::start() {
+    if (running_) return;
+    trouble_.clear();
+    guts_ = std::make_unique<Guts>();
+    auto* g = guts_.get();
+
+    g->quit = ::CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    g->reg_done = ::CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    if (g->quit == nullptr || g->reg_done == nullptr) {
+        if (g->quit != nullptr) ::CloseHandle(g->quit);
+        if (g->reg_done != nullptr) ::CloseHandle(g->reg_done);
+        guts_.reset();
+        return;
+    }
+
+    // ⚠️ **这三样在开跑之前抄一份。** 底下那条线程活得比这个函数长，而
+    // 它们是 `boot()` 写进去的——不抄的话就是跨线程读，而且中间隔着一把
+    // 别人的锁。
+    const std::string my_id = id_;
+    const std::string my_name = name_;
+    const int my_port = port_;
+
+    auto& sh = win_share();
+    sh.live.store(true);
+    const std::uint64_t gen = sh.gen.fetch_add(1) + 1;
+    {
+        std::lock_guard<std::mutex> lk(sh.lk);
+        sh.shot.clear();
+        sh.by_instance.clear();
+    }
+
+    running_ = true;
+    asking_ = true;
+    asker_ = std::thread([this] { ask_around(); });
+
+    g->spin = std::thread([this, g, gen, my_id, my_name, my_port] {
+        auto& share = win_share();
+        // `_changji._tcp` → `_changji._tcp.local`
+        const std::wstring family = widen(std::string(kService) + ".local");
+
+        // ---- 往外报一声 ----
+        //
+        // TXT 里带 id 和名字。**id 是认人的凭据**（`peers.hpp` 上那条：
+        // 认 id 不认地址），名字只是给人看的。
+        //
+        // ⚠️ **实例名必须每个进程唯一。** 同一台机器上跑两个引擎，两边都拿
+        // 主机名去注册的话，网上只看得见一条——两条记录被当成同一个服务。
+        // 名字后面缀上 id 的头四位就分开了（苹果那一份上写着同一件事，
+        // 2026-09-21 实撞过）。**界面上显示的不是它**：那个走 TXT 里的
+        // `name`，还是干干净净的主机名。
+        const std::wstring inst =
+            widen(my_name + "-" + my_id.substr(0, 4)) + L"." + family;
+        // 主机名那一份系统自己会出 A 记录，我们只要指对。
+        const std::wstring host = widen(my_name) + L".local";
+        const std::wstring k_id = L"id";
+        const std::wstring k_name = L"name";
+        const std::wstring v_id = widen(my_id);
+        const std::wstring v_name = widen(my_name);
+        PCWSTR keys[2] = {k_id.c_str(), k_name.c_str()};
+        PCWSTR vals[2] = {v_id.c_str(), v_name.c_str()};
+
+        g->reg_inst = ::DnsServiceConstructInstance(
+            inst.c_str(), host.c_str(), nullptr, nullptr,
+            static_cast<WORD>(my_port), 0, 0, 2, keys, vals);
+        if (g->reg_inst != nullptr) {
+            g->reg.Version = DNS_QUERY_REQUEST_VERSION1;
+            g->reg.InterfaceIndex = 0;
+            g->reg.pServiceInstance = g->reg_inst;
+            g->reg.pQueryContext = g;
+            g->reg.hCredentials = nullptr;
+            g->reg.unicastEnabled = FALSE;
+            // ⚠️ **无捕获的 lambda 当函数指针使。** 这几个回调声明成
+            // `WINAPI`（= `__stdcall`），而 lambda 转出来的是默认调用约定
+            // ——x64 和 arm64 上只有一种调用约定，两者是同一个类型，编得过。
+            // 这个程序不出 32 位的 Windows 包；真要出，这几处得换成写死
+            // `__stdcall` 的自由函数。
+            g->reg.pRegisterCompletionCallback =
+                [](DWORD status, void* ctx, DNS_SERVICE_INSTANCE* si) {
+                    auto* gg = static_cast<Sense::Guts*>(ctx);
+                    if (gg != nullptr) {
+                        gg->reg_status.store(status);
+                        ::SetEvent(gg->reg_done);
+                    }
+                    // **回调给的这一份要自己放**，不是我们构造的那一份。
+                    if (si != nullptr) ::DnsServiceFreeInstance(si);
+                };
+            const DWORD r = ::DnsServiceRegister(&g->reg, nullptr);
+            if (r == DNS_REQUEST_PENDING) {
+                g->reg_sent = true;
+                // 等它回话，但别死等——系统那头不吭声的话，浏览那一半
+                // 还是该转起来。
+                ::WaitForSingleObject(g->reg_done, 5000);
+            }
+            const DWORD st = (r == DNS_REQUEST_PENDING) ? g->reg_status.load() : r;
+            // **报不出去要说出来。** 咽下去的话界面一直显示"开着"，而整个
+            // 网段上没人看得见这一台，人只会以为"对方没开"。
+            if (st != ERROR_SUCCESS) {
+                std::lock_guard<std::mutex> lk(mu_);
+                trouble_ = SAYF("往外报不出去（Windows 回 %1）",
+                                std::to_string(static_cast<int>(st)));
+            }
+        } else {
+            // 连实例都没构出来（名字拼错、内存不够）。**也走同一句话**
+            // ——多一句要多翻十一种语言，而人看见的信息是一样的。
+            std::lock_guard<std::mutex> lk(mu_);
+            trouble_ = SAYF("往外报不出去（Windows 回 %1）",
+                            std::to_string(static_cast<int>(::GetLastError())));
+        }
+
+        // ---- 一轮一轮地照相 ----
+        //
+        // 开一次浏览、收几秒、停掉，然后和上一轮比。**"走了"这件事只能
+        // 这么看出来**（见文件上头那段第三条）。
+        bool said_deaf = false;
+        while (::WaitForSingleObject(g->quit, 0) != WAIT_OBJECT_0) {
+            {
+                std::lock_guard<std::mutex> lk(share.lk);
+                share.shot.clear();
+            }
+
+            DNS_SERVICE_CANCEL browse_cancel{};
+            DNS_SERVICE_BROWSE_REQUEST br{};
+            br.Version = DNS_QUERY_REQUEST_VERSION1;
+            br.InterfaceIndex = 0;
+            br.QueryName = family.c_str();
+            br.pQueryContext = nullptr;   // 上下文在 `win_share()` 里，见那儿
+            br.pBrowseCallback = [](DWORD, void*, DNS_RECORD* rec) {
+                auto& sh2 = win_share();
+                if (rec != nullptr && sh2.live.load()) {
+                    std::lock_guard<std::mutex> lk(sh2.lk);
+                    for (DNS_RECORD* r = rec; r != nullptr; r = r->pNext) {
+                        // 这一族回来的是 PTR，里头那个名字就是实例全名。
+                        if (r->wType != DNS_TYPE_PTR) continue;
+                        if (r->Data.PTR.pNameHost == nullptr) continue;
+                        sh2.shot.insert(to_w(r->Data.PTR.pNameHost));
+                    }
+                }
+                // **这串记录归我们放。**
+                if (rec != nullptr) ::DnsRecordListFree(rec, DnsFreeRecordList);
+            };
+            const DNS_STATUS bs = ::DnsServiceBrowse(&br, &browse_cancel);
+            if (bs != DNS_REQUEST_PENDING) {
+                if (!said_deaf) {
+                    said_deaf = true;
+                    std::lock_guard<std::mutex> lk(mu_);
+                    trouble_ = SAYF("听不见别人（Windows 回 %1）",
+                                    std::to_string(static_cast<int>(bs)));
+                }
+                if (::WaitForSingleObject(g->quit, 5000) == WAIT_OBJECT_0) break;
+                continue;
+            }
+
+            // 收一会儿。**这几秒就是"多久才看得见一台新开的机器"**，
+            // 短了收不全（mDNS 的应答是散着回来的），长了人等得着急。
+            const bool bye = ::WaitForSingleObject(g->quit, 4000) == WAIT_OBJECT_0;
+            ::DnsServiceBrowseCancel(&browse_cancel);
+            if (bye) break;
+
+            // ---- 和上一轮比 ----
+            std::vector<std::wstring> fresh;   // 这一轮新看见、还没问过细节的
+            std::vector<std::string> gone;     // 上一轮在、这一轮不在的
+            {
+                std::lock_guard<std::mutex> lk(share.lk);
+                for (const auto& one : share.shot) {
+                    if (share.by_instance.find(one) == share.by_instance.end()) {
+                        fresh.push_back(one);
+                    }
+                }
+                for (auto it = share.by_instance.begin();
+                     it != share.by_instance.end();) {
+                    if (share.shot.count(it->first) == 0) {
+                        gone.push_back(it->second);
+                        it = share.by_instance.erase(it);
+                    } else {
+                        ++it;
+                    }
+                }
+            }
+            if (!gone.empty()) {
+                std::lock_guard<std::mutex> lk(mu_);
+                for (const auto& id : gone) book_.lost(id);
+            }
+
+            // ---- 新来的：问一次细节（地址、端口、TXT）----
+            for (const auto& one : fresh) {
+                if (::WaitForSingleObject(g->quit, 0) == WAIT_OBJECT_0) break;
+                WinAsk* ask = nullptr;
+                {
+                    std::lock_guard<std::mutex> lk(share.lk);
+                    if (share.asks.size() >= kAskCap) break;
+                    share.asks.push_back(WinAsk{one, gen, {}});
+                    ask = &share.asks.back();   // deque：往后加不搬家
+                }
+                DNS_SERVICE_RESOLVE_REQUEST rr{};
+                rr.Version = DNS_QUERY_REQUEST_VERSION1;
+                rr.InterfaceIndex = 0;
+                // ⚠️ **`QueryName` 是 `PWSTR`，不是 `PCWSTR`。** 给一份自己
+                // 留着的可写缓冲（`ask->name` 活到进程结束），别给临时对象。
+                rr.QueryName = ask->name.data();
+                rr.pQueryContext = ask;
+                rr.pResolveCompletionCallback =
+                    [](DWORD status, void* ctx, DNS_SERVICE_INSTANCE* si) {
+                        auto* a = static_cast<WinAsk*>(ctx);
+                        auto& sh2 = win_share();
+                        const bool fresh_enough =
+                            a != nullptr && sh2.live.load() &&
+                            a->gen == sh2.gen.load();
+                        if (si != nullptr && status == ERROR_SUCCESS &&
+                            fresh_enough) {
+                            Peer p;
+                            for (DWORD i = 0; i < si->dwPropertyCount; ++i) {
+                                const std::string k = narrow(si->keys[i]);
+                                if (k == "id") p.id = narrow(si->values[i]);
+                                else if (k == "name") p.name = narrow(si->values[i]);
+                            }
+                            p.host = narrow(si->pszHostName);
+                            p.port = si->wPort;   // **主机序**，见文件上头
+                            p.seen_at = now_ms();
+                            Sense& s = Sense::instance();
+                            // ⚠️ **自己不算。** 自己广播的那一条自己也收得
+                            // 到，不挡的话表上第一行永远是自己。
+                            if (!p.id.empty() && p.id != s.my_id()) {
+                                {
+                                    std::lock_guard<std::mutex> lk(sh2.lk);
+                                    sh2.by_instance[a->name] = p.id;
+                                }
+                                std::lock_guard<std::mutex> lk(s.mu_);
+                                s.book_.saw(p);
+                            }
+                        }
+                        // **回调给的这一份要自己放。**
+                        if (si != nullptr) ::DnsServiceFreeInstance(si);
+                    };
+                ::DnsServiceResolve(&rr, &ask->cancel);
+            }
+
+            // 喘一口再照下一轮。加上上面收的那几秒，一台机器开起来之后
+            // 最多七八秒就看得见。
+            if (::WaitForSingleObject(g->quit, 3000) == WAIT_OBJECT_0) break;
+        }
+
+        // ---- 收工 ----
+        //
+        // **撤回那一条广播**：不撤的话我们已经关掉了，网段上别人还看得见
+        // 一台"在线"的机器，点进去是连不上的。
+        if (g->reg_sent) {
+            ::ResetEvent(g->reg_done);
+            if (::DnsServiceDeRegister(&g->reg, nullptr) == DNS_REQUEST_PENDING) {
+                ::WaitForSingleObject(g->reg_done, 3000);
+            }
+            g->reg_sent = false;
+        }
+        if (g->reg_inst != nullptr) {
+            ::DnsServiceFreeInstance(g->reg_inst);
+            g->reg_inst = nullptr;
+        }
+    });
+}
+
+void Sense::stop() {
+    if (!running_ || guts_ == nullptr) return;
+    running_ = false;
+    // 先把旗放倒：晚到的回调从这一下起什么都不做（见 `WinShare` 上那段）。
+    win_share().live.store(false);
+    auto* g = guts_.get();
+    if (g->quit != nullptr) ::SetEvent(g->quit);
+    asking_ = false;
+    if (asker_.joinable()) asker_.join();
+    if (g->spin.joinable()) g->spin.join();
+    if (g->quit != nullptr) ::CloseHandle(g->quit);
+    if (g->reg_done != nullptr) ::CloseHandle(g->reg_done);
+    guts_.reset();
+    {
+        std::lock_guard<std::mutex> lk(win_share().lk);
+        win_share().shot.clear();
+        win_share().by_instance.clear();
+    }
+    // **表清空**：关掉之后还摆着一屏"在线"的机器是假的。权限不清
+    //（那是给出去的承诺，和这会儿谁在线没关系）。
+    std::lock_guard<std::mutex> lk(mu_);
+    PeerBook fresh;
+    fresh.load_grants(book_.grants_json());
+    book_ = fresh;
+}
+
+#else   // 这个平台上没有那套 API
+
+struct Sense::Guts {};
+bool Sense::supported() { return false; }
+Sense::~Sense() = default;
+Sense& Sense::instance() { static Sense one; return one; }
+void Sense::start() {}
+void Sense::stop() {}
+
+#endif
+
+// ---- 下面这些两个平台一样 ----
+
+// ⚠️ **这一条原来关在苹果那一档里，2026-09-23 挪出来的。** 它一行平台代码
+// 都没有（发 HTTP、读回包、记一笔），关在里头的后果是 Windows 那一档一接上
+// 就链不动：`Sense::ask_around` 未解析，而那句报错指的是 `start()` 里那条
+// lambda，看不出是"这个函数根本没被编进来"。
+
 void Sense::ask_around() {
     // 每隔几秒问一圈。**在这条线程上发真 HTTP**——一台连不上就要等超时，
     // 卡在那条 select 线程上会把 mDNS 的回调一起堵住。
@@ -451,38 +928,6 @@ void Sense::ask_around() {
     }
 }
 
-void Sense::stop() {
-    if (!running_ || guts_ == nullptr) return;
-    running_ = false;
-    auto* g = guts_.get();
-    const char b = 1;
-    if (g->wake[1] >= 0) { [[maybe_unused]] auto n = ::write(g->wake[1], &b, 1); }
-    asking_ = false;
-    if (asker_.joinable()) asker_.join();
-    if (g->spin.joinable()) g->spin.join();
-    if (g->wake[0] >= 0) ::close(g->wake[0]);
-    if (g->wake[1] >= 0) ::close(g->wake[1]);
-    guts_.reset();
-    // **表清空**：关掉之后还摆着一屏"在线"的机器是假的。权限不清
-    //（那是给出去的承诺，和这会儿谁在线没关系）。
-    std::lock_guard<std::mutex> lk(mu_);
-    PeerBook fresh;
-    fresh.load_grants(book_.grants_json());
-    book_ = fresh;
-}
-
-#else   // 这个平台上没有那套 API
-
-struct Sense::Guts {};
-bool Sense::supported() { return false; }
-Sense::~Sense() = default;
-Sense& Sense::instance() { static Sense one; return one; }
-void Sense::start() {}
-void Sense::stop() {}
-
-#endif
-
-// ---- 下面这些两个平台一样 ----
 
 void Sense::boot(const fs::path& data_dir, int port) {
     {

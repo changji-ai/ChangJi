@@ -913,6 +913,41 @@ if(APPLE)
     set(CHANGJI_DNSSD ON)
     set(CHANGJI_DNSSD_LIB "")
     changji_probe_share_connection("" "")
+elseif(WIN32)
+    # Windows 走**系统自带的那一套**（`windns.h` 里 `DnsService*` 一族，
+    # Win10 1703 起），不是 Apple 的 Bonjour SDK。
+    #
+    # ⚠️ **不走 Bonjour SDK 是有理由的，不是图省事。** 那条路要人另装一个
+    # 安装包、还要那个服务一直开着；而"拷过去就能跑"是这个包的立项理由
+    # 之一——为了一个默认关着的功能，要所有人先装一个苹果的服务，不值。
+    #
+    # ⚠️ **API 是另一套，所以 `lan/sense.cpp` 里是另一份实现**，不是和苹果
+    # / Avahi 那份共用（那两家函数名一模一样，这家完全不同）。所以这儿
+    # 给的定义也是另一个名字：`CHANGJI_HAS_WINDNS`。
+    #
+    # 探一次再开，理由同下面那一段：**探不到就不开，不是编不过**。老一档
+    # 的 Windows SDK（10.0.15063 之前）里没有这几个符号。
+    set(CMAKE_REQUIRED_LIBRARIES dnsapi)
+    check_cxx_source_compiles("
+        #include <windows.h>
+        #include <windns.h>
+        int main() {
+            DNS_SERVICE_CANCEL c{};
+            DNS_SERVICE_BROWSE_REQUEST r{};
+            r.Version = DNS_QUERY_REQUEST_VERSION1;
+            return (int)DnsServiceBrowseCancel(&c) + (int)r.Version;
+        }
+    " CHANGJI_WINDNS)
+    unset(CMAKE_REQUIRED_LIBRARIES)
+    if(CHANGJI_WINDNS)
+        set(CHANGJI_DNSSD ON)
+        set(CHANGJI_DNSSD_LIB dnsapi)
+        message(STATUS "局域网感知：走 Windows 自带的 DNS-SD（dnsapi）")
+    else()
+        set(CHANGJI_DNSSD OFF)
+        set(CHANGJI_DNSSD_LIB "")
+        message(STATUS "局域网感知：这台的 Windows SDK 里没有 DnsService*，那一档关着")
+    endif()
 else()
     find_path(DNSSD_INCLUDE_DIR dns_sd.h PATH_SUFFIXES avahi-compat-libdns_sd)
     find_library(DNSSD_LIBRARY NAMES dns_sd)
@@ -950,7 +985,14 @@ endif()
 
 # mDNS 那一套：探到了才开（见上面那一段）。
 if(CHANGJI_DNSSD)
-    target_compile_definitions(changji_core PRIVATE CHANGJI_HAS_DNSSD)
+    # ⚠️ **两个名字不是一回事**：`CHANGJI_HAS_DNSSD` 是苹果 / Avahi 那套
+    # （`dns_sd.h`），`CHANGJI_HAS_WINDNS` 是 Windows 自带的那套
+    # （`windns.h`）。`lan/sense.cpp` 里是两份实现，各认各的。
+    if(CHANGJI_WINDNS)
+        target_compile_definitions(changji_core PRIVATE CHANGJI_HAS_WINDNS)
+    else()
+        target_compile_definitions(changji_core PRIVATE CHANGJI_HAS_DNSSD)
+    endif()
     if(CHANGJI_DNSSD_SHARE)
         # 苹果那套：注册/浏览/解析全挂在一条连接上，一个 fd。
         target_compile_definitions(changji_core PRIVATE CHANGJI_DNSSD_SHARE_CONNECTION)
@@ -1079,7 +1121,21 @@ if(WIN32)
         #     显示成 "C++97"；二是任何拿 __cplusplus 做条件编译的第三方头文件
         #     都会在 MSVC 上静默走错分支——llama.cpp 的 LU8 宏就是这么炸的，
         #     见 verify/RESULTS.md。
-        target_compile_options(changji_core PRIVATE /utf-8 /Zc:__cplusplus /W4)
+        #
+        # ⚠️ **前两个是 `PUBLIC`，不是 `PRIVATE`**（2026-09-23 改的）。
+        # 这个项目**头文件里就有中文字面量**（`pipeline/jobs.hpp` 里那两句
+        # 「已手动停止…」），而 `changji` 和 `changji-desktop` 都直接 include
+        # 它们。只给 core 的话，那两个目标编的是同一批字节、少一个开关：
+        #
+        #   · **中文 Windows 上当场编不过**（ANSI 936）：GBK 把 UTF-8 的中文
+        #     按双字节吞，吞掉后面那个右引号，报的是「C2001 常量中有换行符」，
+        #     行号指着那个**头文件**——看不出根子是"编它的那个目标少了一个
+        #     编译开关"。2026-09-23 在这台机器上第一次编 `changji` 撞到。
+        #   · **英文 Windows 上编得过**（ANSI 1252，每个字节都是一个字符），
+        #     而那几句中文在二进制里是一串乱码。**这一档更糟**：CI 上全绿，
+        #     没有人会发现。
+        target_compile_options(changji_core PUBLIC /utf-8 /Zc:__cplusplus)
+        target_compile_options(changji_core PRIVATE /W4)
     endif()
 else()
     target_compile_options(changji_core PRIVATE -Wall -Wextra -Wpedantic)
