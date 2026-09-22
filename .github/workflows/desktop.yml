@@ -294,8 +294,25 @@ jobs:
           - { target: linux-x64-cuda,     runner: ubuntu-22.04,     gpu: cuda,   qthost: linux,         qtarch: linux_gcc_64,         ssl: linux-x64 }
           - { target: linux-x64-vulkan,   runner: ubuntu-22.04,     gpu: vulkan, qthost: linux,         qtarch: linux_gcc_64,         ssl: linux-x64 }
 
-          - { target: linux-arm64,        runner: ubuntu-22.04-arm, gpu: cpu,    qthost: linux_arm64,   qtarch: linux_gcc_arm64,      ssl: linux-arm64 }
-          - { target: linux-arm64-cuda,   runner: ubuntu-22.04-arm, gpu: cuda,   qthost: linux_arm64,   qtarch: linux_gcc_arm64,      ssl: linux-arm64 }
+          # ⚠️ **24.04 here, while every other Linux cell is on 22.04.**
+          #
+          # Qt's arm64 Linux binaries are built against a newer base than its
+          # x86_64 ones. On ubuntu-22.04-arm (glibc 2.35) even Qt's own
+          # `qmlimportscanner` refuses to start:
+          #     libstdc++.so.6: version `GLIBCXX_3.4.32' not found
+          #     libm.so.6: version `GLIBC_2.38' not found
+          # and CMake reports it as "Failed to scan target for QML imports",
+          # which says nothing about glibc. The x64 cells on 22.04 are fine —
+          # measured on 2026-09-22, both in the same run.
+          #
+          # **The consequence is real and is not hidden:** the arm64 Linux
+          # desktop package needs glibc ≥ 2.38, so Ubuntu 24.04, Debian 13 or
+          # newer. Building it on 22.04 is not an option Qt offers, and
+          # building Qt from source for one cell is a different project. The
+          # arm64 **engine** package is unaffected — it has no Qt and stays on
+          # 22.04.
+          - { target: linux-arm64,        runner: ubuntu-24.04-arm, gpu: cpu,    qthost: linux_arm64,   qtarch: linux_gcc_arm64,      ssl: linux-arm64 }
+          - { target: linux-arm64-cuda,   runner: ubuntu-24.04-arm, gpu: cuda,   qthost: linux_arm64,   qtarch: linux_gcc_arm64,      ssl: linux-arm64 }
     steps:
       # Two checkouts; see the meta job in release.yml. `desktop/` and
       # `webapp/` live in the product repo, so this job cannot run on this
