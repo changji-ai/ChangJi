@@ -785,6 +785,22 @@ jobs:
           test -s "$RUNNER_TEMP/shot.png" || { echo "it opened, but no screenshot came out"; exit 1; }
           echo "it opens outside the build tree"
 
+      # ⚠️ **`&` does not wait for a GUI program on Windows, and
+      # `$LASTEXITCODE` is never set.**
+      #
+      # This is a Qt app, so its subsystem is WINDOWS: PowerShell launches it
+      # and carries straight on. `$LASTEXITCODE` stays unset, `-ne 0` is
+      # therefore true, and the step threw
+      #     it does not open outside the build tree (exit code )
+      # — with nothing in the brackets. The app had in fact started; its own
+      # log lines (`changji 监听 127.0.0.1:59025`) are in the output directly
+      # above the error. The check was wrong, not the package.
+      #
+      # `Start-Process -PassThru` plus `WaitForExit(ms)` waits, yields a real
+      # exit code, and puts a ceiling on it: the self-test hook closes the
+      # window after CHANGJI_DESKTOP_SHOT_MS, so anything past two minutes is
+      # a hang, and a hang should not sit there until the job's 360-minute
+      # timeout.
       - name: Actually open it (Windows)
         if: runner.os == 'Windows' && matrix.gpu != 'cuda'
         shell: pwsh
@@ -792,8 +808,14 @@ jobs:
           $env:QML_DISABLE_DISK_CACHE = "1"
           $env:CHANGJI_DESKTOP_SHOT = "$env:RUNNER_TEMP\shot.png"
           $env:CHANGJI_DESKTOP_SHOT_MS = "12000"
-          & "dist\changji-desktop\changji-desktop.exe"
-          if ($LASTEXITCODE -ne 0) { throw "it does not open outside the build tree (exit code $LASTEXITCODE)" }
+          $exe = "dist\changji-desktop\changji-desktop.exe"
+          if (-not (Test-Path $exe)) { throw "$exe is not there" }
+          $p = Start-Process -FilePath $exe -PassThru -NoNewWindow
+          if (-not $p.WaitForExit(120000)) {
+            $p.Kill()
+            throw "it did not exit within two minutes — CHANGJI_DESKTOP_SHOT_MS should have closed it after 12 seconds, so it is hung"
+          }
+          if ($p.ExitCode -ne 0) { throw "it does not open outside the build tree (exit code $($p.ExitCode))" }
           if (-not (Test-Path "$env:RUNNER_TEMP\shot.png")) { throw "it opened, but no screenshot came out" }
           Write-Host "it opens outside the build tree"
 
