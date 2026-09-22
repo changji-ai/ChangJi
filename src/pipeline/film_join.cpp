@@ -8,6 +8,7 @@
 #include <nlohmann/json.hpp>
 
 #include "media/assemble.hpp"
+#include "media/product_tags.hpp"
 #include "models/story.hpp"
 #include "util/human_time.hpp"
 #include "util/paths.hpp"
@@ -154,7 +155,14 @@ FilmJoinReport join_film(const ProjectStore& store,
     // 换一次界面语言 final/ 里就多一部"另一个名字的成片"，而谁都不报错。
     const std::string film_name = SAY_NEVER("成片.mp4");
     const fs::path staged = work / paths::from_utf8(film_name);
-    ff.run(media::concat_args(listing, staged));
+    // 隐式标识。这一步和各章那一步是**同一个函数**——两处内容不同（这儿是
+    // 整部电影，填得出项目名），但"标识长什么样"只有一份。
+    //
+    // 必须在这儿写一次：`-f concat` 不继承输入的元数据，各章成片上那份到
+    // 这里一栏都不剩（实测）。
+    ff.run(media::concat_args(
+        listing, staged,
+        media::product_tag_args(models::utc_now_iso8601(), project.title)));
     progress.set_done(1);
 
     // 拼到 .work 里、成了再挪进来。ffmpeg 中途失败或者人按了停，

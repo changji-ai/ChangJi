@@ -141,8 +141,20 @@ std::vector<std::string> normalize_args(const std::filesystem::path& src,
 std::string concat_listing(const std::vector<std::filesystem::path>& clips);
 
 /// 拼接。**零重编码**——上一步已经把规格统一了。
+///
+/// `tags` 是产物的隐式标识（`media::product_tags.hpp`），空 = 不写，参数和
+/// 加它之前逐字节一样。
+///
+/// **这一步是写标识的唯一入口。** `-f concat` 不继承输入文件的元数据（实测：
+/// 拼完一栏不剩），所以这里写的是新的；而从这儿往下游——混音那两条路
+/// （`silent_audio_args` / `mix_args`，`-c:v copy`）、烧字幕（重编码）、
+/// 不烧字幕时的直接改名——**三步都原样带着**，实测过。
+///
+/// 反过来说：别在下游补写。下游每一层都是两条路，写一处就漏一条，
+/// 而漏掉的表现是「某些片子没有标识」，谁都不报错。
 std::vector<std::string> concat_args(const std::filesystem::path& listing,
-                                     const std::filesystem::path& dest);
+                                     const std::filesystem::path& dest,
+                                     const std::vector<std::string>& tags = {});
 
 /// 没有配音时也要有音轨，否则有些平台会认为文件损坏。
 std::vector<std::string> silent_audio_args(const std::filesystem::path& video,

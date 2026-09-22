@@ -842,6 +842,7 @@ add_library(changji_core STATIC
     src/gates/checks.cpp
     src/media/assemble.cpp
     src/media/watermark.cpp
+    src/media/product_tags.cpp
     src/http/readonly.cpp
     src/http/editing.cpp
     src/http/editing_assets.cpp
@@ -1326,6 +1327,7 @@ if(CHANGJI_BUILD_TESTS)
         tests/unit/test_film_join.cpp
         tests/unit/test_finish.cpp
         tests/unit/test_watermark.cpp
+        tests/unit/test_product_tags.cpp
         tests/unit/test_scenes.cpp
         tests/unit/test_upscale.cpp
         tests/unit/test_audio_plan.cpp
@@ -1458,6 +1460,7 @@ if(CHANGJI_BUILD_TESTS)
         src/media/subtitles.cpp
         src/gates/checks.cpp
         src/media/assemble.cpp
+        src/media/product_tags.cpp
         src/media/watermark.cpp
         src/llm/client.cpp
         src/llm/thinking.cpp

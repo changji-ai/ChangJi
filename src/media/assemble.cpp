@@ -9,6 +9,8 @@
 #include <sstream>
 
 // 时间轴按真正生成得出来的帧数算，不按分镜表里的名义时长
+#include "media/product_tags.hpp"
+#include "models/project.hpp"
 #include "stages/limits.hpp"
 #include "util/say.hpp"
 #include "util/cmdline.hpp"
@@ -329,10 +331,17 @@ std::string concat_listing(const std::vector<fs::path>& clips) {
 }
 
 std::vector<std::string> concat_args(const fs::path& listing,
-                                     const fs::path& dest) {
+                                     const fs::path& dest,
+                                     const std::vector<std::string>& tags) {
     // -safe 0 是必需的：清单里是绝对路径，默认的安全检查会拒绝。
-    return {"-y", "-f", "concat", "-safe", "0", "-i", paths::to_utf8(listing),
-            "-c", "copy", paths::to_utf8(dest)};
+    std::vector<std::string> args = {"-y",   "-f",  "concat",
+                                     "-safe", "0",  "-i",
+                                     paths::to_utf8(listing), "-c", "copy"};
+    // 标识摆在输出文件名**之前**：-metadata 是输出选项，摆到后面 ffmpeg 会
+    // 把它当成下一个输出的选项，而这条命令没有下一个输出。
+    args.insert(args.end(), tags.begin(), tags.end());
+    args.push_back(paths::to_utf8(dest));
+    return args;
 }
 
 std::vector<std::string> silent_audio_args(const fs::path& video,
@@ -689,7 +698,11 @@ fs::path Assembler::assemble(const Timeline& timeline,
         f << concat_listing(normalized);
     }
     const fs::path silent = work / "joined.mp4";
-    ff_.run(concat_args(listing, silent));
+    // 隐式标识就写在这一步——从这儿往下游三步都带着，见 concat_args 上那段。
+    // 章的片名这一层不知道（只有一个 out_name 那样的文件名），空着；
+    // 整部电影那头（pipeline/film_join）拿得到项目名，会填上。
+    ff_.run(concat_args(listing, silent,
+                        product_tag_args(models::utc_now_iso8601())));
 
     // 每条配音落在时间线上的位置。
     std::vector<AudioSegment> segments;
