@@ -79,10 +79,72 @@ jobs:
     name: Where this run goes
     runs-on: ubuntu-24.04
     outputs:
+      product_ref: ${{ steps.pref.outputs.ref }}
       version: ${{ steps.v.outputs.version }}
       channel: ${{ steps.v.outputs.channel }}
       gpu: ${{ steps.v.outputs.gpu }}
     steps:
+      # ---- 先定「主项目拿哪一版」，再检出 ----
+      #
+      # ⚠️ **不定的话拿到的是那个仓库的默认分支。** 在功能分支上推一版，编出
+      # 来的是主项目 main 的前端和桌面端——**而且一切正常，没有任何地方会说
+      # 它用的是哪一份**。2026-09-22 这条流水线刚搬过来时就是这样。
+      #
+      # 规矩是**同名配对**：这边推 `v2.2-desktop`，那边要是也有一条同名的就
+      # 用它，没有就退回它的默认分支，**并且把退回这件事说出来**。手动跑时
+      # `product_ref` 指定了就用指定的，指错了当场红，不替人改。
+      - id: pref
+        env:
+          GH_TOKEN: ${{ secrets.CHANGJI_PRODUCT_TOKEN }}
+          WANT: ${{ inputs.product_ref }}
+        run: |
+          set -euo pipefail
+          REPO=integemjack/changji
+          # 问不到默认分支就停，别把空串当答案——网络抖一下的话，底下报的
+          # 会是「那条分支不存在」，而照着那句话查是查不到的。
+          default=""
+          for i in 1 2 3; do
+            default=$(gh api "repos/$REPO" --jq .default_branch 2>/dev/null || true)
+            [ -n "$default" ] && break
+            sleep 2
+          done
+          [ -n "$default" ] || { echo "::error::问不到 $REPO 的默认分支（网络？token？）"; exit 1; }
+
+          # **「没有」只认 404 和 422 两个码。**
+          #
+          # ⚠️ `/commits/{ref}` 对认不出的 ref 回的是 **422**，不是 404
+          #（实测：`no-such-thing` 和 `bad ref!!` 都是 422，各试两次）。
+          # 只认 404 的话，任何一条那边没有的分支名都会让这一步当场红，
+          # 而"退回默认分支"那条路**永远走不到**。
+          # 用这个端点是因为它连 tag 一起认；`/branches/` 回 404 更干净，
+          # 但只认分支。
+          #
+          # 401/403/5xx 一律停：当成「没有」的话会静悄悄退回默认分支，
+          # 编出来的是另一版，而且一切正常。
+          has() {
+            local code
+            code=$(gh api "repos/$REPO/commits/$1" --silent -i 2>/dev/null | head -1 | awk '{print $2}')
+            case "$code" in
+              200)     return 0 ;;
+              404|422) return 1 ;;
+              "")      echo "::error::问 $REPO 的 $1 没回话（网络？）"; exit 1 ;;
+              *)       echo "::error::问 $REPO 的 $1 回了 HTTP $code——不是 404/422，"
+                       echo "所以不是「没有这条」。当成没有的话会静悄悄编另一版。"; exit 1 ;;
+            esac
+          }
+
+          if [ -n "$WANT" ]; then
+            has "$WANT" || { echo "::error::$REPO 上没有 $WANT"; exit 1; }
+            ref="$WANT"
+          elif has "$GITHUB_REF_NAME"; then
+            ref="$GITHUB_REF_NAME"
+          else
+            echo "::notice::$REPO 上没有 $GITHUB_REF_NAME，退回它的默认分支 $default"
+            ref="$default"
+          fi
+          echo "主项目这一版：$REPO@$ref"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
       # ⚠️ **Two checkouts, and the order matters.**
       #
       # This repository holds the engine only. The web UI, the desktop shell
@@ -110,7 +172,7 @@ jobs:
           # Empty means that repo's default branch, which is what a push to
           # THIS repo wants. A push to the product repo passes its own ref
           # through, or a branch there would silently be built against main.
-          ref: ${{ inputs.product_ref }}
+          ref: ${{ steps.pref.outputs.ref }}
           path: changji
 
       - name: Lay this repo's core over changji/cpp
@@ -160,10 +222,11 @@ jobs:
   # Lives in `webapp.yml` because the desktop pipeline needs it too. Why it is
   # rebuilt on every run is explained at the top of that file.
   webapp:
+    needs: meta
     uses: ./.github/workflows/webapp.yml
     secrets: inherit
     with:
-      product_ref: ${{ inputs.product_ref }}
+      product_ref: ${{ needs.meta.outputs.product_ref }}
 
   # ---- Unit tests ----
   #
@@ -178,6 +241,12 @@ jobs:
   # covered by the build below (if it compiles, nothing is broken there).
   test:
     name: Unit tests (${{ matrix.os }})
+    # **`needs: meta` is load-bearing, not ordering.** This job reads
+    # `needs.meta.outputs.product_ref`, and without the dependency that
+    # expression evaluates to an empty string — silently. The checkout would
+    # then take the product repo's default branch while the run claims to be
+    # building this one.
+    needs: meta
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -201,7 +270,7 @@ jobs:
         with:
           repository: integemjack/changji
           token: ${{ secrets.CHANGJI_PRODUCT_TOKEN }}
-          ref: ${{ inputs.product_ref }}
+          ref: ${{ needs.meta.outputs.product_ref }}
           path: changji
       - name: Lay this repo's core over changji/cpp
         run: rm -rf changji/cpp
@@ -263,6 +332,8 @@ jobs:
   # things: that one deliberately has no Qt so it can answer in minutes.
   desktop-build:
     name: Does the desktop shell compile (${{ matrix.os }})
+    # See the note on the test job: this reads needs.meta.outputs.product_ref.
+    needs: meta
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -279,7 +350,7 @@ jobs:
           # Empty means that repo's default branch, which is what a push to
           # THIS repo wants. A push to the product repo passes its own ref
           # through, or a branch there would silently be built against main.
-          ref: ${{ inputs.product_ref }}
+          ref: ${{ needs.meta.outputs.product_ref }}
           path: changji
       - name: Lay this repo's core over changji/cpp
         run: rm -rf changji/cpp
@@ -374,7 +445,7 @@ jobs:
           # Empty means that repo's default branch, which is what a push to
           # THIS repo wants. A push to the product repo passes its own ref
           # through, or a branch there would silently be built against main.
-          ref: ${{ inputs.product_ref }}
+          ref: ${{ needs.meta.outputs.product_ref }}
           path: changji
       - name: Lay this repo's core over changji/cpp
         shell: bash
@@ -812,7 +883,7 @@ jobs:
           # Empty means that repo's default branch, which is what a push to
           # THIS repo wants. A push to the product repo passes its own ref
           # through, or a branch there would silently be built against main.
-          ref: ${{ inputs.product_ref }}
+          ref: ${{ needs.meta.outputs.product_ref }}
           path: changji
       - name: Lay this repo's core over changji/cpp
         shell: bash
@@ -1504,7 +1575,9 @@ jobs:
         if: needs.meta.outputs.channel == 'release'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PRODUCT_REF: ${{ inputs.product_ref }}
+          # 解析过的那一条，不是原始输入——推分支时输入是空的，而真正
+          # 用的是同名配对（或退回默认分支）的结果。发布说明要说真用了哪一版。
+          PRODUCT_REF: ${{ needs.meta.outputs.product_ref }}
         run: |
           gh release delete release --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag \
             || echo "no previous release Release; skipping"
@@ -1554,7 +1627,9 @@ jobs:
         if: needs.meta.outputs.channel == 'beta'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PRODUCT_REF: ${{ inputs.product_ref }}
+          # 解析过的那一条，不是原始输入——推分支时输入是空的，而真正
+          # 用的是同名配对（或退回默认分支）的结果。发布说明要说真用了哪一版。
+          PRODUCT_REF: ${{ needs.meta.outputs.product_ref }}
         run: |
           gh release delete beta --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag \
             || echo "no previous beta Release; skipping"
