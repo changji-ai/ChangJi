@@ -51,6 +51,10 @@ on:
     tags: ['v*']
   workflow_dispatch:
     inputs:
+      product_ref:
+        description: 'Which ref of the private product repo to build against. Blank = its default branch'
+        type: string
+        required: false
       skip_gpu:
         description: 'CPU packages only (skip the four CUDA / Vulkan cells, saves hours)'
         type: boolean
@@ -103,6 +107,10 @@ jobs:
         with:
           repository: integemjack/changji
           token: ${{ secrets.CHANGJI_PRODUCT_TOKEN }}
+          # Empty means that repo's default branch, which is what a push to
+          # THIS repo wants. A push to the product repo passes its own ref
+          # through, or a branch there would silently be built against main.
+          ref: ${{ inputs.product_ref }}
           path: changji
 
       - name: Lay this repo's core over changji/cpp
@@ -154,6 +162,8 @@ jobs:
   webapp:
     uses: ./.github/workflows/webapp.yml
     secrets: inherit
+    with:
+      product_ref: ${{ inputs.product_ref }}
 
   # ---- Unit tests ----
   #
@@ -180,6 +190,10 @@ jobs:
         with:
           repository: integemjack/changji
           token: ${{ secrets.CHANGJI_PRODUCT_TOKEN }}
+          # Empty means that repo's default branch, which is what a push to
+          # THIS repo wants. A push to the product repo passes its own ref
+          # through, or a branch there would silently be built against main.
+          ref: ${{ inputs.product_ref }}
           path: changji
       - name: Lay this repo's core over changji/cpp
         run: rm -rf changji/cpp
@@ -245,6 +259,10 @@ jobs:
         with:
           repository: integemjack/changji
           token: ${{ secrets.CHANGJI_PRODUCT_TOKEN }}
+          # Empty means that repo's default branch, which is what a push to
+          # THIS repo wants. A push to the product repo passes its own ref
+          # through, or a branch there would silently be built against main.
+          ref: ${{ inputs.product_ref }}
           path: changji
       - name: Lay this repo's core over changji/cpp
         run: rm -rf changji/cpp
@@ -336,6 +354,10 @@ jobs:
         with:
           repository: integemjack/changji
           token: ${{ secrets.CHANGJI_PRODUCT_TOKEN }}
+          # Empty means that repo's default branch, which is what a push to
+          # THIS repo wants. A push to the product repo passes its own ref
+          # through, or a branch there would silently be built against main.
+          ref: ${{ inputs.product_ref }}
           path: changji
       - name: Lay this repo's core over changji/cpp
         shell: bash
@@ -495,7 +517,7 @@ jobs:
         if: runner.os == 'macOS'
         env:
           CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
-          CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          CERT_PW: ${{ secrets.MACOS_CERT_PW }}
           CHANNEL: ${{ needs.meta.outputs.channel }}
         run: |
           if [ -z "$CERT_P12" ]; then
@@ -523,35 +545,39 @@ jobs:
           security unlock-keychain -p "$KPASS" "$KEYCHAIN"
           printf '%s' "$CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
           security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" \
-            -P "$CERT_PASSWORD" -T /usr/bin/codesign -f -A
+            -P "${CERT_PW:-}" -T /usr/bin/codesign
           rm -f "$RUNNER_TEMP/cert.p12"
           # Without set-key-partition-list, codesign blocks on a GUI password
           # prompt that nobody is there to answer, and the job hangs until it
           # times out rather than failing.
-          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+          security set-key-partition-list -S apple-tool:,apple: \
             -s -k "$KPASS" "$KEYCHAIN" > /dev/null
+          # Put the throwaway keychain into the search list, or codesign cannot
+          # find the identity inside it.
           security list-keychains -d user -s "$KEYCHAIN" \
-            $(security list-keychains -d user | tr -d '"')
+            $(security list-keychains -d user | sed 's/"//g')
+          # **Read the identity out of the certificate; do not carry it as a
+          # separate secret.** A hand-maintained "Developer ID Application:
+          # Name (TEAMID)" string drifts the day the certificate is renewed
+          # under a different name, and the failure is a confusing
+          # "no identity found" rather than anything about renewal. The
+          # desktop pipeline has always derived it this way.
+          ID=$(security find-identity -v -p codesigning "$KEYCHAIN" |
+               grep -m1 "Developer ID Application" | sed -E 's/.*"(.*)".*/\1/')
+          [ -n "$ID" ] || { echo "::error::this certificate holds no Developer ID Application identity"; exit 1; }
+          echo "CHANGJI_SIGN_ID=$ID" >> "$GITHUB_ENV"
           echo "CHANGJI_SIGNED=yes" >> "$GITHUB_ENV"
-          security find-identity -v -p codesigning "$KEYCHAIN"
+          echo "signing as: $ID"
 
       # `--options runtime` (the hardened runtime) and `--timestamp` are both
       # required for notarisation. Leave either out and the submission is
       # rejected minutes later with a message that does not name the flag.
       - name: Sign (macOS)
         if: runner.os == 'macOS'
-        env:
-          SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
         run: |
           [ "$CHANGJI_SIGNED" = "yes" ] || { echo "not signed; skipping"; exit 0; }
-          if [ -z "$SIGN_IDENTITY" ]; then
-            echo "::error::MACOS_CERT_P12 is set but MACOS_SIGN_IDENTITY is not."
-            echo "It is the full name, e.g. 'Developer ID Application: Name (TEAMID)';"
-            echo "the import step above printed the identities in this keychain."
-            exit 1
-          fi
           codesign --force --options runtime --timestamp \
-            --keychain "$KEYCHAIN_PATH" --sign "$SIGN_IDENTITY" build/changji
+            --keychain "$KEYCHAIN_PATH" --sign "$CHANGJI_SIGN_ID" build/changji
           codesign --verify --strict --verbose=2 build/changji
 
       # **Notarisation takes a .zip, and the ticket cannot be stapled.**
@@ -766,6 +792,10 @@ jobs:
         with:
           repository: integemjack/changji
           token: ${{ secrets.CHANGJI_PRODUCT_TOKEN }}
+          # Empty means that repo's default branch, which is what a push to
+          # THIS repo wants. A push to the product repo passes its own ref
+          # through, or a branch there would silently be built against main.
+          ref: ${{ inputs.product_ref }}
           path: changji
       - name: Lay this repo's core over changji/cpp
         shell: bash

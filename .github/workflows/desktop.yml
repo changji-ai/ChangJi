@@ -61,6 +61,10 @@ on:
     tags: ['desktop-v*']
   workflow_dispatch:
     inputs:
+      product_ref:
+        description: 'Which ref of the private product repo to build against. Blank = its default branch'
+        type: string
+        required: false
       version:
         description: 'Version (goes into filenames and the Release title). Blank derives it from the branch'
         type: string
@@ -93,6 +97,10 @@ jobs:
         with:
           repository: integemjack/changji
           token: ${{ secrets.CHANGJI_PRODUCT_TOKEN }}
+          # Empty means that repo's default branch, which is what a push to
+          # THIS repo wants. A push to the product repo passes its own ref
+          # through, or a branch there would silently be built against main.
+          ref: ${{ inputs.product_ref }}
           path: changji
       - name: Lay this repo's core over changji/cpp
         run: rm -rf changji/cpp
@@ -131,6 +139,8 @@ jobs:
   webapp:
     uses: ./.github/workflows/webapp.yml
     secrets: inherit
+    with:
+      product_ref: ${{ inputs.product_ref }}
 
   # The desktop app ships three targets (the most common one per machine), not
   # the engine pipeline's six.
@@ -161,6 +171,10 @@ jobs:
         with:
           repository: integemjack/changji
           token: ${{ secrets.CHANGJI_PRODUCT_TOKEN }}
+          # Empty means that repo's default branch, which is what a push to
+          # THIS repo wants. A push to the product repo passes its own ref
+          # through, or a branch there would silently be built against main.
+          ref: ${{ inputs.product_ref }}
           path: changji
       - name: Lay this repo's core over changji/cpp
         shell: bash

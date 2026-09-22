@@ -17,6 +17,11 @@ name: Web UI
 
 on:
   workflow_call:
+    inputs:
+      product_ref:
+        description: 'Which ref of the private product repo to build against. Blank = its default branch'
+        type: string
+        required: false
 
 jobs:
   webapp:
@@ -43,6 +48,10 @@ jobs:
         with:
           repository: integemjack/changji
           token: ${{ secrets.CHANGJI_PRODUCT_TOKEN }}
+          # Empty means that repo's default branch, which is what a push to
+          # THIS repo wants. A push to the product repo passes its own ref
+          # through, or a branch there would silently be built against main.
+          ref: ${{ inputs.product_ref }}
           path: changji
 
       - name: Lay this repo's core over changji/cpp
