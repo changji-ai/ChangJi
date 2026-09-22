@@ -32,13 +32,12 @@ constexpr int kMinMarkH = 32;
 /// 边距，同样按短边算。两边一样宽才像一个角。
 constexpr double kMarginRatio = 0.030;
 
-constexpr char kFileName[] = "cj_watermark.png";
-
 int scaled(int v, double k) { return std::max(1, static_cast<int>(std::lround(v * k))); }
 
 }  // namespace
 
-WatermarkPlan stage_watermark(const fs::path& dir, int target_w, int target_h) {
+WatermarkPlan stage_watermark(const fs::path& image_path, int target_w,
+                              int target_h) {
     const int shorter = std::min(target_w, target_h);
     if (shorter <= 0) return {};
 
@@ -50,8 +49,10 @@ WatermarkPlan stage_watermark(const fs::path& dir, int target_w, int target_h) {
     const int src_w = portrait ? bundled::kWatermarkPortraitW : bundled::kWatermarkLandscapeW;
     const int src_h = portrait ? bundled::kWatermarkPortraitH : bundled::kWatermarkLandscapeH;
 
-    const fs::path dest = dir / kFileName;
+    const fs::path dest = image_path;
     {
+        std::error_code ec;
+        fs::create_directories(dest.parent_path(), ec);
         std::ofstream f(dest, std::ios::binary | std::ios::trunc);
         if (!f) {
             throw std::runtime_error(

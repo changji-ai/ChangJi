@@ -20,6 +20,7 @@
 #include "config/settings.hpp"
 #include "infer/exec_queue.hpp"
 #include "infer/sd_image.hpp"
+#include "media/watermark.hpp"
 #include "models/shot.hpp"
 #include "pipeline/jobs.hpp"
 #include "stages/render.hpp"
@@ -55,11 +56,20 @@ void encode_raw_to_mp4(const std::filesystem::path& raw_path, int width,
                        double duration_s = 0.0);
 
 /// 拼给 ffmpeg 的参数。测试拿它检查规格，不用真跑 ffmpeg。
+///
+/// **产物的标识在这一步加**：`watermark` 是画面上那个角标（空 = 不加，参数
+/// 和加它之前逐字节一样），`tags` 是写进元数据的隐式那一半。
+///
+/// 为什么是这儿：这是一镜从 rawvideo 变成 mp4 的**唯一一次编码**，加在这里
+/// 不多一次重编码；而进程内出片和走工作进程出片都落到这个函数上
+/// （`run_deps.cpp` / `task_run.cpp` 两条路都走 sd_video），没有第三条路。
 std::vector<std::string> encode_args(const std::filesystem::path& raw_path,
                                      int width, int height, int fps,
                                      const config::AssemblyConfig& assembly,
                                      const std::filesystem::path& dest,
                                      const std::optional<std::filesystem::path>& audio = std::nullopt,
-                                     double duration_s = 0.0);
+                                     double duration_s = 0.0,
+                                     const media::WatermarkPlan& watermark = {},
+                                     const std::vector<std::string>& tags = {});
 
 }  // namespace changji::infer

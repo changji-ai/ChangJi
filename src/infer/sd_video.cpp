@@ -9,6 +9,8 @@
 
 #include "infer/local_exec.hpp"
 #include "infer/scheduler.hpp"
+#include "media/product_tags.hpp"
+#include "models/project.hpp"
 #include "pipeline/activity.hpp"
 #include "util/paths.hpp"
 #include "util/proc.hpp"
@@ -46,7 +48,9 @@ std::vector<std::string> encode_args(const fs::path& raw_path, int width,
                                      const config::AssemblyConfig& assembly,
                                      const fs::path& dest,
                                      const std::optional<fs::path>& audio,
-                                     double duration_s) {
+                                     double duration_s,
+                                     const media::WatermarkPlan& watermark,
+                                     const std::vector<std::string>& tags) {
     std::vector<std::string> args = {
         "-y",                       // 覆盖。重跑一镜时不该卡在"要覆盖吗"上
         "-f", "rawvideo",
@@ -60,6 +64,11 @@ std::vector<std::string> encode_args(const fs::path& raw_path, int width,
         // 那条声音在这一步被原地丢掉，成片里台词之间是数字静音。
         // 装配那边按 [sound].ambient 决定用不用它——这里只负责别丢。
         args.insert(args.end(), {"-i", paths::to_utf8(*audio)});
+    }
+    // 角标。**这一步加，装配那边就不再加了**——装配是 `-c copy` 往下走的，
+    // 这儿烧进去的水印一路带到成片。
+    if (!watermark.empty()) {
+        args.insert(args.end(), {"-vf", media::with_watermark("null", watermark)});
     }
     args.insert(args.end(), {
         "-c:v", assembly.video_codec,
@@ -88,6 +97,8 @@ std::vector<std::string> encode_args(const fs::path& raw_path, int width,
     } else {
         args.push_back("-an");      // 没有声音就明说没有，别让 ffmpeg 猜
     }
+    // 隐式标识摆在输出文件名**之前**：-metadata 是输出选项。
+    args.insert(args.end(), tags.begin(), tags.end());
     args.push_back(paths::to_utf8(dest));
     return args;
 }
@@ -107,12 +118,29 @@ void encode_raw_to_mp4(const fs::path& raw_path, int width, int height, int fps,
                            assembly.ffmpeg_path));
     }
 
+    // 产物的标识。**每一镜自己解一份图，编完就删**：出片是多镜并行的
+    // （多卡机上好几镜同时编码），共用一个文件名会互相踩；而留在盘上就等于
+    // 留一个「删掉它就没水印」的开关。
+    const fs::path wm_png =
+        dest.parent_path() /
+        paths::from_utf8(dest.stem().string() + ".cjwm.png");
+    const media::WatermarkPlan watermark =
+        media::stage_watermark(wm_png, width, height);
+    struct Cleanup {
+        const fs::path& p;
+        ~Cleanup() {
+            std::error_code e;
+            fs::remove(p, e);
+        }
+    } cleanup{wm_png};
+
     // 不限时。一镜的编码在低配机器上可能要几十秒，
     // 而超时把它杀掉留下的是一个半截的 mp4——比慢更糟。
     const proc::Result r = proc::run(
         *exe,
         encode_args(raw_path, width, height, fps, assembly, dest, audio,
-                    duration_s),
+                    duration_s, watermark,
+                    media::product_tag_args(models::utc_now_iso8601())),
         0);
     if (!r.launched || r.exit_code != 0) {
         throw SdError(SAYF("ffmpeg 编码失败（退出码 %1）：\n%2",

@@ -23,7 +23,6 @@
 
 #include "config/settings.hpp"
 #include "media/ffmpeg.hpp"
-#include "media/watermark.hpp"
 #include "media/subtitles.hpp"
 #include "models/project.hpp"
 #include "models/shot.hpp"
@@ -123,12 +122,6 @@ struct NormalizeOptions {
     bool source_has_audio = false;
     /// 编码时 `-tune grain`：不加的话 x264 把颗粒当噪声抹掉，白做。
     bool tune_grain = false;
-    /// 产物角标。空 = 不加，出来的参数和加水印之前逐字节一样。
-    ///
-    /// **和 extra_vf 分开两个字段，不是拼成一个。** 水印那段是多条链
-    /// （`movie=…[cjwm];[base][cjwm]overlay=…`），塞进 extra_vf 会被
-    /// 当成"接在主链后面"用逗号拼上去，当场语法错。
-    WatermarkPlan watermark;
 };
 
 std::vector<std::string> normalize_args(const std::filesystem::path& src,
