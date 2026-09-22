@@ -395,26 +395,52 @@ jobs:
           # configure time, and this cell was red from the day the desktop
           # shell was added (noticed 2026-09-21: all three platforms reporting
           # Failed to find required Qt component "WebSockets").
+          # ⚠️ **Name the architecture.** Left to guess, the action picked a
+          # MinGW Qt on windows-2022 while Ninja picked up the MinGW gcc that
+          # happens to be on PATH — so this cell was checking a toolchain
+          # **nobody ships with**. It failed at link with a wall of
+          # `undefined reference to __imp__ZNK9QJSEngine8hasErrorEv`, which
+          # reads like a Qt bug and is really two halves of two different Qt
+          # builds meeting.
+          arch: ${{ runner.os == 'Windows' && 'win64_msvc2022_64' || '' }}
           modules: 'qtmultimedia qtwebsockets'
           cache: true
 
       - name: Install ninja
+        if: runner.os != 'Windows'
         uses: seanmiddleditch/gha-setup-ninja@v5
 
       # Same reason as the unit-test cell: all that matters here is whether the
       # desktop files compile, so there is no need to drag image generation,
       # local LLMs and OpenSSL along.
-      - name: Configure
-        run: >
-          cmake -S changji/cpp -B build -G Ninja
-          -DCMAKE_BUILD_TYPE=Release
-          -DCHANGJI_SD=OFF
-          -DCHANGJI_LLAMA=OFF
-          -DCHANGJI_SSL=OFF
-          -DCHANGJI_DESKTOP=ON
+      #
+      # ⚠️ **The same generator the desktop pipeline uses, per platform.** A
+      # gate that compiles with a different toolchain than the one that ships
+      # is not a gate: it goes red on problems users will never have, and
+      # green on ones they will.
+      - name: Configure + build (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          cmake -S changji/cpp -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCHANGJI_SD=OFF \
+            -DCHANGJI_LLAMA=OFF \
+            -DCHANGJI_SSL=OFF \
+            -DCHANGJI_DESKTOP=ON
+          cmake --build build --target changji-desktop --parallel
 
-      - name: Build
-        run: cmake --build build --target changji-desktop --parallel
+      - name: Configure + build (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cmake -S changji/cpp -B build -G "Visual Studio 17 2022" -A x64 `
+            -DCHANGJI_SD=OFF `
+            -DCHANGJI_LLAMA=OFF `
+            -DCHANGJI_SSL=OFF `
+            -DCHANGJI_DESKTOP=ON
+          if ($LASTEXITCODE -ne 0) { throw "configure failed" }
+          cmake --build build --config Release --target changji-desktop --parallel
+          if ($LASTEXITCODE -ne 0) { throw "build failed" }
 
   # ---- OpenSSL (static) ----
   #
