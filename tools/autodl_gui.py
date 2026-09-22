@@ -3767,7 +3767,36 @@ def selftest():
     return 0
 
 
+def _utf8_console():
+    """Make stdout/stderr carry non-ASCII on a Windows console.
+
+    ⚠️ **Windows picks cp1252 (or whatever the machine's ANSI code page is) for
+    a console, not UTF-8.** Every line this tool prints is Chinese, so the first
+    `print` raises
+
+        UnicodeEncodeError: 'charmap' codec can't encode characters in
+        position 0-3: character maps to <undefined>
+
+    and the frozen executable dies with "Failed to execute script". Seen for
+    real on 2026-09-22: `--version` printed fine (ASCII), `--selftest` crashed
+    on its success line, and the Windows packaging cell went red while Linux
+    and macOS passed.
+
+    `errors="replace"` rather than strict: a console that genuinely cannot show
+    a character should print a placeholder, not take the process down.
+
+    `reconfigure` needs a TextIOWrapper, and a windowed build has `None` for
+    both — hence the guard.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):
+            pass
+
+
 def main(argv=None):
+    _utf8_console()
     argv = list(sys.argv[1:] if argv is None else argv)
     if "--version" in argv:
         print(VERSION)
