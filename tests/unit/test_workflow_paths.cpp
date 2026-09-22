@@ -1,14 +1,17 @@
-// **CI 那几份 yml 里引到的路径，得真有那个文件。**
+// **Every path the CI yml files mention has to be a file that exists.**
 //
-// 改名、挪地方、打错一个字——这一类错**只有推上去才知道**，而知道的方式是
-// 一趟构建跑到一半停在「No such file or directory」上。桌面端那条线更贵：
-// 它要装 Qt、编 sd.cpp 和 llama.cpp，三个平台几十分钟，才走到那一行。
+// A rename, a move, a typo — that class of mistake **is only discovered by
+// pushing**, and the way you discover it is a build stopping halfway through on
+// "No such file or directory". The desktop pipeline is worse: it installs Qt
+// and builds sd.cpp and llama.cpp, tens of minutes across three platforms,
+// before it reaches that line.
 //
-// 这条用例花的是几毫秒。
+// This test costs milliseconds.
 //
-// 认两种写法：`changji/cpp/...`（Unix）和 `changji\cpp\...`（yml 里
-// Windows 那几步写的就是反斜杠）。带 `${{ }}` 的跳过——那是模板，
-// 展开之后是什么这一层不知道。
+// It accepts both spellings: `changji/cpp/...` (Unix) and `changji\cpp\...`
+// (which is how the Windows steps in the yml write it). Anything containing
+// `${{ }}` is skipped — that is a template, and what it expands to is not
+// knowable here.
 
 #include <doctest/doctest.h>
 
@@ -22,46 +25,90 @@ namespace fs = std::filesystem;
 
 namespace {
 
-/// 仓库根：`.github/`、`cpp/`、`desktop/`、`webapp/` 都在这一层。
-/// `CHANGJI_SRC_DIR` 是 `<根>/cpp/src`，往上数**两层**。
-fs::path repo_root() {
-    return fs::path{CHANGJI_SRC_DIR}.parent_path().parent_path();
+/// This repository's root: `src/`, `tests/`, `tools/`, `.github/` are all
+/// directly inside it. `CHANGJI_SRC_DIR` is `<root>/src`, so: **one level up.**
+///
+/// ⚠️ **It used to go up two levels**, back when this engine was a `cpp/`
+/// subdirectory of the product repo and the workflows lived in that repo's
+/// root. In the standalone repository that lands *outside the checkout
+/// entirely*, and the first REQUIRE stopped the whole test — which is exactly
+/// how it was failing on Linux before the workflows moved here. Red looked
+/// like "a CI path is wrong"; in fact the test could not find itself, and
+/// while it was stopped, every mistake it exists to catch went through.
+fs::path repo_root() { return fs::path{CHANGJI_SRC_DIR}.parent_path(); }
+
+/// The private product repo, which holds `webapp/`, `desktop/` and `brand/`.
+///
+/// It is **not** checked out next to this one in general, so the paths that
+/// point into it can only be verified when it happens to be there — which is
+/// the case in the nested working copy, where this repo sits inside it. When
+/// it is absent those paths are counted and reported, not silently dropped:
+/// "skipped 4" is information; a quietly shrinking count is not.
+fs::path product_root() { return repo_root().parent_path(); }
+bool product_present() {
+    return fs::is_directory(product_root() / "webapp") &&
+           fs::is_directory(product_root() / "desktop");
 }
 
-/// 把 yml 里那一串解成真路径。
-///
-/// ⚠️ **yml 里写的是 `changji/cpp/...` 而不是 `cpp/...`**：CI 上
-/// `actions/checkout` 带 `path: changji`，仓库落在工作区的 `changji/` 底下，
-/// 所以那一串是**工作区相对**的，头上那截 `changji/` 指的就是仓库自己。
-/// 剥掉它，剩下的对着仓库根找。
-///
-/// ⚠️ **别靠"检出目录叫不叫 changji"来定位。** 原来那版往上数三层、拿检出
-/// 目录的爹当根，于是 `.github/workflows` 被找到了**仓库外面**——第一个
-/// `REQUIRE` 当场停，底下十七条路一条都没验着。红的样子像"CI 路径写错了"，
-/// 其实是这条用例自己站错了地方；而它一停，它要挡的那一类错就全放过去了。
-fs::path resolve_ci(const std::string& p) {
-    static const std::string kCheckout = "changji/";
-    return repo_root() /
-           (p.rfind(kCheckout, 0) == 0 ? p.substr(kCheckout.size()) : p);
+/// The top-level directories of this repository. Used to recognise the
+/// repo-relative paths that cloud-tool.yml writes (`tools/autodl_gui.py`), and
+/// derived from the tree rather than listed by hand so it cannot go stale.
+const std::set<std::string>& top_level() {
+    static const std::set<std::string> dirs = [] {
+        std::set<std::string> d;
+        for (const auto& e : fs::directory_iterator(repo_root())) {
+            if (e.is_directory()) d.insert(e.path().filename().string());
+        }
+        return d;
+    }();
+    return dirs;
 }
 
-/// 这一串看着像不像"仓库里的一条路"。
+/// Does this token look like a path into one of the two repositories?
 ///
-/// 只认 `changji/` 和 `.github/` 开头的：别的（`../desktop/...` 这种注释里
-/// 的相对写法、`/usr/bin/...` 这种系统路径）不归这条用例管，认了只会误报。
+/// Three shapes are accepted, and nothing else — a relative `../desktop/...`
+/// inside a comment, or a system path like `/usr/bin/...`, is not this test's
+/// business and accepting it would only produce false alarms.
 bool looks_like_path(const std::string& t) {
-    if (t.find("${{") != std::string::npos) return false;   // 模板，展开了才知道
-    if (t.find('*') != std::string::npos) return false;     // 通配
-    if (t.find('{') != std::string::npos) return false;     // `package_{a,b}.sh` 那种简写
-    return t.rfind("changji/", 0) == 0 || t.rfind(".github/", 0) == 0;
+    if (t.find("${{") != std::string::npos) return false;   // a template
+    if (t.find('*') != std::string::npos) return false;     // a glob
+    if (t.find('{') != std::string::npos) return false;     // `package_{a,b}.sh`
+    if (t.find('/') == std::string::npos) return false;     // not a path at all
+    if (t.rfind("changji/", 0) == 0) return true;
+    const std::string head = t.substr(0, t.find('/'));
+    return top_level().count(head) > 0;
 }
 
-/// 把 yml 切成一个个"可能是路径"的串。
+enum class Where { kHere, kProduct };
+
+/// Turn a token from a yml file into a real path.
 ///
-/// 反斜杠换成斜杠（Windows 那几步那么写），前后的引号、逗号、括号剥掉。
+/// ⚠️ **The workspace layout the yml files are written against:**
+///
+///     changji/          the private product repo (webapp/, desktop/, brand/)
+///     changji/cpp/      THIS repo, laid on top of the copy in there
+///
+/// So `changji/cpp/X` is this repo's `X`, while `changji/Y` is the product
+/// repo's `Y`. Everything else is already relative to this repo's root.
+std::pair<fs::path, Where> resolve_ci(const std::string& p) {
+    static const std::string kProduct = "changji/";
+    static const std::string kHere = "changji/cpp/";
+    if (p.rfind(kHere, 0) == 0) {
+        return {repo_root() / p.substr(kHere.size()), Where::kHere};
+    }
+    if (p.rfind(kProduct, 0) == 0) {
+        return {product_root() / p.substr(kProduct.size()), Where::kProduct};
+    }
+    return {repo_root() / p, Where::kHere};
+}
+
+/// Cut a yml file into tokens that might be paths.
+///
+/// Backslashes become slashes (that is how the Windows steps spell them), and
+/// surrounding quotes, commas and brackets are stripped.
 std::set<std::string> paths_in(const fs::path& f) {
     std::ifstream in(f);
-    REQUIRE_MESSAGE(in.good(), "读不到 " << f.string());
+    REQUIRE_MESSAGE(in.good(), "cannot read " << f.string());
     std::set<std::string> out;
     for (std::string line; std::getline(in, line);) {
         std::string tok;
@@ -72,7 +119,7 @@ std::set<std::string> paths_in(const fs::path& f) {
                              c == '\r';
             if (!sep) { tok += (c == '\\' ? '/' : c); continue; }
             if (!tok.empty()) {
-                // 结尾那几个标点剥掉：`路径。`、`路径）`、`路径:`
+                // Strip trailing punctuation: `path.`, `path:`, `path;`
                 while (!tok.empty() &&
                        (tok.back() == ':' || tok.back() == ';' || tok.back() == '.')) {
                     tok.pop_back();
@@ -89,23 +136,34 @@ std::set<std::string> paths_in(const fs::path& f) {
 
 }  // namespace
 
-TEST_CASE("CI 那几份 yml 里引到的路径，文件真的在") {
+TEST_CASE("every path the CI yml files mention really exists") {
     const fs::path dir = repo_root() / ".github" / "workflows";
-    REQUIRE_MESSAGE(fs::is_directory(dir), "读不到 " << dir.string());
+    REQUIRE_MESSAGE(fs::is_directory(dir), "cannot read " << dir.string());
 
+    const bool have_product = product_present();
     int checked = 0;
+    int skipped = 0;
     for (const auto& entry : fs::directory_iterator(dir)) {
         if (entry.path().extension() != ".yml") continue;
         for (const auto& p : paths_in(entry.path())) {
+            const auto [full, where] = resolve_ci(p);
+            if (where == Where::kProduct && !have_product) { ++skipped; continue; }
             ++checked;
-            const fs::path full = resolve_ci(p);
             CAPTURE(entry.path().filename().string());
             CAPTURE(p);
-            CHECK_MESSAGE(fs::exists(full), "这条路上没有东西：" << full.string());
+            CHECK_MESSAGE(fs::exists(full), "nothing at this path: " << full.string());
         }
     }
 
-    // 一条都没抠出来就是这条用例自己不认路了，不是"全都对"。
+    // `std::string`, not a ternary of two `const char*` — doctest's
+    // stringification takes the latter as a pointer and prints an address.
+    MESSAGE("checked " << checked << " paths, skipped " << skipped
+                       << " (product repo "
+                       << std::string(have_product ? "present" : "absent") << ")");
+
+    // Extracting nothing means the test stopped recognising paths, not that
+    // everything is correct.
     REQUIRE_MESSAGE(checked >= 10,
-                    "只抠出 " << checked << " 条路——这条用例八成是自己不认路了");
+                    "only extracted " << checked << " paths — this test has most "
+                    "likely stopped recognising them");
 }

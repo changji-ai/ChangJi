@@ -460,6 +460,7 @@ jobs:
           TAG: ${{ needs.meta.outputs.tag }}
           VER: ${{ needs.meta.outputs.version }}
           CHANNEL: ${{ needs.meta.outputs.channel }}
+          PRODUCT_REF: ${{ inputs.product_ref }}
         run: |
           set -e
           # Delete before creating: the tag would otherwise stay pinned to the
@@ -490,6 +491,12 @@ jobs:
             echo "|---|---|"
             echo "| Branch | \`${GITHUB_REF_NAME}\` |"
             echo "| Commit | ${GITHUB_SHA} |"
+            # **The desktop shell itself comes from the other repository.**
+            # The branch above is this repo's; when the run was triggered from
+            # over there, that is the branch that actually changed, and without
+            # this line the notes say "main" while the shell came from a
+            # feature branch.
+            [ -n "$PRODUCT_REF" ] && echo "| Shell and web UI from | \`$PRODUCT_REF\` |"
             echo "| Built | $(date -u '+%Y-%m-%d %H:%M UTC') |"
           } > body.md
           # Prerelease: `/releases/latest` does not point at it, so anyone

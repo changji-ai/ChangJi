@@ -184,15 +184,22 @@ jobs:
       matrix:
         os: [ubuntu-24.04, macos-15]
     steps:
-      # Two checkouts; see the meta job for why.
-      - name: Check out the product repo
+      # Two checkouts; see the meta job for why — except that here the first
+      # one is **allowed to fail**.
+      #
+      # The unit tests need nothing from the product repo. Requiring its token
+      # would mean that anybody without it — a fork, an outside contributor —
+      # cannot run the tests on this public repository at all, which is a
+      # strange thing for the tests to demand. With the token present, the
+      # checkout succeeds and `test_workflow_paths` also verifies the paths
+      # pointing into that repo; without it, that test reports how many it
+      # skipped and checks the rest.
+      - name: Check out the product repo (optional here)
+        continue-on-error: true
         uses: actions/checkout@v4
         with:
           repository: integemjack/changji
           token: ${{ secrets.CHANGJI_PRODUCT_TOKEN }}
-          # Empty means that repo's default branch, which is what a push to
-          # THIS repo wants. A push to the product repo passes its own ref
-          # through, or a branch there would silently be built against main.
           ref: ${{ inputs.product_ref }}
           path: changji
       - name: Lay this repo's core over changji/cpp
@@ -1487,6 +1494,7 @@ jobs:
         if: needs.meta.outputs.channel == 'release'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PRODUCT_REF: ${{ inputs.product_ref }}
         run: |
           gh release delete release --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag \
             || echo "no previous release Release; skipping"
@@ -1497,6 +1505,11 @@ jobs:
             echo "|---|---|"
             echo "| Version | \`${{ needs.meta.outputs.version }}\` (what \`changji --version\` prints) |"
             echo "| Commit | ${GITHUB_SHA} |"
+            # **Which product ref went into this.** The web UI is baked into
+            # the binary and comes from the other repository, so "which commit"
+            # above only answers half the question. When this run was triggered
+            # from over there, the branch it carried is the half that changed.
+            [ -n "$PRODUCT_REF" ] && echo "| Web UI from | \`$PRODUCT_REF\` |"
             echo "| Built | $(date -u '+%Y-%m-%d %H:%M UTC') |"
             echo
             echo "## Downloads"
@@ -1531,6 +1544,7 @@ jobs:
         if: needs.meta.outputs.channel == 'beta'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PRODUCT_REF: ${{ inputs.product_ref }}
         run: |
           gh release delete beta --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag \
             || echo "no previous beta Release; skipping"
@@ -1548,6 +1562,9 @@ jobs:
             echo "|---|---|"
             echo "| Branch | \`${GITHUB_REF_NAME}\` |"
             echo "| Commit | ${GITHUB_SHA} |"
+            # See the note in the stable step: this names the branch of THIS
+            # repo, and the web UI comes from the other one.
+            [ -n "$PRODUCT_REF" ] && echo "| Web UI from | \`$PRODUCT_REF\` |"
             echo "| Version | \`${{ needs.meta.outputs.version }}\` (what \`changji --version\` prints) |"
             echo "| Built | $(date -u '+%Y-%m-%d %H:%M UTC') |"
             echo
