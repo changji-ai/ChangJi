@@ -1,0 +1,1540 @@
+# Build for every platform and architecture, then ship it.
+#
+# **Two roads; which one you take depends on what you pushed:**
+#
+#   a `v*` tag     → a proper Release, the tag is the version
+#                      git tag v1.2.0 && git push origin v1.2.0
+#   any branch     → a rolling prerelease, **always on the same `beta` tag**
+#   run by hand    → same, also beta
+#
+# The beta road is "last push wins": each run deletes the `beta` Release and
+# its tag and rebuilds them against this commit. So there is only ever one set
+# of packages up there, never a pile of leftovers from some branch six months
+# ago — **stale artifacts mixed in are worse than none**, because whoever is
+# downloading cannot tell which one is current.
+#
+# `beta` is a prerelease, so `/releases/latest` does not point at it and
+# install.sh still installs the stable build by default. To get beta:
+# `CHANGJI_VERSION=beta bash install.sh`.
+#
+# The six cells:
+#
+#   linux-x64     ubuntu-22.04       22.04 rather than 24.04: glibc 2.35 instead
+#                                    of 2.39, so the binary still runs on older
+#                                    distributions
+#   linux-arm64   ubuntu-22.04-arm   same. Raspberry Pi, ARM servers, Linux VMs
+#                                    on Apple silicon
+#   macos-arm64   macos-15
+#   macos-x64     macos-15-intel     Intel Macs. The macos-13 images are retired
+#   windows-x64   windows-2022
+#   windows-arm64 windows-11-arm     native arm64 MSVC, not a cross build
+#
+# To move a target to a different runner, edit that one matrix row; nothing
+# else needs to change.
+#
+# Those six are **CPU-only** packages. GPU builds are a separate tier
+# (build-gpu, below), two roads each on Windows and Linux: cuda / vulkan, named
+# `changji-<os>-x64-<backend>`. **Tagged releases and beta build the same set**
+# — beta carries the NVIDIA packages and the vendor-agnostic Vulkan packages
+# too, not just CPU. To save time on a manual run, tick "CPU packages only".
+#
+# ⚠️ **Every branch push is ten cells**: six CPU platforms each building
+# sd.cpp + llama.cpp (tens of minutes), plus four GPU cells (one to two hours
+# each, tens of core-hours together). A docs-only commit pays the same. Add
+# paths-ignore under on.push if that becomes too expensive.
+
+name: Release
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      skip_gpu:
+        description: 'CPU packages only (skip the four CUDA / Vulkan cells, saves hours)'
+        type: boolean
+        default: false
+
+# Two pushes to the same branch in a row: cancel the unfinished one. Only the
+# last result survives on beta anyway, so finishing the earlier run is wasted
+# machine time.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---- What this run is ----
+  #
+  # The version and the publishing channel are worked out in one place; every
+  # later job just reads them. Scattering `if: startsWith(github.ref, ...)`
+  # around means four places to edit and one of them will be missed — and the
+  # way that shows up is "the binaries carry the right version, they just went
+  # to the wrong place".
+  meta:
+    name: Where this run goes
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      channel: ${{ steps.v.outputs.channel }}
+      gpu: ${{ steps.v.outputs.gpu }}
+    steps:
+      # ⚠️ **Two checkouts, and the order matters.**
+      #
+      # This repository holds the engine only. The web UI, the desktop shell
+      # and the brand assets live in the private product repository, which the
+      # packaging pipeline pulls in as well.
+      #
+      # Layout that every path in these workflow files assumes:
+      #
+      #   changji/            <- the private product repo (webapp/, desktop/, brand/)
+      #   changji/cpp/        <- THIS repo, laid over the stale copy in there
+      #
+      # The product repo carries its own copy of `cpp/`, which is whatever was
+      # last committed over there — not necessarily this commit. It is removed
+      # and replaced. Build the wrong core and nothing in the output says so.
+      #
+      # ⚠️ **`fetch-depth: 0` on this repo.** The version is *counted*
+      # (`cpp/tools/version.sh` asks git how many commits separate the commit
+      # that set the current prefix from HEAD). The default single-commit clone
+      # does not contain that commit, so the count is always 0 — silently.
+      - name: Check out the product repo
+        uses: actions/checkout@v4
+        with:
+          repository: integemjack/changji
+          token: ${{ secrets.CHANGJI_PRODUCT_TOKEN }}
+          path: changji
+
+      - name: Lay this repo's core over changji/cpp
+        run: rm -rf changji/cpp
+
+      - uses: actions/checkout@v4
+        with:
+          path: changji/cpp
+          fetch-depth: 0
+
+      - id: v
+        env:
+          # Empty on a push event — only a manual run sets it.
+          SKIP_GPU: ${{ inputs.skip_gpu }}
+        run: |
+          # **The four GPU cells run by default**, for tags and branch pushes
+          # alike: beta is what people actually try, and a CPU-only beta means
+          # what they try is "it works, but it is absurdly slow" — feedback
+          # from that is worthless. The price is tens of core-hours per branch
+          # push. To skip it for a copy-edit commit, run the workflow by hand
+          # and tick "CPU packages only".
+          if [ "$SKIP_GPU" = "true" ]; then
+            echo "gpu=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "gpu=true"  >> "$GITHUB_OUTPUT"
+          fi
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            echo "version=${GITHUB_REF_NAME}"  >> "$GITHUB_OUTPUT"
+            echo "channel=release"             >> "$GITHUB_OUTPUT"
+          else
+            # **The version comes from the prefix in CMake** (decided
+            # 2026-09-21): `<prefix>-<commits since the prefix was set>`, and
+            # changing the prefix restarts the count at 0. The rule and the
+            # algorithm live in `cpp/tools/version.sh`.
+            #
+            # The branch name is appended: the same commit may have been built
+            # on two branches, and whoever downloads it needs to tell them
+            # apart. Slashes become dashes — this ends up in a filename, and a
+            # slash in a filename bites eventually.
+            echo "version=$(sh changji/cpp/tools/version.sh)-${GITHUB_REF_NAME//\//-}" >> "$GITHUB_OUTPUT"
+            echo "channel=beta" >> "$GITHUB_OUTPUT"
+          fi
+          cat "$GITHUB_OUTPUT"
+
+  # ---- Web UI ----
+  #
+  # Lives in `webapp.yml` because the desktop pipeline needs it too. Why it is
+  # rebuilt on every run is explained at the top of that file.
+  webapp:
+    uses: ./.github/workflows/webapp.yml
+    secrets: inherit
+
+  # ---- Unit tests ----
+  #
+  # **sd.cpp / llama.cpp are not linked here**: this tier exists to give an
+  # answer in minutes. Those two take tens of minutes to build, and the test
+  # target does not link them anyway (it tests the stubs used when they are
+  # absent).
+  #
+  # Both platforms run: the path layer branches per platform and
+  # `user_dirs.json` stores a separate expectation for macos / linux / windows,
+  # so running only on Linux means the macOS half is never checked. Windows is
+  # covered by the build below (if it compiles, nothing is broken there).
+  test:
+    name: Unit tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    steps:
+      # Two checkouts; see the meta job for why.
+      - name: Check out the product repo
+        uses: actions/checkout@v4
+        with:
+          repository: integemjack/changji
+          token: ${{ secrets.CHANGJI_PRODUCT_TOKEN }}
+          path: changji
+      - name: Lay this repo's core over changji/cpp
+        run: rm -rf changji/cpp
+      - uses: actions/checkout@v4
+        with:
+          path: changji/cpp
+
+      - name: Install ninja
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo apt-get update && sudo apt-get install -y ninja-build
+          else
+            brew install ninja
+          fi
+
+      # CHANGJI_SSL=OFF: the test target **does not link httplib**, so it does
+      # not need OpenSSL either. Leaving it on would make this tier wait for
+      # the openssl job below, which defeats the point of a tier that answers
+      # in minutes.
+      - name: Configure
+        run: |
+          cmake -S changji/cpp -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCHANGJI_SD=OFF \
+            -DCHANGJI_LLAMA=OFF \
+            -DCHANGJI_SSL=OFF \
+            -DCHANGJI_BUILD_TESTS=ON
+
+      - name: Build
+        run: cmake --build build --target changji_tests --parallel
+
+      - name: Run
+        run: ctest --test-dir build --output-on-failure
+
+  # ---- Desktop shell: it has to compile on all three platforms ----
+  #
+  # **This cell compiles; it does not package.** The desktop deliverables are
+  # not settled yet (the macOS packaging script has been exercised; the Windows
+  # and Linux ones were written 2026-09-21 and **have never been run on those
+  # systems** — each says so at the top of the file). But "it compiles" earns a
+  # cell on its own: the desktop shell has per-platform code
+  # (`keep_awake.cpp` is three different implementations, and the font section
+  # of `main.cpp`), and while it was written on a Mac **no compiler ever looked
+  # at the Windows and Linux branches**.
+  #
+  # Red here beats a user installing it and having nothing open.
+  #
+  # ⚠️ `CHANGJI_DESKTOP=ON` needs Qt, so this cell is slower than the others
+  # (a few minutes to install Qt). It and the unit-test tier are two different
+  # things: that one deliberately has no Qt so it can answer in minutes.
+  desktop-build:
+    name: Does the desktop shell compile (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2022]
+    steps:
+      # Two checkouts; see the meta job for why. The desktop sources come from
+      # the product repo, so this job cannot run on this repository alone.
+      - name: Check out the product repo
+        uses: actions/checkout@v4
+        with:
+          repository: integemjack/changji
+          token: ${{ secrets.CHANGJI_PRODUCT_TOKEN }}
+          path: changji
+      - name: Lay this repo's core over changji/cpp
+        run: rm -rf changji/cpp
+      - uses: actions/checkout@v4
+        with:
+          path: changji/cpp
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.1'
+          # ⚠️ **qtwebsockets is not optional.** It is a separate module, not
+          # part of qtbase — without it `find_package(... WebSockets)` fails at
+          # configure time, and this cell was red from the day the desktop
+          # shell was added (noticed 2026-09-21: all three platforms reporting
+          # Failed to find required Qt component "WebSockets").
+          modules: 'qtmultimedia qtwebsockets'
+          cache: true
+
+      - name: Install ninja
+        uses: seanmiddleditch/gha-setup-ninja@v5
+
+      # Same reason as the unit-test cell: all that matters here is whether the
+      # desktop files compile, so there is no need to drag image generation,
+      # local LLMs and OpenSSL along.
+      - name: Configure
+        run: >
+          cmake -S changji/cpp -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCHANGJI_SD=OFF
+          -DCHANGJI_LLAMA=OFF
+          -DCHANGJI_SSL=OFF
+          -DCHANGJI_DESKTOP=ON
+
+      - name: Build
+        run: cmake --build build --target changji-desktop --parallel
+
+  # ---- OpenSSL (static) ----
+  #
+  # Lives in `openssl.yml` because the desktop pipeline needs it too. Copying
+  # that whole bundle — version, sha256, six per-platform Configure lines, the
+  # static-only assertion — into a second file means that the day somebody
+  # bumps the version they bump one copy, and the packages built from the other
+  # still ship. Why we do not use the runner's OpenSSL is explained at the top
+  # of that file.
+  openssl:
+    uses: ./.github/workflows/openssl.yml
+
+  # ---- The six platforms ----
+  build:
+    name: Build ${{ matrix.target }}
+    needs: [meta, webapp, test, openssl]
+    runs-on: ${{ matrix.runner }}
+    env:
+      # Baked into the binary; `changji --version` prints it — the first thing
+      # anyone says in a bug report.
+      CHANGJI_VERSION: ${{ needs.meta.outputs.version }}
+    strategy:
+      # One cell failing must not take the others down: the six platforms each
+      # have their own traps, and seeing all of them at once beats fixing one
+      # and waiting another round.
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x64
+            runner: ubuntu-22.04
+          - target: linux-arm64
+            runner: ubuntu-22.04-arm
+          - target: macos-arm64
+            runner: macos-15
+          - target: macos-x64
+            runner: macos-15-intel
+          - target: windows-x64
+            runner: windows-2022
+            arch: x64
+          - target: windows-arm64
+            runner: windows-11-arm
+            arch: ARM64
+            # **arm64 must use clang-cl, not MSVC.**
+            # llama.cpp's ggml/src/ggml-cpu/CMakeLists.txt says outright
+            # `MSVC is not supported for ARM, use clang` and stops with a
+            # configure-time FATAL_ERROR. The x64 cell has no such limit and
+            # keeps using MSVC.
+            toolset: ClangCL
+    steps:
+      # Two checkouts; see the meta job for why.
+      - name: Check out the product repo
+        uses: actions/checkout@v4
+        with:
+          repository: integemjack/changji
+          token: ${{ secrets.CHANGJI_PRODUCT_TOKEN }}
+          path: changji
+      - name: Lay this repo's core over changji/cpp
+        shell: bash
+        run: rm -rf changji/cpp
+      - uses: actions/checkout@v4
+        with:
+          path: changji/cpp
+
+      # CHANGJI_LLAMA=ON needs a Python: llama.cpp is patched in place with
+      # leejet's extensions after it is fetched (patches/apply_to_llamacpp.py),
+      # and configure stops dead if it cannot find an interpreter. The runners
+      # ship different Python versions, so pin one rather than find out the day
+      # an image changes.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: bundled-webapp
+          path: changji/cpp/src/http/
+
+      # The static libraries from the openssl job above. Its artifact names are
+      # exactly these six matrix.target values, one to one.
+      - uses: actions/download-artifact@v4
+        with:
+          name: openssl-${{ matrix.target }}
+          path: openssl
+
+      - name: Install ninja (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo apt-get update && sudo apt-get install -y ninja-build
+          else
+            brew install ninja
+          fi
+
+      # **GGML_NATIVE=OFF is the single most important switch in this file.**
+      #
+      # ggml turns it on by default, i.e. -march=native: the binary comes out
+      # carrying the instruction set of **the machine that built it**. Ship
+      # that and anyone on an older CPU gets SIGILL / "illegal instruction" on
+      # startup — a crash indistinguishable from "this program is buggy".
+      # With it off, x86 targets the AVX2 baseline (Haswell, 2013) and arm64
+      # targets generic armv8.
+      #
+      # Two more things are pinned on macOS:
+      #   - deployment target 13.3, not whatever the runner is running. Without
+      #     it the binary demands macOS 15, and most people who bought an Intel
+      #     Mac never upgraded that far.
+      #   - Metal shaders embedded in the binary. Otherwise it looks for a
+      #     .metallib next to itself at runtime, and "single file" stops being
+      #     true.
+      - name: Configure (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          EXTRA=""
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            EXTRA="-DCMAKE_OSX_DEPLOYMENT_TARGET=13.3 -DGGML_METAL_EMBED_LIBRARY=ON"
+          fi
+          cmake -S changji/cpp -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCHANGJI_VERSION="$CHANGJI_VERSION" \
+            -DCHANGJI_SD=ON \
+            -DCHANGJI_LLAMA=ON \
+            -DCHANGJI_BUILD_TESTS=OFF \
+            -DGGML_NATIVE=OFF \
+            -DOPENSSL_ROOT_DIR="$PWD/openssl" \
+            $EXTRA
+
+      # **Windows uses the Visual Studio generator, not Ninja.**
+      # The Ninja road would need vcvarsall.bat called first, and the two
+      # Windows runners do not agree on where VS lives or which components are
+      # installed. The VS generator finds its own toolchain, one argument
+      # covers both architectures, and that removes a whole class of "only the
+      # arm64 cell is red" failures.
+      - name: Configure (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $tset = "${{ matrix.toolset }}"
+          $targs = if ($tset) { @("-T", $tset) } else { @() }
+          $ssl = ((Get-Location).Path -replace '\\','/') + "/openssl"
+          cmake -S changji/cpp -B build -G "Visual Studio 17 2022" -A ${{ matrix.arch }} @targs `
+            -DCHANGJI_VERSION="$env:CHANGJI_VERSION" `
+            -DCHANGJI_SD=ON `
+            -DCHANGJI_LLAMA=ON `
+            -DCHANGJI_BUILD_TESTS=OFF `
+            -DGGML_NATIVE=OFF `
+            -DOPENSSL_ROOT_DIR="$ssl"
+
+      # Only the changji target. The test target already ran in the tier above;
+      # building it again here is tens of minutes of waiting for nothing.
+      - name: Build
+        run: cmake --build build --config Release --target changji --parallel
+
+      # Spend one second asking whether the thing that came out actually runs.
+      # When cross-compilation, static linking or Metal embedding go wrong the
+      # artifact looks perfectly normal; only running it says otherwise. Both
+      # arm64 cells are native runners, so they can.
+      - name: Does it start (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          ./build/changji --version
+          test "$(./build/changji --version)" = "$CHANGJI_VERSION"
+
+      # **Running on the build machine proves nothing.**
+      #
+      # The step above is green on the runner while the user who unpacks the
+      # archive gets
+      # `dyld: Library not loaded: /opt/homebrew/opt/brotli/...` — because the
+      # runner has Homebrew and those libraries really are at that path. This
+      # class of failure, linking against something only the build machine has,
+      # is findable only by reading the artifact's dependency table. Running it
+      # will never find it.
+      #
+      # The rule: nothing outside /usr/lib and /System. @rpath/@loader_path are
+      # out too — we ship a single file, there is no lib directory beside it.
+      - name: No build-machine-only libraries (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          otool -L build/changji
+          bad=$(otool -L build/changji | tail -n +2 | awk '{print $1}' \
+                | grep -Ev '^(/usr/lib/|/System/)' || true)
+          if [ -n "$bad" ]; then
+            echo "::error::The artifact depends on libraries only the build machine has:"
+            echo "$bad"
+            exit 1
+          fi
+
+      - name: Does it start (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $v = & build/Release/changji.exe --version
+          Write-Host $v
+          if ($v -ne $env:CHANGJI_VERSION) { throw "version mismatch: $v" }
+
+      # ---- macOS: sign, then notarize ----
+      #
+      # Without this the user's first contact with the product is macOS
+      # refusing to run it: on a downloaded, unsigned binary Gatekeeper says
+      # "changji is damaged and can't be opened. You should move it to the
+      # Bin." **That wording does not mention signing at all**, so the honest
+      # reading is that the download is corrupt — people re-download, get the
+      # same message, and conclude the project is broken.
+      #
+      # ⚠️ **`secrets` is not available in an `if:` expression.** GitHub's
+      # context table allows `github / needs / strategy / matrix / job /
+      # runner / env / vars / steps / inputs` there and nothing else. Writing
+      # `if: secrets.FOO != ''` is not an error — the expression is just always
+      # false and the step never runs. (Same trap as `matrix` in a job-level
+      # `if`; see the note in openssl.yml.) So the secrets come in through
+      # `env:` and the decision is made inside the script.
+      - name: Import the signing certificate (macOS)
+        if: runner.os == 'macOS'
+        env:
+          CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          CHANNEL: ${{ needs.meta.outputs.channel }}
+        run: |
+          if [ -z "$CERT_P12" ]; then
+            # **A tagged release without a certificate is a hard stop.** An
+            # unsigned stable build is worse than no build: it reaches people
+            # who are not following the project and hits them with the
+            # "damaged" dialogue above.
+            if [ "$CHANNEL" = "release" ]; then
+              echo "::error::MACOS_CERT_P12 is not set, so this build cannot be signed."
+              echo "An unsigned stable release tells every macOS user the download is damaged."
+              echo "Set the secrets with tools/setup_signing_secrets.sh, then re-run."
+              exit 1
+            fi
+            echo "::warning::No signing certificate; this macOS beta ships unsigned."
+            echo "CHANGJI_SIGNED=no" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          # A throwaway keychain, not the login one: it is deleted with the
+          # runner, and nothing that follows can reach any other credential.
+          KEYCHAIN="$RUNNER_TEMP/changji-signing.keychain-db"
+          KPASS=$(openssl rand -base64 24)
+          echo "KEYCHAIN_PATH=$KEYCHAIN" >> "$GITHUB_ENV"
+          security create-keychain -p "$KPASS" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KPASS" "$KEYCHAIN"
+          printf '%s' "$CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" \
+            -P "$CERT_PASSWORD" -T /usr/bin/codesign -f -A
+          rm -f "$RUNNER_TEMP/cert.p12"
+          # Without set-key-partition-list, codesign blocks on a GUI password
+          # prompt that nobody is there to answer, and the job hangs until it
+          # times out rather than failing.
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KPASS" "$KEYCHAIN" > /dev/null
+          security list-keychains -d user -s "$KEYCHAIN" \
+            $(security list-keychains -d user | tr -d '"')
+          echo "CHANGJI_SIGNED=yes" >> "$GITHUB_ENV"
+          security find-identity -v -p codesigning "$KEYCHAIN"
+
+      # `--options runtime` (the hardened runtime) and `--timestamp` are both
+      # required for notarisation. Leave either out and the submission is
+      # rejected minutes later with a message that does not name the flag.
+      - name: Sign (macOS)
+        if: runner.os == 'macOS'
+        env:
+          SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+        run: |
+          [ "$CHANGJI_SIGNED" = "yes" ] || { echo "not signed; skipping"; exit 0; }
+          if [ -z "$SIGN_IDENTITY" ]; then
+            echo "::error::MACOS_CERT_P12 is set but MACOS_SIGN_IDENTITY is not."
+            echo "It is the full name, e.g. 'Developer ID Application: Name (TEAMID)';"
+            echo "the import step above printed the identities in this keychain."
+            exit 1
+          fi
+          codesign --force --options runtime --timestamp \
+            --keychain "$KEYCHAIN_PATH" --sign "$SIGN_IDENTITY" build/changji
+          codesign --verify --strict --verbose=2 build/changji
+
+      # **Notarisation takes a .zip, and the ticket cannot be stapled.**
+      #
+      # `notarytool` accepts .dmg, .pkg and .zip only — never a .tar.gz, which
+      # is what we ship. And `stapler` attaches a ticket to bundles (.app,
+      # .dmg, .pkg), **not to a bare executable**. So: zip the signed binary
+      # purely to submit it, and ship the tar.gz as before. Apple records the
+      # ticket against the binary's code directory hash, and Gatekeeper checks
+      # for it **online** on the user's machine. That is the normal arrangement
+      # for a standalone tool; the one consequence worth knowing is that a
+      # first launch with no network falls back to the unnotarised path.
+      - name: Notarize (macOS)
+        if: runner.os == 'macOS'
+        env:
+          NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+          NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          NOTARY_ISSUER: ${{ secrets.MACOS_NOTARY_ISSUER }}
+          CHANNEL: ${{ needs.meta.outputs.channel }}
+        run: |
+          [ "$CHANGJI_SIGNED" = "yes" ] || { echo "not signed; nothing to notarize"; exit 0; }
+          if [ -z "$NOTARY_KEY" ] || [ -z "$NOTARY_KEY_ID" ] || [ -z "$NOTARY_ISSUER" ]; then
+            if [ "$CHANNEL" = "release" ]; then
+              echo "::error::Signed but the notarisation secrets are missing."
+              echo "A signed-but-unnotarised binary still gets stopped by Gatekeeper;"
+              echo "the dialogue just changes wording. Set MACOS_NOTARY_KEY,"
+              echo "MACOS_NOTARY_KEY_ID and MACOS_NOTARY_ISSUER, then re-run."
+              exit 1
+            fi
+            echo "::warning::Signed but not notarized (notarisation secrets missing)."
+            echo "CHANGJI_NOTARIZED=no" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          KEY="$RUNNER_TEMP/notary.p8"
+          printf '%s' "$NOTARY_KEY" | base64 --decode > "$KEY"
+          ditto -c -k build/changji "$RUNNER_TEMP/notarize.zip"
+          set +e
+          xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" \
+            --key "$KEY" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER" \
+            --wait --timeout 30m --output-format json > "$RUNNER_TEMP/notary.json"
+          rc=$?
+          set -e
+          cat "$RUNNER_TEMP/notary.json"
+          id=$(python3 -c "import json,sys;print(json.load(open(sys.argv[1])).get('id',''))" \
+               "$RUNNER_TEMP/notary.json" 2>/dev/null || true)
+          status=$(python3 -c "import json,sys;print(json.load(open(sys.argv[1])).get('status',''))" \
+                   "$RUNNER_TEMP/notary.json" 2>/dev/null || true)
+          if [ "$status" != "Accepted" ] || [ $rc -ne 0 ]; then
+            # **Print the log.** "Invalid" on its own says nothing; the log
+            # names the file and the reason (almost always a missing hardened
+            # runtime or a missing secure timestamp), and without it the next
+            # person guesses.
+            echo "::error::Notarisation did not succeed (status=$status)."
+            [ -n "$id" ] && xcrun notarytool log "$id" \
+              --key "$KEY" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER" || true
+            rm -f "$KEY"
+            exit 1
+          fi
+          rm -f "$KEY"
+          echo "CHANGJI_NOTARIZED=yes" >> "$GITHUB_ENV"
+
+      # **Ask the system, not the build log.**
+      #
+      # Every step above can be green while the binary is still rejected on a
+      # user's machine — a signature with no timestamp, a certificate that is
+      # not a Developer ID, a notarisation ticket that was never actually
+      # registered. `-R="notarized" --check-notarization` is the one check that
+      # goes and asks Apple the same question Gatekeeper will ask. It needs
+      # network, which the runner has.
+      - name: Check what a user's Mac will see (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          [ "$CHANGJI_SIGNED" = "yes" ] || { echo "unsigned beta; nothing to check"; exit 0; }
+          codesign -dvvv build/changji 2>&1 | tee "$RUNNER_TEMP/sig.txt"
+          grep -q 'Authority=Developer ID Application' "$RUNNER_TEMP/sig.txt" || {
+            echo "::error::Not signed with a Developer ID Application certificate."
+            echo "A Mac App Distribution or development certificate signs fine here"
+            echo "and is refused on every machine that is not this one."
+            exit 1
+          }
+          grep -q 'Timestamp=' "$RUNNER_TEMP/sig.txt" || {
+            echo "::error::No secure timestamp — the signature expires with the certificate."
+            exit 1
+          }
+          grep -qi 'flags=.*runtime' "$RUNNER_TEMP/sig.txt" || {
+            echo "::error::The hardened runtime is not enabled (codesign --options runtime)."
+            exit 1
+          }
+          if [ "$CHANGJI_NOTARIZED" = "yes" ]; then
+            codesign -vvvv -R="notarized" --check-notarization build/changji
+            echo "Apple confirms the ticket: this is what Gatekeeper will see."
+          fi
+
+      - name: Package (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p dist stage
+          # -p preserves the mode; on macOS a plain cp is fine but the
+          # signature lives in the file itself, so copy, never rewrite.
+          cp build/changji stage/
+          cp changji/README.md stage/
+          if [ "$RUNNER_OS" = "macOS" ] && [ "$CHANGJI_SIGNED" = "yes" ]; then
+            # Copying can strip nothing here, but check anyway: a broken
+            # signature inside the archive is invisible until a user downloads
+            # it, and this costs a second.
+            codesign --verify --strict stage/changji
+          fi
+          tar -czf "dist/changji-${{ matrix.target }}.tar.gz" -C stage .
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist, stage | Out-Null
+          Copy-Item build/Release/changji.exe stage/
+          Copy-Item changji/README.md stage/
+          Compress-Archive -Path stage/* -DestinationPath "dist/changji-${{ matrix.target }}.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: changji-${{ matrix.target }}
+          path: dist/*
+
+  # ---- The four GPU cells ----
+  #
+  # The six above are **CPU-only** packages: they work, but a single shot is
+  # measured in hours. These build with a GPU backend, two roads each on
+  # Windows and Linux:
+  #
+  #   *-cuda     native NVIDIA. The fastest, and the only one this project has
+  #              run on real hardware for any length of time.
+  #   *-vulkan   works on NVIDIA, AMD and Intel. Slower than native, but it
+  #              runs as soon as the graphics driver is there —
+  #              **AMD and Intel users take this one.**
+  #
+  # **The native AMD / Intel backends (rocm / sycl) were removed 2026-09-14.**
+  # In the round where seven of eight cells were red they were the four hardest
+  # to keep alive: AMD's and Intel's Windows installer URLs rot every quarter,
+  # ROCm fills the runner with a dozen gigabytes, and the SYCL artifact is not
+  # a single file — the user has to install the oneAPI runtime first. Vulkan
+  # already covers both vendors' cards. CHANGJI_SD_HIP / CHANGJI_SD_SYCL are
+  # still in CMake and still work for a local build; to bring them back to CI,
+  # read this file's git history.
+  #
+  # **This tier runs on every branch push.** A cell easily takes one to two
+  # hours (each extra GPU architecture rebuilds the several hundred ggml .cu
+  # files again) and four of them is tens of core-hours. That is expensive on
+  # purpose: beta is what people actually try, and a CPU-only beta hands them
+  # something absurdly slow to judge the product by. Triggers:
+  #
+  #   tag           → runs
+  #   branch push   → runs (beta carries the same four packages as a release)
+  #   manual run    → runs; only "CPU packages only" skips it
+  #
+  # **No cell here blocks the release.** publish waits on the six CPU cells
+  # only; however many GPU packages came out is what gets published, and the
+  # table in the release notes is generated from what is actually in dist/.
+  # The reason is that these four depend on two vendors' installers, and those
+  # download URLs rot — holding an entire Release hostage to a dead link is not
+  # worth it.
+  build-gpu:
+    name: Build ${{ matrix.target }}
+    needs: [meta, webapp, test, openssl]
+    if: needs.meta.outputs.gpu == 'true'
+    runs-on: ${{ matrix.runner }}
+    # 360 is GitHub's ceiling, and this really does use it. If a cell times
+    # out, shorten one of the two architecture lists below.
+    timeout-minutes: 360
+    env:
+      CHANGJI_VERSION: ${{ needs.meta.outputs.version }}
+
+      # **Which NVIDIA architectures to build for.** `-real` emits machine
+      # code, `-virtual` emits PTX. 75-virtual sits at the bottom as the
+      # fallback: **PTX only JITs forward, never backward**, so every card not
+      # listed below (RTX 20xx / A100 / H100 …) still starts — each kernel is
+      # compiled on first use, which is slow but is not "does not run".
+      # Each entry adds roughly linearly to this cell's runtime.
+      CUDA_ARCH: '75-virtual;86-real;89-real;120-real'
+
+      # Pinned, for the same reason as the GIT_TAGs in CMakeLists.
+      # CUDA must be ≥ 12.8 or sm_120 (the 5090) will not build.
+      #
+      # **Raised from 12.8 to 13.2 on 2026-09-17** (the user asked for CUDA 13).
+      #
+      # ⚠️ **Why 13.2 and not a newer 13.3 / 13.4**: one of the four packages
+      # installed on Linux is `cuda-cccl` (ggml-cuda uses cub/thrust), and in
+      # NVIDIA's ubuntu2204 repository it **stops at 13-2** — from 13-3 on it
+      # is simply gone, with no indication of what replaced it. Pin higher and
+      # this cell dies at the apt step. All four packages exist at 13-2 and
+      # their versions agree (nvcc / cudart-dev / cccl are all 13.2.86).
+      #
+      # The architecture line needs no change: what CUDA 13 dropped is
+      # Maxwell / Pascal / Volta (the release notes say "corresponding to
+      # compute capabilities earlier than Turing"), and our floor is already
+      # 75-virtual, which is Turing.
+      CUDA_APT: '13-2'
+      CUDA_DIR: '/usr/local/cuda-13.2'
+      CUDA_WIN_VER: '13.2.2'
+      CUDA_WIN_COMP: '13.2'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: linux-x64-cuda,     runner: ubuntu-22.04, gpu: cuda }
+          - { target: linux-x64-vulkan,   runner: ubuntu-22.04, gpu: vulkan }
+          - { target: windows-x64-cuda,   runner: windows-2022, gpu: cuda }
+          - { target: windows-x64-vulkan, runner: windows-2022, gpu: vulkan }
+    steps:
+      # Two checkouts; see the meta job for why.
+      - name: Check out the product repo
+        uses: actions/checkout@v4
+        with:
+          repository: integemjack/changji
+          token: ${{ secrets.CHANGJI_PRODUCT_TOKEN }}
+          path: changji
+      - name: Lay this repo's core over changji/cpp
+        shell: bash
+        run: rm -rf changji/cpp
+      - uses: actions/checkout@v4
+        with:
+          path: changji/cpp
+
+      # A runner has twenty-odd gigabytes free, and CUDA's intermediates (one
+      # set per architecture) are more than ten. **Not clearing space shows up
+      # as "No space left on device" halfway through the build**, buried in
+      # thousands of lines of compiler output where it reads like one source
+      # file failing to compile.
+      - name: Free up disk space (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          df -h /
+          # **Leave $AGENT_TOOLSDIRECTORY alone.** setup-python installs into
+          # it in the next step; deleting it costs a re-download of Python at
+          # best and fails that step outright at worst.
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /usr/local/share/boost /usr/local/.ghcup \
+                      /opt/hostedtoolcache/CodeQL
+          sudo apt-get clean
+          df -h /
+
+      # Same reason as the tier above: CHANGJI_LLAMA=ON needs Python to apply
+      # leejet's patches.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: bundled-webapp
+          path: changji/cpp/src/http/
+
+      # All four GPU cells are x64, so only the linux-x64 / windows-x64
+      # artifacts are needed.
+      - uses: actions/download-artifact@v4
+        with:
+          name: openssl-${{ runner.os == 'Linux' && 'linux-x64' || 'windows-x64' }}
+          path: openssl
+
+      - name: Install ninja (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ninja-build
+
+      # ---- Vendor toolchains ----
+
+      # **Install only the packages actually used; not the `cuda` metapackage.**
+      # That metapackage starts at 8 GB (nsight, the profiler and the samples
+      # all come along). What is needed here is nvcc, cudart and cublas, plus
+      # CCCL — ggml-cuda uses cub/thrust.
+      - name: Install CUDA (Linux)
+        if: runner.os == 'Linux' && matrix.gpu == 'cuda'
+        run: |
+          curl -fsSLo /tmp/cuda-keyring.deb \
+            https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb
+          sudo dpkg -i /tmp/cuda-keyring.deb
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            cuda-nvcc-${CUDA_APT} cuda-cudart-dev-${CUDA_APT} \
+            cuda-cccl-${CUDA_APT} libcublas-dev-${CUDA_APT}
+          echo "${CUDA_DIR}/bin" >> "$GITHUB_PATH"
+          echo "CUDA_PATH=${CUDA_DIR}" >> "$GITHUB_ENV"
+          "${CUDA_DIR}/bin/nvcc" --version
+
+      # The network installer, naming only the components we want. `-s` is
+      # silent.
+      - name: Install CUDA (Windows)
+        if: runner.os == 'Windows' && matrix.gpu == 'cuda'
+        shell: pwsh
+        run: |
+          $url = "https://developer.download.nvidia.com/compute/cuda/$env:CUDA_WIN_VER/network_installers/cuda_${env:CUDA_WIN_VER}_windows_network.exe"
+          Write-Host "downloading $url"
+          curl.exe -fL --retry 3 -o cuda.exe $url
+          if ($LASTEXITCODE -ne 0) { throw "CUDA installer download failed: $url" }
+          $c = $env:CUDA_WIN_COMP
+          # **`crt` and `nvvm` were split out of nvcc in CUDA 13**; on 12.x
+          # they did not need listing. Missing `nvvm` looks nothing like a
+          # missing component: it installs, nvcc.exe is there, and five minutes
+          # later CMake fails at `enable_language(CUDA)` with one line of log,
+          #     #$ ""%CICC_PATH%\cicc" … The system cannot find the path
+          # — `cicc` (the device-side front end) lives in nvvm\bin, and
+          # %CICC_PATH% is derived from its location by nvcc.profile, so
+          # without the package it expands to nothing. Run #102 of 2026-09-17
+          # died exactly this way on windows-x64-cuda.
+          $comp = @("nvcc","crt","nvvm","cudart","cublas","cublas_dev","thrust",
+                    "cuda_profiler_api","visual_studio_integration") |
+                  ForEach-Object { "${_}_$c" }
+          Start-Process -Wait -FilePath .\cuda.exe -ArgumentList (@("-s") + $comp)
+          $cuda = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v$c"
+          # **Check them one at a time; do not just check nvcc.** Checking only
+          # nvcc means a missing nvvm blows up five minutes later, when CMake
+          # probes the compiler, with an error that reads as unrelated to this
+          # step (see above). One second here saves a whole CI round.
+          # **Only assert the two that are certain.** ptxas / fatbinary may
+          # have moved into the new nvptxcompiler / nvfatbin subpackages in
+          # CUDA 13; that has not been verified, and guessing here would fail
+          # builds that would otherwise have worked — worse than not checking.
+          foreach ($need in @("bin\nvcc.exe", "nvvm\bin\cicc.exe")) {
+            if (-not (Test-Path "$cuda\$need")) {
+              throw "CUDA installed but $cuda\$need is not there. A component name " +
+                    "or the version no longer matches — see Possible Subpackage " +
+                    "Names in the CUDA installation guide."
+            }
+          }
+          # **Both variables are needed.** MSBuild's CUDA integration reads the
+          # versioned one (CUDA_PATH_V13_2); CMake's find_program reads
+          # CUDA_PATH. Setting only one shows up as "configure passed, and the
+          # build says no CUDA toolset found".
+          "CUDA_PATH=$cuda" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "CUDA_PATH_V$($c -replace '\.','_')=$cuda" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "$cuda\bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+          # Belt and braces: when the installer fails to detect VS it silently
+          # omits the integration files, and CMake then reports "No CUDA
+          # toolset found", which does not look related to this step.
+          $bc = "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\MSBuild\Microsoft\VC\v170\BuildCustomizations"
+          $ext = "$cuda\extras\visual_studio_integration\MSBuildExtensions"
+          if ((Test-Path $ext) -and (Test-Path $bc)) {
+            Copy-Item "$ext\*" -Destination $bc -Force
+          }
+
+      # LunarG's SDK carries glslc, which ggml-vulkan needs before it can
+      # build: several hundred .comp shaders get compiled to SPIR-V first. The
+      # distribution's own libvulkan-dev has only headers and the loader, no
+      # glslc, and the build then reports "glslc not found" a quarter of an
+      # hour in.
+      - name: Install the Vulkan SDK (Linux)
+        if: runner.os == 'Linux' && matrix.gpu == 'vulkan'
+        run: |
+          curl -fsSL https://packages.lunarg.com/lunarg-signing-key-pub.asc \
+            | sudo tee /etc/apt/trusted.gpg.d/lunarg.asc > /dev/null
+          sudo curl -fsSLo /etc/apt/sources.list.d/lunarg-vulkan-jammy.list \
+            https://packages.lunarg.com/vulkan/lunarg-vulkan-jammy.list
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq vulkan-sdk
+          glslc --version
+
+      # **This URL is deliberately not version-pinned.** LunarG retires
+      # versioned download links fairly often, so pinning a specific version is
+      # the more fragile choice; and to us the Vulkan SDK is "a glslc and a set
+      # of headers", where version drift is a smaller risk than a dead link.
+      # The installed directory name contains the version, which is why the
+      # path below is discovered rather than hard-coded.
+      - name: Install the Vulkan SDK (Windows)
+        if: runner.os == 'Windows' && matrix.gpu == 'vulkan'
+        shell: pwsh
+        run: |
+          curl.exe -fL --retry 3 -o vulkan-sdk.exe `
+            "https://sdk.lunarg.com/sdk/download/latest/windows/vulkan_sdk.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Vulkan SDK download failed." }
+          Start-Process -Wait -FilePath .\vulkan-sdk.exe `
+            -ArgumentList "--accept-licenses","--default-answer","--confirm-command","install"
+          $sdk = Get-ChildItem "C:\VulkanSDK" -Directory -ErrorAction SilentlyContinue |
+                 Sort-Object Name | Select-Object -Last 1
+          if (-not $sdk) { throw "Vulkan SDK installed but C:\VulkanSDK is empty." }
+          "VULKAN_SDK=$($sdk.FullName)" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "$($sdk.FullName)\Bin"        | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+
+      # ---- Configure + build ----
+      #
+      # **Artifacts all land in build/out/.** The two systems use different
+      # generators (the VS generator puts things under Release/, Ninja puts
+      # them in the build root) while the verification and packaging steps that
+      # follow are shared; without this every one of them would have to branch
+      # again. The configuration-specific variable (..._RELEASE) does **not**
+      # append another Release/ subdirectory, so setting both is what makes the
+      # two generators agree on one location.
+
+      - name: Configure + build (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          EXTRA=()
+          case "${{ matrix.gpu }}" in
+            cuda)
+              # **CHANGJI_CUDA_STATIC: link the CUDA runtime in, so unpacking
+              # gives you one file.** Without it the archive is the executable
+              # plus 537 MB of .so (libcublasLt alone is 485 MB), and not one
+              # byte of those 537 MB varies with our code — while beta is
+              # deleted and rebuilt on every push, so it is re-uploaded every
+              # single run. Static linking pulls only the object files the
+              # linker actually references, so it is very likely smaller than
+              # what we have now.
+              # The Windows cell has no equivalent: NVIDIA does not ship a
+              # static cuBLAS. See the CHANGJI_CUDA_STATIC section in
+              # CMakeLists.
+              EXTRA+=(-DCHANGJI_SD_CUDA=ON "-DCHANGJI_CUDA_ARCH=$CUDA_ARCH"
+                      "-DCMAKE_CUDA_COMPILER=$CUDA_DIR/bin/nvcc"
+                      -DCHANGJI_CUDA_STATIC=ON) ;;
+            vulkan)
+              EXTRA+=(-DCHANGJI_SD_VULKAN=ON) ;;
+          esac
+          # $ORIGIN has to reach RUNPATH literally, hence the single quotes.
+          # Let the shell expand it and the rpath becomes an empty string —
+          # and the binary **still runs on the build machine** (those .so files
+          # are on the system path there). Only somebody unpacking the archive
+          # sees the missing-library error.
+          cmake -S changji/cpp -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCHANGJI_VERSION="$CHANGJI_VERSION" \
+            -DCHANGJI_SD=ON \
+            -DCHANGJI_LLAMA=ON \
+            -DCHANGJI_BUILD_TESTS=OFF \
+            -DGGML_NATIVE=OFF \
+            -DCMAKE_RUNTIME_OUTPUT_DIRECTORY="$PWD/out" \
+            -DCMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE="$PWD/out" \
+            -DOPENSSL_ROOT_DIR="$PWD/openssl" \
+            '-DCMAKE_BUILD_RPATH=$ORIGIN' \
+            "${EXTRA[@]}"
+          cmake --build build --target changji --parallel
+
+      # Windows uses the VS generator for the same reason as the tier above:
+      # it finds its own toolchain, with no vcvarsall.bat call first.
+      - name: Configure + build (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $out = ((Get-Location).Path -replace '\\','/') + "/out"
+          $ssl = ((Get-Location).Path -replace '\\','/') + "/openssl"
+          # **Both the [string[]] and the missing @ are required; drop either
+          # and the vulkan cell will not build.**
+          #
+          # PowerShell unwraps a single-element array into a plain string, and
+          # the vulkan cell happens to have exactly one element (cuda has two,
+          # which is why this went unnoticed). Then `@extra` is a splat — and
+          # splatting a string sends it **one character at a time**, so cmake
+          # receives `-` `D` `C` `H` … and reports
+          #     CMake Warning: Ignoring extra path from command line: "N"
+          #     CMake Error: Unknown argument -
+          # Reproduced locally with argecho: @$str produces 22 single-character
+          # arguments, $str produces 1. Native commands expand an array into
+          # separate arguments on their own, so no splat is needed here.
+          [string[]]$extra = if ("${{ matrix.gpu }}" -eq "cuda") {
+            @("-DCHANGJI_SD_CUDA=ON", "-DCHANGJI_CUDA_ARCH=$env:CUDA_ARCH")
+          } else {
+            @("-DCHANGJI_SD_VULKAN=ON")
+          }
+          cmake -S changji/cpp -B build -G "Visual Studio 17 2022" -A x64 `
+            -DCHANGJI_VERSION="$env:CHANGJI_VERSION" `
+            -DCHANGJI_SD=ON `
+            -DCHANGJI_LLAMA=ON `
+            -DCHANGJI_BUILD_TESTS=OFF `
+            -DGGML_NATIVE=OFF `
+            -DCMAKE_RUNTIME_OUTPUT_DIRECTORY="$out" `
+            -DCMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE="$out" `
+            -DOPENSSL_ROOT_DIR="$ssl" `
+            $extra
+          if ($LASTEXITCODE -ne 0) { throw "configure failed" }
+          cmake --build build --config Release --target changji --parallel
+          if ($LASTEXITCODE -ne 0) { throw "build failed" }
+
+      # ---- Check it ----
+      #
+      # **"Is the backend actually inside this binary" has to be asked here.**
+      #
+      # This is not hypothetical: on 2026-09-10, a hand-typed configure command
+      # on a 5090 left out -DCMAKE_CUDA_COMPILER. It configured, it compiled,
+      # the server started, the job ran — entirely on the CPU. One shot took
+      # more than five hours to get two steps in, and nvidia-smi showed no
+      # compute process at all. What found it was
+      # `strings <binary> | grep -c ggml_cuda`: 0 against 2348. CI has no GPU
+      # and cannot run real inference, but this test does not need one.
+      - name: Check it (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          BIN=out/changji
+          test -f "$BIN" || { echo "artifact is not at $BIN; here is where it actually went:"; find out build -maxdepth 3 -name 'changji*' 2>/dev/null; exit 1; }
+          # **The cuda cell cannot actually run the binary.**
+          # It links against the driver library (libcuda.so.1), which is
+          # installed by the **graphics driver**, not by the toolkit — CI has
+          # no card and therefore no driver, so the loader reports
+          # "error while loading shared libraries: libcuda.so.1" and exits 127.
+          # That is not a broken package; it is a machine that cannot run it.
+          # linux-x64-cuda went red exactly here on 2026-09-13: the build was
+          # fine, this one line stopped it, and not a single NVIDIA package
+          # shipped.
+          # The strings check below still runs — that is the one written for
+          # "the backend is not in there", and it needs no GPU.
+          case "${{ matrix.gpu }}" in
+            cuda)
+              echo "skipping the run for ${{ matrix.gpu }}: the binary needs a graphics driver to load, and CI has no card" ;;
+            *)
+              "$BIN" --version
+              test "$("$BIN" --version)" = "$CHANGJI_VERSION" ;;
+          esac
+          case "${{ matrix.gpu }}" in
+            cuda)   MARK=ggml_cuda_ ;;
+            vulkan) MARK=ggml_vk_ ;;
+          esac
+          N=$(strings -a "$BIN" | grep -c -- "$MARK" || true)
+          echo "$MARK appears $N times in the binary"
+          if [ "$N" -lt 1 ]; then
+            echo "**The ${{ matrix.gpu }} backend is simply not in this binary.** It built,"
+            echo "but it will only ever use the CPU — ship it and the user sees"
+            echo "'it runs, but absurdly slowly', with no way to find out why."
+            exit 1
+          fi
+          ldd "$BIN" || true
+
+      - name: Check it (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $bin = "out/changji.exe"
+          if (-not (Test-Path $bin)) {
+            Get-ChildItem out, build -Recurse -Filter changji.exe -ErrorAction SilentlyContinue |
+              Select-Object FullName
+            throw "artifact is not at $bin"
+          }
+          # Same reason as the step above: the cuda exe needs nvcuda.dll to
+          # start, which belongs to the **graphics driver** — the toolkit does
+          # not ship it and CI has no card. The symptom is sneakier than on
+          # Linux: the process never starts, `& $bin --version` prints nothing,
+          # and this reports "version mismatch:" with nothing after it, which
+          # reads like a wrong version string. windows-x64-cuda died on this
+          # line on 2026-09-13.
+          if ("${{ matrix.gpu }}" -eq "cuda") {
+            Write-Host "skipping the run for ${{ matrix.gpu }}: the exe needs a graphics driver to load, and CI has no card"
+          } else {
+            $v = & $bin --version
+            Write-Host $v
+            if ($v -ne $env:CHANGJI_VERSION) { throw "version mismatch: $v" }
+          }
+          $mark = switch ("${{ matrix.gpu }}") {
+            "cuda"   { "ggml_cuda_" }
+            "vulkan" { "ggml_vk_" }
+          }
+          # Scan in chunks rather than reading it all into memory: the cuda
+          # exe is several hundred megabytes, and turning that into a .NET
+          # string doubles it — the runner would simply run out of memory.
+          $fs = [IO.File]::OpenRead((Resolve-Path $bin))
+          $size = 16MB
+          $buf = New-Object byte[] $size
+          # **Do not use `[Text.Encoding]::Latin1`.** That property arrived in
+          # .NET 5: under `shell: pwsh` CI runs PowerShell 7 and has it, but
+          # anybody running this by hand in powershell.exe (5.1, on .NET
+          # Framework) gets **$null**, and the error is "cannot call a method
+          # on a null-valued expression", which reads like a corrupt file.
+          # That is how a by-hand packaging run died on a Windows box on
+          # 2026-09-18. 28591 is ISO-8859-1; both PowerShells have it and
+          # behave identically.
+          $latin1 = [Text.Encoding]::GetEncoding(28591)
+          $carry = ''
+          $n = 0
+          while (($read = $fs.Read($buf, 0, $size)) -gt 0) {
+            $s = $carry + $latin1.GetString($buf, 0, $read)
+            $n += [regex]::Matches($s, [regex]::Escape($mark)).Count
+            $carry = $s.Substring([Math]::Max(0, $s.Length - $mark.Length))
+          }
+          $fs.Close()
+          Write-Host "$mark appears $n times in the binary"
+          if ($n -lt 1) {
+            throw "**The ${{ matrix.gpu }} backend is simply not in this binary.** It built, but it will only ever use the CPU — ship it and the user sees 'it runs, but absurdly slowly', with no way to find out why."
+          }
+
+      # ---- Package ----
+      #
+      # **The runtime libraries go into the archive too**, so unpacking is
+      # enough to run it.
+      - name: Package (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p dist stage
+          cp out/changji stage/
+          cp changji/README.md stage/
+          # Take what ldd says is needed; do not guess filenames — one CUDA
+          # point release and a hard-coded libcublas.so.12.8.x becomes "copy
+          # failed", or worse: it copies a file the binary never looks for,
+          # and the archive looks complete.
+          LIBS=$(ldd out/changji | awk '$3 ~ /libcudart|libcublas|libcublasLt|libnvrtc|libvulkan/ {print $3}' || true)
+          for so in $LIBS; do
+            cp -L "$so" stage/
+            echo "bringing $so"
+          done
+          # **Same gate as on Windows: check again against what ldd says.**
+          # The day that awk pattern stops matching a new library name (one
+          # CUDA .so rename is enough), `LIBS` is empty — **and an empty for
+          # loop does nothing and reports nothing**, so the archive is built
+          # and shipped, and only unpacking reveals it does not run. That is
+          # exactly how the Windows cell shipped an exe-only cuda package on
+          # 2026-09-17 (see the comment in "Package (Windows)").
+          # libcuda.so.1 is excluded: that belongs to the **graphics driver**
+          # and has no business in the archive.
+          # With CHANGJI_CUDA_STATIC on, the cuda cell's ldd output has none of
+          # these lines anyway (the runtime is already inside the binary), and
+          # the gate still holds — it asks "what does ldd say is needed", not
+          # "are there three files", so it stands aside on the static road by
+          # itself.
+          MISSING=""
+          for need in $(ldd out/changji | awk '{print $1}' |
+                        grep -E '^lib(cu|nv)' | grep -v '^libcuda\.so'); do
+            [ -f "stage/$need" ] || MISSING="$MISSING $need"
+          done
+          if [ -n "$MISSING" ]; then
+            echo "**the archive is missing:$MISSING**"
+            echo "ldd says the binary needs them to start, and stage/ does not have them —"
+            echo "unpacking and running it gives 'error while loading shared libraries',"
+            echo "which looks unrelated to packaging."
+            exit 1
+          fi
+          ls -lh stage/
+          tar -czf "dist/changji-${{ matrix.target }}.tar.gz" -C stage .
+          ls -lh dist/
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist, stage | Out-Null
+          Copy-Item out/changji.exe stage/
+          Copy-Item changji/README.md stage/
+          if ("${{ matrix.gpu }}" -eq "cuda") {
+            # **The DLLs are not in `bin\`, they are in `bin\x64\`.**
+            #
+            # CUDA 13 moved the Windows runtime DLLs into `bin\x64\` (NVIDIA's
+            # own redist archives use that path:
+            # `libcublas-windows-x86_64-13.4.1.3-archive/bin/x64/cublas64_13.dll`),
+            # while **executables like nvcc.exe stayed in `bin\`** — so the
+            # "is bin\nvcc.exe there" check above still passes and reveals
+            # nothing.
+            #
+            # This step used to hard-code `"$env:CUDA_PATH\bin"`, so it copied
+            # nothing. **And Get-ChildItem matching nothing is not an error**:
+            # the cell ran green, the zip shipped, and it contained
+            # changji.exe and README.md. That is where the
+            # changji-windows-x64-cuda.zip from run #103 on 2026-09-17 came
+            # from — 97 MB, two files. Double-clicking it said "cublas64_13.dll
+            # was not found", with no mention of CUDA anywhere, while Actions
+            # was green from end to end.
+            #
+            # So: **search the whole toolkit recursively** (`bin\` or
+            # `bin\x64\`, and the next move needs no edit here), and **go red
+            # on the spot if nothing is found**.
+            $missing = @()
+            foreach ($pat in @("cudart64_*.dll","cublas64_*.dll","cublasLt64_*.dll")) {
+              $hit = Get-ChildItem $env:CUDA_PATH -Recurse -File -Filter $pat `
+                       -ErrorAction SilentlyContinue | Select-Object -First 1
+              if (-not $hit) { $missing += $pat; continue }
+              Copy-Item $hit.FullName stage/
+              Write-Host "bringing $($hit.FullName)"
+            }
+            if ($missing.Count) {
+              throw "These CUDA runtime DLLs were not found anywhere under $env:CUDA_PATH: " +
+                    ($missing -join ", ") + ". The directory layout or the component " +
+                    "names changed again — packaging now would ship an archive that " +
+                    "does nothing at all when double-clicked."
+            }
+
+            # **Do not trust "I copied three files"; check against the list the
+            # exe actually asks for.**
+            #
+            # On Linux that gate is `ldd`: take what it says, then look again.
+            # Windows has no ldd, but the DLLs an exe will load sit in the file
+            # **as plain text** (same chunked scan as the ggml_cuda_ count
+            # above — do not read it all into memory). The two the driver owns
+            # (nvcuda.dll / nvml.dll) do not belong in the archive, and they
+            # have no "64_<version>" in their names, so the regex below leaves
+            # them out on its own.
+            #
+            # The throw above covers "not found in the toolkit"; this covers
+            # the other half: **what the exe wants and what the archive has do
+            # not match** — say, the day it starts needing an nvrtc64_*.dll.
+            $want = @{}
+            $fs = [IO.File]::OpenRead((Resolve-Path stage/changji.exe))
+            $size = 16MB
+            $buf = New-Object byte[] $size
+            # 28591 = ISO-8859-1. Not `::Latin1`; see the comment in "Check it
+            # (Windows)" above — on PowerShell 5.1 that property is $null.
+            $latin1 = [Text.Encoding]::GetEncoding(28591)
+            $carry = ''
+            while (($read = $fs.Read($buf, 0, $size)) -gt 0) {
+              $s = $carry + $latin1.GetString($buf, 0, $read)
+              foreach ($m in [regex]::Matches($s, '(?i)(cu|nv)[a-z0-9_]*64_[0-9_]+\.dll')) {
+                # The key is lower-cased only so comparison ignores case
+                # (Windows filenames do too); the value keeps its original
+                # spelling, because the error message has to show the real DLL
+                # name — that is what somebody will go looking for.
+                $want[$m.Value.ToLower()] = $m.Value
+              }
+              # The longest of these names is about thirty characters; 64 is
+              # plenty to catch one split across a chunk boundary.
+              $carry = $s.Substring([Math]::Max(0, $s.Length - 64))
+            }
+            $fs.Close()
+            Write-Host "the exe asks for: $(($want.Values | Sort-Object) -join ', ')"
+            $have = @(Get-ChildItem stage -Filter *.dll | ForEach-Object { $_.Name.ToLower() })
+            $lack = @($want.Keys | Where-Object { $have -notcontains $_ } |
+                      ForEach-Object { $want[$_] } | Sort-Object)
+            if ($lack.Count) {
+              throw "The archive is missing " + ($lack -join ", ") +
+                    " — the exe needs them the moment it starts, so a user who " +
+                    "unpacks and double-clicks it gets '…dll was not found'."
+            }
+          }
+          Get-ChildItem stage | Format-Table Name, Length
+          # **Not Compress-Archive.** With cublasLt included, stage/ is over
+          # six hundred megabytes, and Compress-Archive is glacial at that size
+          # (it feeds files through as PowerShell objects one at a time). The
+          # .NET call streams straight to disk and takes tens of seconds.
+          $src = (Resolve-Path stage).Path
+          $zip = Join-Path (Get-Location).Path "dist/changji-${{ matrix.target }}.zip"
+          [IO.Compression.ZipFile]::CreateFromDirectory(
+            $src, $zip, [IO.Compression.CompressionLevel]::Optimal, $false)
+          Get-ChildItem dist | Format-Table Name, Length
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: changji-${{ matrix.target }}
+          path: dist/*
+
+  # ---- Publish ----
+  publish:
+    name: Publish to ${{ needs.meta.outputs.channel == 'release' && 'Release' || 'the beta prerelease' }}
+    # **Wait for build-gpu, but do not let it block.** It is in `needs` so that
+    # publishing happens after it finishes — otherwise the Release is already
+    # built by the time the GPU packages are, and it would have to be published
+    # twice. The `if` below is the part that matters: publish as soon as all
+    # six CPU cells pass, however many GPU cells failed — they depend on two
+    # vendors' download URLs, and holding an entire Release hostage to a dead
+    # link is not worth it. When build-gpu is skipped (a manual run with "CPU
+    # packages only"), the `needs` result is `skipped`, and without
+    # always()/!cancelled() this job would be skipped along with it.
+    #
+    # ⚠️ The price is that **publishing a beta waits for those four GPU cells**:
+    # from push to something-on-the-Release is hours, not tens of minutes. To
+    # try a CPU package sooner, download it from that run's artifacts instead
+    # of waiting for the Release.
+    needs: [meta, build, build-gpu]
+    if: ${{ !cancelled() && needs.build.result == 'success' && needs.meta.result == 'success' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    # **Grouped by channel, not by ref, and never cancelled.**
+    # Two branches pushed at once both have to publish to the same beta;
+    # cancelling, or running them concurrently, can land in the window where
+    # the old one is deleted and the new one does not exist yet. Queue them so
+    # they go one at a time and the last to finish wins.
+    concurrency:
+      group: publish-${{ needs.meta.outputs.channel }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: changji-*
+          path: dist
+          merge-multiple: true
+
+      # **Checksums have to exist.** install.sh downloads this file and
+      # verifies against it, and refuses to install on a mismatch — a
+      # half-downloaded binary installs fine and then reports "Exec format
+      # error", which looks nothing like a network problem.
+      - name: Compute SHA256SUMS
+        working-directory: dist
+        run: |
+          sha256sum changji-* | tee SHA256SUMS
+          ls -lh
+
+      # ---- version.json ----
+      #
+      # **This is the file the updater reads.** The program has to decide
+      # whether the copy in hand is current, and it cannot do that by parsing
+      # the Markdown table in the release notes — that table is written for
+      # people, and rewording it would break update checking silently.
+      #
+      # Both channels get one, with identical fields: the program picks which
+      # to fetch from `[update].channel`, and the shape it gets back has to be
+      # the same either way, or there are two parsers to maintain.
+      #
+      # Every asset carries its size and sha256: whatever is downloaded has to
+      # match before it is trusted (a truncated download installs and then
+      # says "Exec format error", which looks nothing like a network problem —
+      # the same point as the SHA256SUMS comment above).
+      - name: Write version.json
+        working-directory: dist
+        env:
+          CJ_VERSION: ${{ needs.meta.outputs.version }}
+          CJ_CHANNEL: ${{ needs.meta.outputs.channel }}
+        run: |
+          python3 - <<'PY' > version.json
+          import hashlib, json, os, pathlib, time
+          assets = []
+          for p in sorted(pathlib.Path('.').glob('changji-*')):
+              h = hashlib.sha256(p.read_bytes()).hexdigest()
+              assets.append({'name': p.name, 'bytes': p.stat().st_size, 'sha256': h})
+          print(json.dumps({
+              'version': os.environ['CJ_VERSION'],
+              'channel': os.environ['CJ_CHANNEL'],
+              'commit': os.environ.get('GITHUB_SHA', ''),
+              'built_at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+              'assets': assets,
+          }, ensure_ascii=False, indent=1))
+          PY
+          cat version.json
+
+      # **The table is generated from what is actually in dist/, not written
+      # out by hand.** However many GPU cells failed, publishing goes ahead
+      # (see the `if` on this job), and a hard-coded table would then contain
+      # links that 404 — at precisely the moment a user most needs to tell
+      # whether that package got built this time. Not built means not listed;
+      # listed means it is there.
+      #
+      # ⚠️ Fields are separated by `|`, not by whitespace. The original split
+      # on spaces, which worked only because the labels were Chinese and had
+      # none. The first English label with a space in it would have silently
+      # shifted every column after it.
+      - name: Write the release notes
+        run: |
+          {
+            echo "| OS | GPU | Package | Needs installing first |"
+            echo "|---|---|---|---|"
+            while IFS='|' read -r name os gpu note; do
+              [ -n "$name" ] || continue
+              [ -f "dist/$name" ] || continue
+              printf '| %s | %s | `%s` | %s |\n' "$os" "$gpu" "$name" "$note"
+            done <<'ROWS'
+          changji-linux-x64.tar.gz|Linux|none (CPU only)|—
+          changji-linux-arm64.tar.gz|Linux (arm64)|none (CPU only)|—
+          changji-macos-arm64.tar.gz|macOS (Apple silicon)|Metal (built in)|—
+          changji-macos-x64.tar.gz|macOS (Intel)|none (CPU only)|—
+          changji-windows-x64.zip|Windows|none (CPU only)|—
+          changji-windows-arm64.zip|Windows (arm64)|none (CPU only)|—
+          changji-linux-x64-cuda.tar.gz|Linux|NVIDIA|just the driver; the CUDA runtime is in the archive
+          changji-linux-x64-vulkan.tar.gz|Linux|any of the three|just the driver; NVIDIA, AMD and Intel all work
+          changji-windows-x64-cuda.zip|Windows|NVIDIA|just the driver; the CUDA runtime is in the archive
+          changji-windows-x64-vulkan.zip|Windows|any of the three|just the driver; NVIDIA, AMD and Intel all work
+          ROWS
+            echo
+            cat <<'EOF'
+          **If you do not know which one to take, these two lines are enough:**
+
+          - NVIDIA card → `-cuda`. AMD, Intel, or integrated graphics →
+            `-vulkan`, which runs as soon as you unpack it.
+          - The six without a suffix are **CPU only**: they get through the
+            whole pipeline, but a single shot takes hours. Good for a first
+            look at the interface.
+
+          Unpacking gives you one executable plus whatever runtime libraries it
+          needs, and nothing else. **Assembly and subtitle burn-in need ffmpeg**
+          somewhere on your PATH. Model weights are not in the archive; the
+          first time you open the interface it asks you to pick, then downloads
+          them itself.
+
+          The macOS builds are signed with a Developer ID and notarised by
+          Apple, so they open without the "damaged and can't be opened"
+          dialogue. Gatekeeper checks the notarisation ticket over the network
+          on first launch.
+
+          ```
+          changji --version       which build you have
+          changji --doctor        health check; it names anything missing
+          changji --port 8080     start the server, then open http://127.0.0.1:8080
+          ```
+
+          `SHA256SUMS` holds the checksums for these packages.
+          EOF
+          } > notes.md
+          cat notes.md
+
+      # ---- Stable: **there is only ever one Release**, deleted and rebuilt
+      #      like beta ----
+      #
+      # Changed 2026-09-17 (the user: "from now on there is only one release
+      # too"). It used to create a Release per `v*` tag and accumulate a long
+      # list of them.
+      #
+      # **A single fixed one is what the updater needs.** Update checking needs
+      # an address that **does not change with the version** to fetch
+      # `version.json` from:
+      #
+      #   .../releases/download/release/version.json
+      #   .../releases/download/beta/version.json
+      #
+      # With one Release per version that address changes every time, and the
+      # program would have to page through the API and guess which is newest
+      # (and `--generate-notes` output is not pleasant to parse either).
+      #
+      # No version information is lost: the `v*` tag stays in git history, and
+      # both the Release title and the `version` field in `version.json` are
+      # that tag.
+      #
+      # Deleted and rebuilt rather than added to (`--clobber`), for exactly the
+      # reason given under beta below: the tag would stay pinned to the commit
+      # that first created it, and when a platform fails to build in some run,
+      # **the previous run's package for that platform** stays up — and whoever
+      # is downloading cannot tell which one is current.
+      - name: Create the Release (stable)
+        if: needs.meta.outputs.channel == 'release'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete release --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag \
+            || echo "no previous release Release; skipping"
+          gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/release" --silent \
+            || echo "no leftover release tag; skipping"
+          {
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Version | \`${{ needs.meta.outputs.version }}\` (what \`changji --version\` prints) |"
+            echo "| Commit | ${GITHUB_SHA} |"
+            echo "| Built | $(date -u '+%Y-%m-%d %H:%M UTC') |"
+            echo
+            echo "## Downloads"
+            echo
+            cat notes.md
+            echo
+            echo "On Linux and macOS there is also a one-line install:"
+            echo
+            echo '```bash'
+            echo "curl -fsSL https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/install.sh | bash"
+            echo '```'
+          } > body.md
+          gh release create release \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "${{ needs.meta.outputs.version }}" \
+            --notes-file body.md \
+            dist/*
+
+      # **beta is deleted and rebuilt, not added to.**
+      #
+      # Adding to it (`gh release upload --clobber`) looks gentler, but two
+      # things are wrong with it: the tag stays pinned to the commit that first
+      # created it (`gh release edit --target` only works on drafts), and when
+      # a platform fails to build in some run, **the previous run's package for
+      # that platform** is still sitting there — whoever is downloading cannot
+      # tell which is current, at exactly the moment they most need to.
+      #
+      # The cost is a few seconds in which beta does not exist, which is
+      # lighter than shipping a mixed-vintage set of packages.
+      - name: Create the beta prerelease
+        if: needs.meta.outputs.channel == 'beta'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete beta --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag \
+            || echo "no previous beta Release; skipping"
+          # Belt and braces: the step above only removes the tag when the
+          # Release exists. A tag with no Release (created by hand, or left
+          # behind by a run that died halfway) would be reused by the create
+          # below, and **what got published would point at the old commit**.
+          gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/beta" --silent \
+            || echo "no leftover beta tag; skipping"
+          {
+            echo "**Rolling prerelease.** Built from the last branch push; the next one overwrites it."
+            echo "For a stable build, look for a v-prefixed entry under [Releases](https://github.com/$GITHUB_REPOSITORY/releases)."
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Branch | \`${GITHUB_REF_NAME}\` |"
+            echo "| Commit | ${GITHUB_SHA} |"
+            echo "| Version | \`${{ needs.meta.outputs.version }}\` (what \`changji --version\` prints) |"
+            echo "| Built | $(date -u '+%Y-%m-%d %H:%M UTC') |"
+            echo
+            echo "## Downloads"
+            echo
+            cat notes.md
+            echo
+            echo "To install beta:"
+            echo
+            echo '```bash'
+            echo "CHANGJI_VERSION=beta bash <(curl -fsSL https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/install.sh)"
+            echo '```'
+          } > body.md
+          gh release create beta \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --prerelease \
+            --title "beta (${GITHUB_REF_NAME})" \
+            --notes-file body.md \
+            dist/*
