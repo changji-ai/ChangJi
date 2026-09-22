@@ -75,6 +75,15 @@ public:
     /// 没给过就回两个空串。
     std::pair<std::string, std::string> their_door(const std::string& id) const;
 
+    /// 某一台在机器表上会长什么地址。**票给没给过都回**。
+    ///
+    /// 设置页要拿它比一句话：这一台**是不是已经在机器表上了**。
+    /// ⚠️ **别在界面那头拼这个地址**：那就成了同一件事两处各写一遍
+    ///（CLAUDE.md 第八条），而两处一分叉的表现是"明明在表上，页面上还
+    /// 写着「拿它来算」"——按下去回 409，人只看见一个按不动的按钮。
+    /// 问不着（不在表上、没有主机名或端口）回空串。
+    std::string their_url(const std::string& id) const;
+
     /// 拿着这张票的，被允许了什么。**收活那一关拿它判**（见 `Grant::ticket`）。
     /// 票对不上回一个全空的 `Grant`。
     Grant by_ticket(const std::string& ticket) const;

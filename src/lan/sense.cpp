@@ -74,6 +74,19 @@ std::string host_name() {
     return SAY("一台机器");
 }
 
+/// 一台在机器表上会长什么地址。**只此一处**——`their_door`（拿它来算那
+/// 一下）和 `their_url`（"是不是已经在表上了"）都走它。两处各拼一遍的话，
+/// 哪天端口或者主机名的处理改了，两句话就对不上。
+///
+/// ⚠️ **mDNS 报回来的主机名末尾带一个点**（`macbook.local.`），拼进 URL
+/// 有的库不认。
+std::string url_of(const Peer& p) {
+    std::string host = p.host;
+    while (!host.empty() && host.back() == '.') host.pop_back();
+    if (host.empty() || p.port <= 0) return {};
+    return "http://" + host + ":" + std::to_string(p.port);
+}
+
 }  // namespace
 
 #if defined(CHANGJI_HAS_DNSSD)
@@ -532,12 +545,17 @@ std::pair<std::string, std::string> Sense::their_door(
     for (const auto& p : book_.list()) {
         if (p.id != id) continue;
         if (p.their_ticket.empty()) return {};
-        std::string host = p.host;
-        // mDNS 报回来的主机名末尾带一个点，拼进 URL 有的库不认。
-        while (!host.empty() && host.back() == '.') host.pop_back();
-        if (host.empty() || p.port <= 0) return {};
-        return {"http://" + host + ":" + std::to_string(p.port),
-                p.their_ticket};
+        const std::string url = url_of(p);
+        if (url.empty()) return {};
+        return {url, p.their_ticket};
+    }
+    return {};
+}
+
+std::string Sense::their_url(const std::string& id) const {
+    std::lock_guard<std::mutex> lk(mu_);
+    for (const auto& p : book_.list()) {
+        if (p.id == id) return url_of(p);
     }
     return {};
 }
