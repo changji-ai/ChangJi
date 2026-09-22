@@ -172,11 +172,14 @@ jobs:
       # Layout that every path in these workflow files assumes:
       #
       #   changji/            <- the private product repo (webapp/, desktop/, brand/)
-      #   changji/cpp/        <- THIS repo, laid over the stale copy in there
+      #   changji/cpp/        <- THIS repo, checked out over whatever is there
       #
-      # The product repo carries its own copy of `cpp/`, which is whatever was
-      # last committed over there — not necessarily this commit. It is removed
-      # and replaced. Build the wrong core and nothing in the output says so.
+      # The product repo keeps `cpp/` as a submodule pointing at this one, and
+      # `actions/checkout` leaves submodules alone unless asked — so that path
+      # arrives empty. It is removed and checked out anyway: that also covers a
+      # checkout which did ask for submodules (it would hold the *pinned*
+      # commit, not this one). Build the wrong core and nothing in the output
+      # says so.
       #
       # ⚠️ **`fetch-depth: 0` on this repo.** The version is *counted*
       # (`cpp/tools/version.sh` asks git how many commits separate the commit

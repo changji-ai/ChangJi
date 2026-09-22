@@ -37,12 +37,15 @@ jobs:
       # Layout that every path in these workflow files assumes:
       #
       #   changji/            <- the private product repo (webapp/, desktop/, brand/)
-      #   changji/cpp/        <- THIS repo, laid on top of the stale copy in there
+      #   changji/cpp/        <- THIS repo, checked out over whatever is there
       #
-      # The product repo also carries a copy of `cpp/`. It is whatever was last
-      # committed over there, which is not necessarily this commit — so it gets
-      # removed and replaced. Skipping that step builds the wrong core, and
-      # nothing about the build output says so.
+      # The product repo keeps `cpp/` as a submodule pointing at this one, and
+      # `actions/checkout` leaves submodules alone unless asked — so that path
+      # arrives empty. It is removed and checked out anyway: the removal is what
+      # covers the other two cases, a checkout that did ask for submodules (it
+      # would hold the *pinned* commit, not this one) and the copy the product
+      # repo tracked file-by-file before 2026-09-22. Skip the step and the build
+      # uses the wrong core, or no core at all, and nothing in its output says so.
       - name: Check out the product repo
         uses: actions/checkout@v4
         with:
