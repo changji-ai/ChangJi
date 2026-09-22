@@ -1001,12 +1001,64 @@ jobs:
             echo "Desktop \`$VER\`. **Separate from the engine release line** —"
             echo "this holds desktop installers only; the engine packages are in the v-prefixed Releases."
             echo
-            echo "| OS | How to install |"
-            echo "|---|---|"
-            echo "| macOS | Download the \`.dmg\`, open it, drag the icon into Applications |"
-            echo "| Windows | Download \`setup.exe\`, double-click, click through |"
-            echo "| Linux | Download the \`.tar.gz\`, unpack it, run \`changji-desktop.sh\` inside |"
+            # **The table is generated from what is actually in dist/.**
+            #
+            # It used to be three hard-coded rows — one per operating system —
+            # written when this pipeline shipped one package per system. There
+            # are nine now, three of them Windows, and "Download setup.exe"
+            # does not say which of the three. Worse, a hard-coded table
+            # survives a cell that failed: it would list a package that is not
+            # there, and a 404 is exactly what somebody does not need at the
+            # moment they are trying to work out whether their build exists.
+            #
+            # Matching is on `changji-<target>-$VER`, not a bare `<target>*`
+            # glob: `changji-windows-x64-*` also matches
+            # `changji-windows-x64-cuda-…`, and the two rows would collide.
+            echo "| OS | GPU | Package | How to install |"
+            echo "|---|---|---|---|"
+            listed=""
+            while IFS='|' read -r tgt os gpu how; do
+              [ -n "$tgt" ] || continue
+              f=$(ls "dist/changji-$tgt-$VER"* 2>/dev/null | head -1 || true)
+              [ -n "$f" ] || continue
+              listed="$listed $(basename "$f")"
+              printf '| %s | %s | `%s` | %s |\n' "$os" "$gpu" "$(basename "$f")" "$how"
+            done <<'ROWS'
+          macos-universal|macOS (Intel and Apple silicon)|Metal, built in|Open the .dmg and drag the icon into Applications
+          windows-x64|Windows|none (CPU only)|Run setup.exe and click through
+          windows-x64-cuda|Windows|NVIDIA|Run setup.exe; the CUDA runtime is inside
+          windows-x64-vulkan|Windows|any of the three|Run setup.exe; NVIDIA, AMD and Intel all work
+          linux-x64|Linux|none (CPU only)|Unpack the .tar.gz and run changji-desktop.sh
+          linux-x64-cuda|Linux|NVIDIA|Unpack and run changji-desktop.sh
+          linux-x64-vulkan|Linux|any of the three|Unpack and run changji-desktop.sh
+          linux-arm64|Linux (arm64, glibc 2.38+)|none (CPU only)|Unpack and run changji-desktop.sh
+          linux-arm64-cuda|Linux (arm64, glibc 2.38+)|NVIDIA|Unpack and run changji-desktop.sh
+          ROWS
             echo
+            # ⚠️ **Anything in dist/ that no row matched gets said out loud.**
+            #
+            # A generated table only tells the truth in one direction: it will
+            # not list a package that failed to build. It says nothing about a
+            # package that built and has no row — a new target would ship
+            # unmentioned, which is the same invisibility the hard-coded table
+            # had. This does not fail the release; it puts the names in the
+            # notes so they are not lost.
+            missed=""
+            for f in dist/*; do
+              # 没有 nullglob 时，一个都匹配不上的 glob 会把 `dist/*` 原样
+              # 留下来——那一轮就会往清单里写一条不存在的东西。实践中走不到
+              # （前面摊平那步会先红），但那是句假话。
+              [ -e "$f" ] || continue
+              b=$(basename "$f")
+              case "$b" in NOTARIZED) continue ;; esac
+              case " $listed " in *" $b "*) ;; *) missed="$missed $b" ;; esac
+            done
+            if [ -n "$missed" ]; then
+              echo "**Also in this release, with no row in the table above**"
+              echo "(a target was added and the table was not updated):"
+              for b in $missed; do echo "- \`$b\`"; done
+              echo
+            fi
             echo "| | |"
             echo "|---|---|"
             echo "| Branch | \`${GITHUB_REF_NAME}\` |"
