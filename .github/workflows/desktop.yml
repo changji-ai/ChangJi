@@ -73,8 +73,11 @@ on:
 permissions:
   contents: write
 
+# The product ref is part of the group; see the note in release.yml. Without
+# it, the same engine branch built against two different product branches
+# counts as one run and the second cancels the first.
 concurrency:
-  group: desktop-${{ github.ref }}
+  group: desktop-${{ github.ref }}-${{ inputs.product_ref || github.ref_name }}
   cancel-in-progress: true
 
 jobs:
@@ -165,6 +168,7 @@ jobs:
           ref: ${{ steps.pref.outputs.ref }}
           path: changji
       - name: Lay this repo's core over changji/cpp
+        shell: bash
         run: rm -rf changji/cpp
       - uses: actions/checkout@v4
         with:

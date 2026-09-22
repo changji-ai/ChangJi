@@ -182,12 +182,24 @@ jobs:
           # MSVC names them .lib, everyone else .a. Check that each one is
           # there under whichever name this platform uses — an empty lib/
           # directory would otherwise sail through the loop above.
+          #
+          # ⚠️ **No pipeline here, and that is the whole point.** This was
+          # `ls "$want".a "$want".lib 2>/dev/null | grep -q .`, which is wrong
+          # under the shell Actions actually uses: `bash -e -o pipefail`. `ls`
+          # with two arguments where one is missing prints the one that exists
+          # **and exits 2**; `grep -q` then sees output and exits 0; and
+          # `pipefail` takes the rightmost non-zero, so the pipeline fails and
+          # the check reports the file as missing. It went red on all four
+          # finished cells of the first real run while the log directly above
+          # it listed libssl.a and libcrypto.a, both present. Tested locally in
+          # a shell without `pipefail`, which is why it looked fine.
           for want in libssl libcrypto; do
-            ls "openssl-prefix/lib/$want".a "openssl-prefix/lib/$want".lib \
-               2>/dev/null | grep -q . || {
+            if [ ! -f "openssl-prefix/lib/$want.a" ] &&
+               [ ! -f "openssl-prefix/lib/$want.lib" ]; then
               echo "::error::$want is missing from openssl-prefix/lib"
+              ls -la openssl-prefix/lib || true
               exit 1
-            }
+            fi
           done
 
       - uses: actions/upload-artifact@v4

@@ -55,6 +55,7 @@ jobs:
           path: changji
 
       - name: Lay this repo's core over changji/cpp
+        shell: bash
         run: rm -rf changji/cpp
 
       - uses: actions/checkout@v4

@@ -63,8 +63,18 @@ on:
 # Two pushes to the same branch in a row: cancel the unfinished one. Only the
 # last result survives on beta anyway, so finishing the earlier run is wasted
 # machine time.
+#
+# ⚠️ **The product ref is part of the group.** Grouping on `github.ref` alone
+# means the same engine branch built against two different product branches
+# counts as "the same run", and the second cancels the first — which is wrong,
+# because they are two different builds. Seen for real on 2026-09-22: pushing
+# this repo and dispatching from the product repo landed in the same group, and
+# the dispatch killed the push. (Harmless that time; it would not be if both
+# were wanted.) `concurrency` is evaluated before any job runs, so this is the
+# raw input rather than the resolved ref — on a push it is empty and falls back
+# to the branch name, which is the old behaviour exactly.
 concurrency:
-  group: build-${{ github.ref }}
+  group: build-${{ github.ref }}-${{ inputs.product_ref || github.ref_name }}
   cancel-in-progress: true
 
 jobs:
@@ -175,7 +185,15 @@ jobs:
           ref: ${{ steps.pref.outputs.ref }}
           path: changji
 
+      # ⚠️ **`shell: bash` on every one of these, Windows or not.** The
+      # default shell on a Windows runner is PowerShell, where `rm -rf` is not
+      # a command — `rm` is an alias for Remove-Item and `-rf` is not one of
+      # its parameters. The `desktop-build` cell went red on exactly this in
+      # the first real run, at the third step, before Qt was even installed.
+      # Spelling it out uniformly costs nothing and removes the whole class:
+      # a cell that gains a Windows entry later cannot reintroduce it.
       - name: Lay this repo's core over changji/cpp
+        shell: bash
         run: rm -rf changji/cpp
 
       - uses: actions/checkout@v4
@@ -273,6 +291,7 @@ jobs:
           ref: ${{ needs.meta.outputs.product_ref }}
           path: changji
       - name: Lay this repo's core over changji/cpp
+        shell: bash
         run: rm -rf changji/cpp
       - uses: actions/checkout@v4
         with:
@@ -353,6 +372,7 @@ jobs:
           ref: ${{ needs.meta.outputs.product_ref }}
           path: changji
       - name: Lay this repo's core over changji/cpp
+        shell: bash
         run: rm -rf changji/cpp
       - uses: actions/checkout@v4
         with:
