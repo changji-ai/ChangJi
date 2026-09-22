@@ -1,7 +1,8 @@
 # changji 引擎
 
 场记引擎。**一个二进制**：界面、接口、编排、推理全在进程内。
-方案见 [../docs/C++重构方案.md](../docs/C++重构方案.md)。
+方案写在主仓库（`integemjack/changji`）的 `docs/C++重构方案.md` 里——
+那份文档**不在这个仓库中**，这里只有引擎本身。
 
 迁移期间它和一份 Python 引擎并存，靠**对拍**逐条比响应保证两边一致。
 阶段 8 之后 Python 那一侧连同对拍工具一起删了——留下的安全网是
@@ -12,8 +13,8 @@
 ## 构建
 
 要 CMake ≥ 3.20 和一个 C++17 编译器。Linux/macOS 上装好 cmake、ninja、
-git 就能编；发布用的六个平台由
-[.github/workflows/release.yml](../../.github/workflows/release.yml) 编。
+git 就能编；发布用的六个平台由主仓库的 `.github/workflows/release.yml`
+编——**CI 配置也不在这个仓库中**。
 
 **开了 `CHANGJI_LLAMA` 还要一个 Python 解释器**——llama.cpp 拉下来要就地
 打 leejet 的扩展补丁，配置期找不到解释器会当场停。这是构建期依赖，
@@ -79,8 +80,7 @@ cmake --build build
 > 一大坨运行时依赖，而且 leejet 那套 ggml 扩展补丁**没有覆盖
 > ggml-sycl**（覆盖了 CPU / CUDA / Metal / Vulkan，见
 > [patches/README.md](patches/README.md)）——SYCL 上的 fp8 权重多半加载不了。
-> 八个 GPU 包由 CI 编，见
-> [.github/workflows/release.yml](../../.github/workflows/release.yml)。
+> 八个 GPU 包由 CI 编，配置是主仓库的 `.github/workflows/release.yml`。
 
 开 `CHANGJI_LLAMA` 时 ggml 由 llama.cpp 提供，并且**就地打上 leejet 的扩展
 补丁**（`patches/apply_to_llamacpp.py`，接在 FetchContent 的 `PATCH_COMMAND`
