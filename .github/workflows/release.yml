@@ -389,7 +389,7 @@ jobs:
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
         with:
-          version: '6.8.1'
+          version: '6.9.3'
           # ⚠️ **qtwebsockets is not optional.** It is a separate module, not
           # part of qtbase — without it `find_package(... WebSockets)` fails at
           # configure time, and this cell was red from the day the desktop
