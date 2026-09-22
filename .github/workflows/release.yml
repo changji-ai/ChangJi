@@ -94,15 +94,19 @@ jobs:
       channel: ${{ steps.v.outputs.channel }}
       gpu: ${{ steps.v.outputs.gpu }}
     steps:
-      # ---- 先定「主项目拿哪一版」，再检出 ----
+      # ---- Decide which ref of the product repo to use, before checking out ----
       #
-      # ⚠️ **不定的话拿到的是那个仓库的默认分支。** 在功能分支上推一版，编出
-      # 来的是主项目 main 的前端和桌面端——**而且一切正常，没有任何地方会说
-      # 它用的是哪一份**。2026-09-22 这条流水线刚搬过来时就是这样。
+      # ⚠️ **Without this you get that repository's default branch.** Push a
+      # feature branch here and what gets built is the product repo's main —
+      # its web UI, its desktop shell — **and everything looks normal; nothing
+      # anywhere says which sources went in.** That is how this pipeline
+      # behaved the day it moved here, 2026-09-22.
       #
-      # 规矩是**同名配对**：这边推 `v2.2-desktop`，那边要是也有一条同名的就
-      # 用它，没有就退回它的默认分支，**并且把退回这件事说出来**。手动跑时
-      # `product_ref` 指定了就用指定的，指错了当场红，不替人改。
+      # The rule is **pair by name**: a push of `v2.2-desktop` here takes a
+      # branch of the same name over there if one exists, and otherwise falls
+      # back to that repo's default branch — **saying so**, rather than
+      # quietly. An explicit `product_ref` on a manual run wins, and a wrong
+      # one fails the job instead of being corrected for you.
       - id: pref
         env:
           GH_TOKEN: ${{ secrets.CHANGJI_PRODUCT_TOKEN }}
@@ -110,49 +114,53 @@ jobs:
         run: |
           set -euo pipefail
           REPO=integemjack/changji
-          # 问不到默认分支就停，别把空串当答案——网络抖一下的话，底下报的
-          # 会是「那条分支不存在」，而照着那句话查是查不到的。
+          # Stop if the default branch cannot be read; do not treat an empty
+          # string as the answer. A network blip would otherwise surface below
+          # as "that branch does not exist", and chasing that sentence leads
+          # nowhere.
           default=""
           for i in 1 2 3; do
             default=$(gh api "repos/$REPO" --jq .default_branch 2>/dev/null || true)
             [ -n "$default" ] && break
             sleep 2
           done
-          [ -n "$default" ] || { echo "::error::问不到 $REPO 的默认分支（网络？token？）"; exit 1; }
+          [ -n "$default" ] || { echo "::error::cannot read the default branch of $REPO (network? token?)"; exit 1; }
 
-          # **「没有」只认 404 和 422 两个码。**
+          # **"Absent" means 404 or 422, and nothing else.**
           #
-          # ⚠️ `/commits/{ref}` 对认不出的 ref 回的是 **422**，不是 404
-          #（实测：`no-such-thing` 和 `bad ref!!` 都是 422，各试两次）。
-          # 只认 404 的话，任何一条那边没有的分支名都会让这一步当场红，
-          # 而"退回默认分支"那条路**永远走不到**。
-          # 用这个端点是因为它连 tag 一起认；`/branches/` 回 404 更干净，
-          # 但只认分支。
+          # ⚠️ `/commits/{ref}` answers **422** for a ref it does not
+          # recognise, not 404 (measured: `no-such-thing` and `bad ref!!`,
+          # both 422, twice each). Accepting only 404 would turn every
+          # not-yet-existing branch name into a hard failure and make the
+          # fallback path unreachable. This endpoint is used because it
+          # resolves tags too; `/branches/` answers a cleaner 404 but knows
+          # only branches.
           #
-          # 401/403/5xx 一律停：当成「没有」的话会静悄悄退回默认分支，
-          # 编出来的是另一版，而且一切正常。
+          # 401/403/5xx all stop: treating those as "absent" would quietly
+          # fall back to the default branch and build a different version,
+          # with everything looking fine.
           has() {
             local code
             code=$(gh api "repos/$REPO/commits/$1" --silent -i 2>/dev/null | head -1 | awk '{print $2}')
             case "$code" in
               200)     return 0 ;;
               404|422) return 1 ;;
-              "")      echo "::error::问 $REPO 的 $1 没回话（网络？）"; exit 1 ;;
-              *)       echo "::error::问 $REPO 的 $1 回了 HTTP $code——不是 404/422，"
-                       echo "所以不是「没有这条」。当成没有的话会静悄悄编另一版。"; exit 1 ;;
+              "")      echo "::error::no answer asking $REPO for $1 (network?)"; exit 1 ;;
+              *)       echo "::error::asking $REPO for $1 returned HTTP $code — not 404/422,"
+                       echo "so it does not mean absent. Treating it as absent builds another version."; exit 1 ;;
             esac
           }
 
           if [ -n "$WANT" ]; then
-            has "$WANT" || { echo "::error::$REPO 上没有 $WANT"; exit 1; }
+            has "$WANT" || { echo "::error::$REPO has no $WANT"; exit 1; }
             ref="$WANT"
           elif has "$GITHUB_REF_NAME"; then
             ref="$GITHUB_REF_NAME"
           else
-            echo "::notice::$REPO 上没有 $GITHUB_REF_NAME，退回它的默认分支 $default"
+            echo "::notice::$REPO has no $GITHUB_REF_NAME; falling back to its default branch $default"
             ref="$default"
           fi
-          echo "主项目这一版：$REPO@$ref"
+          echo "product repo: $REPO@$ref"
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
 
       # ⚠️ **Two checkouts, and the order matters.**
@@ -1616,8 +1624,9 @@ jobs:
         if: needs.meta.outputs.channel == 'release'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # 解析过的那一条，不是原始输入——推分支时输入是空的，而真正
-          # 用的是同名配对（或退回默认分支）的结果。发布说明要说真用了哪一版。
+          # The resolved ref, not the raw input: on a push the input is
+          # empty while what was actually used is the same-name pairing (or
+          # the fallback). The notes have to name the version that went in.
           PRODUCT_REF: ${{ needs.meta.outputs.product_ref }}
         run: |
           gh release delete release --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag \
@@ -1668,8 +1677,9 @@ jobs:
         if: needs.meta.outputs.channel == 'beta'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # 解析过的那一条，不是原始输入——推分支时输入是空的，而真正
-          # 用的是同名配对（或退回默认分支）的结果。发布说明要说真用了哪一版。
+          # The resolved ref, not the raw input: on a push the input is
+          # empty while what was actually used is the same-name pairing (or
+          # the fallback). The notes have to name the version that went in.
           PRODUCT_REF: ${{ needs.meta.outputs.product_ref }}
         run: |
           gh release delete beta --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag \
