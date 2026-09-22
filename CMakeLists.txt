@@ -1238,6 +1238,7 @@ if(CHANGJI_BUILD_TESTS)
         tests/unit/test_qml_textformat.cpp
         tests/unit/test_qml_names.cpp
         tests/unit/test_done_words.cpp
+        tests/unit/test_lap_time.cpp
         tests/unit/test_qml_anim.cpp
     tests/unit/test_qml_icons.cpp
     tests/unit/test_qml_round.cpp

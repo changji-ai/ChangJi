@@ -393,6 +393,7 @@ nlohmann::json running_activities() {
     // **只报短活**：长跑任务由 jobs() 那头报，两边在 running_work() 里接起来。
     Board& b = board();
     std::lock_guard lg(b.mu);
+    const auto now = Clock::now();
     nlohmann::json out = nlohmann::json::array();
     for (const auto& [id, row] : b.live) {
         if (row->state != TaskState::Running) continue;
@@ -400,6 +401,11 @@ nlohmann::json running_activities() {
         // 列表，不跳的话同一件活在顶栏上数两遍。见 Task::mark_long_job。
         if (row->long_job) continue;
         out.push_back({
+            // **这一行的 id 要带上。** 思考正文是另一条路取的
+            // （`/api/task/thinking?id=…`），没有 id 的话拿着这份名单
+            // 也问不出"它正在想什么"——桌面端那一行 2026-09-22 起要摆
+            // 思考正文，就卡在这儿。
+            {"id", row->id},
             {"kind", row->kind},
             {"project", row->project},
             {"episode_id", row->episode_id},
@@ -429,6 +435,14 @@ nlohmann::json running_activities() {
             // 正文不在这儿（两秒一推，一件就能把通道占满），
             // 要看走 `/api/task/thinking`。
             {"thinking_chars", static_cast<int>(text::utf8_len(row->thinking))},
+            // **已经干了多久。** 和任务页那份（`to_json_locked`）同一个字段名、
+            // 同一笔账——一件活开工那一刻起算（`Task::begin`）。
+            //
+            // 由这儿报不由界面自己数：界面是隔两秒收一次快照的，自己数的话
+            // 一是接上的时候从零起（那件活可能已经跑了二十分钟），二是断线
+            // 重连就归零。**排队这件事归引擎记**（CLAUDE.md 第九条），用时
+            // 同理。
+            {"seconds", round1(secs(row->started_at, now))},
         });
     }
     return out;

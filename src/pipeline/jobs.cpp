@@ -386,9 +386,17 @@ json JobTable::running_jobs() const {
     for (const JobKind k : {JobKind::Run, JobKind::Write}) {
         const JobState& s = slot(k).state;
         if (!s.running) continue;
+        const double elapsed =
+            s.started_at.time_since_epoch().count() == 0
+                ? 0.0
+                : std::chrono::duration<double>(
+                      std::chrono::steady_clock::now() - s.started_at).count();
         // **只带顶栏画得下的那几样。** 这条消息每两秒推给每个连着的浏览器，
         // 塞事件流进来的话，一个跑着的任务就能把这条通道变成主要流量。
         out.push_back({
+            // 账本上那一行的 id。**思考正文按它取**（`/api/task/thinking`），
+            // 和短活那份（`running_activities`）同一个字段名。0 = 还没登记上。
+            {"id", slot(k).task_id},
             {"kind", to_string(k)},
             {"project", s.project},
             {"episode_id", s.episode_id.value_or("")},
@@ -409,6 +417,8 @@ json JobTable::running_jobs() const {
             // 有一个，显示 3 个」，一半是这个。同 task_board 那份的字段名。
             {"long_job", true},
             {"working", true},
+            // 已经跑了多久。和短活那份同一个字段名，界面一套代码画两边。
+            {"seconds", round1(elapsed)},
         });
     }
     return out;
