@@ -1,0 +1,493 @@
+# Desktop releases.
+#
+#   push a branch (not main)  → rolling prerelease, **always on the same
+#                               `desktop-beta` tag**
+#   push a `desktop-v*` tag   → a proper release
+#   run by hand               → same, also beta
+#
+# ⚠️ **It does not share a Release with `release.yml`.** That `beta` belongs to
+# the engine and holds a pile of `changji-<os>-x64-<backend>` archives; drop a
+# desktop `.dmg` in among them and whoever is downloading cannot tell whether
+# the two are the same thing. So the desktop app gets its own pipeline and its
+# own tag.
+#
+# ⚠️ **`main` is excluded.** No rolling desktop beta on the trunk (the user's
+# decision) — what belongs on that branch is tagged releases.
+#
+# ⚠️ **`workflow_dispatch` alone is not enough.** Manual triggering **only works
+# for workflows that exist on the default branch**: while this file was still on
+# a feature branch it was not visible on the Actions page at all (hit for real
+# on 2026-09-21: after pushing, `actions/workflows` listed only `release.yml`
+# and `cloud-tool.yml`). The `push` trigger is not branch-specific, so it runs
+# wherever it is pushed.
+#
+# The cost, stated plainly: one run installs Qt and builds sd.cpp and
+# llama.cpp — tens of minutes per platform, three platforms. The macOS cell
+# also sends a package to Apple for notarisation, another ten to fifteen
+# minutes. **Editing one line of QML triggers all of it.** To build without
+# publishing, use `[skip ci]`.
+#
+# The engine pipeline still has its own `desktop-build` cell that compiles
+# `changji-desktop` on all three platforms. **That one compiles and does not
+# package** — the desktop shell has per-platform code (`keep_awake.cpp` is
+# three different implementations), and red there beats finding out at release
+# time.
+#
+# ---
+#
+# The three packaging scripts (`desktop/package_{macos,windows,linux}.*`) are
+# **the same ones used locally**: however you package by hand is how CI
+# packages. Write it twice and CI goes green while the package on your desk is
+# broken (or the reverse), and that kind of mistake surfaces only when somebody
+# complains. Why each step does what it does, and which traps it walked into,
+# is written in those scripts, not repeated here.
+#
+# **Signing and notarisation need these five secrets** (without them the build
+# falls back to an ad-hoc signature and no notarisation — good enough to try
+# yourself, but a user downloading it sees "is damaged and can't be opened"):
+#
+#     MACOS_CERT_P12 / MACOS_CERT_PW          Developer ID certificate (.p12, base64)
+#     MACOS_NOTARY_KEY / _KEY_ID / _ISSUER    App Store Connect .p8 (base64)
+#
+# and, like every workflow in this repository, `CHANGJI_PRODUCT_TOKEN` to read
+# the private product repo, which is where `desktop/` lives.
+
+name: Desktop release
+
+on:
+  push:
+    # **main is excluded**; every other branch is included.
+    branches-ignore: ['main']
+    tags: ['desktop-v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version (goes into filenames and the Release title). Blank derives it from the branch'
+        type: string
+        required: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # What this run is called and which tag it publishes to. **Worked out once,
+  # read everywhere below** — scattering `if: startsWith(github.ref, ...)`
+  # around means four places to edit for one change.
+  meta:
+    name: Where this run goes
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      tag: ${{ steps.v.outputs.tag }}
+      channel: ${{ steps.v.outputs.channel }}
+    steps:
+      # Two checkouts; see the meta job in release.yml for the full reasoning.
+      # ⚠️ **`fetch-depth: 0` on this repo**: the version is *counted*
+      # (`cpp/tools/version.sh`), and a single-commit clone counts 0, silently.
+      - name: Check out the product repo
+        uses: actions/checkout@v4
+        with:
+          repository: integemjack/changji
+          token: ${{ secrets.CHANGJI_PRODUCT_TOKEN }}
+          path: changji
+      - name: Lay this repo's core over changji/cpp
+        run: rm -rf changji/cpp
+      - uses: actions/checkout@v4
+        with:
+          path: changji/cpp
+          fetch-depth: 0
+
+      - id: v
+        env:
+          WANT: ${{ inputs.version }}
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            # `desktop-v1.2` → version `v1.2`, tag unchanged.
+            echo "tag=${GITHUB_REF_NAME}"            >> "$GITHUB_OUTPUT"
+            echo "version=${GITHUB_REF_NAME#desktop-}" >> "$GITHUB_OUTPUT"
+            echo "channel=release"                   >> "$GITHUB_OUTPUT"
+          elif [ -n "$WANT" ]; then
+            echo "tag=desktop-${WANT}" >> "$GITHUB_OUTPUT"
+            echo "version=${WANT}"     >> "$GITHUB_OUTPUT"
+            echo "channel=release"     >> "$GITHUB_OUTPUT"
+          else
+            # **Always the same tag**: a branch push is a rolling prerelease and
+            # the last push wins.
+            #
+            # The version comes from the prefix in CMake (same as the engine
+            # pipeline; the rule lives in `cpp/tools/version.sh`) with the
+            # branch name appended — the same commit may have been built on two
+            # branches. Slashes become dashes, since this ends up in filenames.
+            echo "tag=desktop-beta" >> "$GITHUB_OUTPUT"
+            echo "version=$(sh changji/cpp/tools/version.sh)-${GITHUB_REF_NAME//\//-}" >> "$GITHUB_OUTPUT"
+            echo "channel=beta" >> "$GITHUB_OUTPUT"
+          fi
+          cat "$GITHUB_OUTPUT"
+
+  webapp:
+    uses: ./.github/workflows/webapp.yml
+    secrets: inherit
+
+  # The desktop app ships three targets (the most common one per machine), not
+  # the engine pipeline's six.
+  openssl:
+    uses: ./.github/workflows/openssl.yml
+    with:
+      keys: '["macos-arm64","windows-x64","linux-x64"]'
+
+  build:
+    name: Package ${{ matrix.target }}
+    needs: [meta, webapp, openssl]
+    runs-on: ${{ matrix.runner }}
+    env:
+      CHANGJI_VERSION: ${{ needs.meta.outputs.version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: macos-arm64, runner: macos-15 }
+          - { target: windows-x64, runner: windows-2022 }
+          - { target: linux-x64,   runner: ubuntu-22.04 }
+    steps:
+      # Two checkouts; see the meta job in release.yml. `desktop/` and
+      # `webapp/` live in the product repo, so this job cannot run on this
+      # repository alone.
+      - name: Check out the product repo
+        uses: actions/checkout@v4
+        with:
+          repository: integemjack/changji
+          token: ${{ secrets.CHANGJI_PRODUCT_TOKEN }}
+          path: changji
+      - name: Lay this repo's core over changji/cpp
+        shell: bash
+        run: rm -rf changji/cpp
+      - uses: actions/checkout@v4
+        with:
+          path: changji/cpp
+
+      # CHANGJI_LLAMA=ON needs a Python: llama.cpp is patched in place with
+      # leejet's extensions after it is fetched, and configure stops dead
+      # without an interpreter (same as the engine pipeline).
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: bundled-webapp
+          path: changji/cpp/src/http/
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: openssl-${{ matrix.target }}
+          path: openssl
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.1'
+          # ⚠️ **qtwebsockets is not optional.** It is a separate module, not
+          # part of qtbase — without it `find_package(... WebSockets)` fails at
+          # configure time, and this cell was red from the day the desktop
+          # shell was added (noticed 2026-09-21: all three platforms reporting
+          # Failed to find required Qt component "WebSockets").
+          modules: 'qtmultimedia qtwebsockets'
+          cache: true
+
+      - name: Install ninja
+        uses: seanmiddleditch/gha-setup-ninja@v5
+
+      # On Linux, Qt needs a pile of X / GL development packages to link.
+      - name: Install the Linux libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgl1-mesa-dev libxkbcommon-dev \
+            libxcb-cursor0 libxcb-xinerama0 libfontconfig1-dev
+
+      # **Same switches as the engine pipeline**: what is inside the desktop
+      # app *is* that engine, and leaving one off removes half the features
+      # while the interface pages for them sit there as if nothing happened.
+      - name: Configure (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          EXTRA=""
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            EXTRA="-DCMAKE_OSX_DEPLOYMENT_TARGET=13.3 -DGGML_METAL_EMBED_LIBRARY=ON"
+          fi
+          cmake -S changji/cpp -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCHANGJI_VERSION="$CHANGJI_VERSION" \
+            -DCHANGJI_DESKTOP=ON \
+            -DCHANGJI_SD=ON \
+            -DCHANGJI_LLAMA=ON \
+            -DCHANGJI_BUILD_TESTS=OFF \
+            -DGGML_NATIVE=OFF \
+            -DOPENSSL_ROOT_DIR="$PWD/openssl" \
+            $EXTRA
+
+      # Windows uses the Visual Studio generator, not Ninja (same as the engine
+      # pipeline: Ninja would need vcvarsall.bat first, and the runners do not
+      # agree on where VS lives).
+      - name: Configure (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ssl = ((Get-Location).Path -replace '\\','/') + "/openssl"
+          cmake -S changji/cpp -B build -G "Visual Studio 17 2022" -A x64 `
+            -DCHANGJI_VERSION="$env:CHANGJI_VERSION" `
+            -DCHANGJI_DESKTOP=ON `
+            -DCHANGJI_SD=ON `
+            -DCHANGJI_LLAMA=ON `
+            -DCHANGJI_BUILD_TESTS=OFF `
+            -DGGML_NATIVE=OFF `
+            -DOPENSSL_ROOT_DIR="$ssl"
+
+      - name: Build
+        run: cmake --build build --config Release --target changji-desktop --parallel
+
+      # ---- The signing certificate (macOS only, and only when the secret is
+      #      there) ----
+      #
+      # Without it the build falls back to an ad-hoc signature: the package
+      # runs here, but a user who downloads it sees "is damaged and should be
+      # moved to the Bin" — which is why the publish step below refuses to
+      # ship one.
+      - name: Import the Developer ID certificate
+        id: signcert
+        if: runner.os == 'macOS'
+        env:
+          CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          CERT_PW: ${{ secrets.MACOS_CERT_PW }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CERT_P12:-}" ]; then
+            echo "no MACOS_CERT_P12; this run signs ad-hoc"
+            echo "identity=" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          KC="$RUNNER_TEMP/sign.keychain-db"; KPW="$(openssl rand -base64 18)"
+          security create-keychain -p "$KPW" "$KC"
+          security set-keychain-settings -lut 21600 "$KC"
+          security unlock-keychain -p "$KPW" "$KC"
+          echo "$CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KC" -P "${CERT_PW:-}" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KPW" "$KC" >/dev/null
+          # Put the throwaway keychain into the search list, or codesign cannot
+          # find the identity inside it.
+          security list-keychains -d user -s "$KC" $(security list-keychains -d user | sed 's/"//g')
+          ID=$(security find-identity -v -p codesigning "$KC" | grep -m1 "Developer ID Application" | sed -E 's/.*"(.*)".*/\1/')
+          rm -f "$RUNNER_TEMP/cert.p12"
+          [ -n "$ID" ] || { echo "this certificate holds no Developer ID Application identity"; exit 1; }
+          echo "identity=$ID" >> "$GITHUB_OUTPUT"
+          echo "signing as: $ID"
+
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        env:
+          CHANGJI_SIGN_ID: ${{ steps.signcert.outputs.identity }}
+          NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+          CHANGJI_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          CHANGJI_NOTARY_ISSUER: ${{ secrets.MACOS_NOTARY_ISSUER }}
+        run: |
+          set -euo pipefail
+          if [ -n "${NOTARY_KEY:-}" ]; then
+            echo "$NOTARY_KEY" | base64 --decode > "$RUNNER_TEMP/nkey.p8"
+            export CHANGJI_NOTARY_KEY="$RUNNER_TEMP/nkey.p8"
+          fi
+          bash changji/desktop/package_macos.sh build dist
+          rm -f "$RUNNER_TEMP/nkey.p8"
+
+      # **Ask the ticket, not the secrets.**
+      #
+      # The publish job used to decide "is this notarised?" by testing whether
+      # MACOS_CERT_P12 was set. That answers a different question: with a
+      # certificate present and the notarisation secrets missing, the dmg is
+      # signed, unnotarised, and shipped — and a user still gets the "damaged"
+      # dialogue. A `.dmg` **can** carry a stapled ticket (unlike the bare
+      # engine binary), so this asks the artifact itself and leaves a marker
+      # that the publish job, which runs on Linux and has no stapler, can read.
+      - name: Is the dmg really notarized (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          dmg=$(ls dist/*.dmg 2>/dev/null | head -1 || true)
+          [ -n "$dmg" ] || { echo "no dmg came out of packaging"; exit 1; }
+          if xcrun stapler validate "$dmg"; then
+            echo "ticket is stapled to $(basename "$dmg")"
+            : > dist/NOTARIZED
+          else
+            echo "::warning::$(basename "$dmg") carries no notarisation ticket."
+            echo "It will not be published; download it from this run's artifacts to test locally."
+          fi
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          # NSIS: the runners ship Chocolatey, so one install gets makensis.
+          choco install nsis -y --no-progress
+          $env:PATH = "$env:PATH;C:\Program Files (x86)\NSIS"
+          powershell -ExecutionPolicy Bypass -File changji\desktop\package_windows.ps1 build dist
+
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: bash changji/desktop/package_linux.sh build dist
+
+      # Building a package proves nothing; **it has to be opened from outside
+      # the build tree**.
+      #
+      # This uses the desktop app's own self-test hooks (`CHANGJI_DESKTOP_SHOT`:
+      # show yourself, take a screenshot, exit). A missing QML plugin or a
+      # missing runtime library does not stop a package from being *built* —
+      # those only appear when it actually opens. **Linux has no display**, so
+      # xvfb provides one.
+      - name: Actually open it (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          QML_DISABLE_DISK_CACHE=1 CHANGJI_DESKTOP_SHOT="$RUNNER_TEMP/shot.png" \
+            CHANGJI_DESKTOP_SHOT_MS=12000 \
+            dist/changji.app/Contents/MacOS/changji-desktop
+          test -s "$RUNNER_TEMP/shot.png" || { echo "it opened, but no screenshot came out"; exit 1; }
+          echo "it opens outside the build tree"
+
+      - name: Actually open it (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y xvfb
+          xvfb-run -a env QML_DISABLE_DISK_CACHE=1 \
+            CHANGJI_DESKTOP_SHOT="$RUNNER_TEMP/shot.png" CHANGJI_DESKTOP_SHOT_MS=12000 \
+            dist/changji-desktop/changji-desktop
+          test -s "$RUNNER_TEMP/shot.png" || { echo "it opened, but no screenshot came out"; exit 1; }
+          echo "it opens outside the build tree"
+
+      - name: Actually open it (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:QML_DISABLE_DISK_CACHE = "1"
+          $env:CHANGJI_DESKTOP_SHOT = "$env:RUNNER_TEMP\shot.png"
+          $env:CHANGJI_DESKTOP_SHOT_MS = "12000"
+          & "dist\changji-desktop\changji-desktop.exe"
+          if ($LASTEXITCODE -ne 0) { throw "it does not open outside the build tree (exit code $LASTEXITCODE)" }
+          if (-not (Test-Path "$env:RUNNER_TEMP\shot.png")) { throw "it opened, but no screenshot came out" }
+          Write-Host "it opens outside the build tree"
+
+      # Upload only what can be shipped: .dmg / setup.exe / .tar.gz. The
+      # unpacked directory (a several-hundred-megabyte .app, changji-desktop\)
+      # stays behind — it is an intermediate, and uploading it only invites
+      # people to download the wrong thing.
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.target }}
+          path: |
+            dist/*.dmg
+            dist/*setup.exe
+            dist/*.tar.gz
+            dist/*.AppImage
+            dist/*.deb
+            dist/NOTARIZED
+          if-no-files-found: error
+
+  publish:
+    name: Publish
+    needs: [meta, build]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: desktop-*
+          path: dist
+          merge-multiple: true
+
+      - name: What is about to be published
+        run: ls -la dist
+
+      # ⚠️ **An unnotarised mac package must not ship.**
+      #
+      # A user who downloads an unnotarised `.dmg` cannot open it; macOS says
+      # "is damaged and should be moved to the Bin" — wording identical to a
+      # genuinely corrupt file, while nothing at this end reports anything at
+      # all. Better that this run goes red.
+      #
+      # **This asks the artifact, not the configuration.** It used to test
+      # `secrets.MACOS_CERT_P12 != ''`, which answers a different question: a
+      # certificate with the notarisation secrets missing produces a signed,
+      # unnotarised dmg that sailed straight through. The macOS cell now runs
+      # `stapler validate` on the dmg it built and leaves `NOTARIZED` beside it
+      # only if the ticket is really attached. (This job runs on Linux and has
+      # no stapler of its own, which is why it arrives as a marker.)
+      #
+      # On a manual run in a fork with no secrets configured, the packages are
+      # still downloadable from the run's artifacts; they just do not enter the
+      # Release.
+      - name: Gate — is the mac package notarized
+        run: |
+          set -e
+          dmg=$(ls dist/*.dmg 2>/dev/null | head -1 || true)
+          [ -n "$dmg" ] || { echo "no mac package in this run; skipping"; exit 0; }
+          if [ -f dist/NOTARIZED ]; then
+            echo "$(basename "$dmg") is notarized"
+          else
+            echo "::warning::$(basename "$dmg") is not notarized — removing it from the release."
+            echo "Users cannot open it; it would tell them the download is damaged."
+            rm -f dist/*.dmg
+          fi
+          rm -f dist/NOTARIZED
+
+      - name: Create the Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.meta.outputs.tag }}
+          VER: ${{ needs.meta.outputs.version }}
+          CHANNEL: ${{ needs.meta.outputs.channel }}
+        run: |
+          set -e
+          # Delete before creating: the tag would otherwise stay pinned to the
+          # commit that first created it, and when a platform fails to build in
+          # some run the previous run's package for that platform is still
+          # sitting there — whoever is downloading cannot tell which is current
+          # (the same passage as in the engine pipeline).
+          gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag \
+            || echo "no previous $TAG; skipping"
+          gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$TAG" --silent \
+            || echo "no leftover tag; skipping"
+          {
+            if [ "$CHANNEL" = "beta" ]; then
+              echo "**Rolling prerelease.** Built from the last branch push; the next one overwrites it."
+              echo "For a proper release, look for a \`desktop-v\` entry under Releases."
+              echo
+            fi
+            echo "Desktop \`$VER\`. **Separate from the engine release line** —"
+            echo "this holds desktop installers only; the engine packages are in the v-prefixed Releases."
+            echo
+            echo "| OS | How to install |"
+            echo "|---|---|"
+            echo "| macOS | Download the \`.dmg\`, open it, drag the icon into Applications |"
+            echo "| Windows | Download \`setup.exe\`, double-click, click through |"
+            echo "| Linux | Download the \`.tar.gz\`, unpack it, run \`changji-desktop.sh\` inside |"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Branch | \`${GITHUB_REF_NAME}\` |"
+            echo "| Commit | ${GITHUB_SHA} |"
+            echo "| Built | $(date -u '+%Y-%m-%d %H:%M UTC') |"
+          } > body.md
+          # Prerelease: `/releases/latest` does not point at it, so anyone
+          # downloading still gets the tagged build by default.
+          PRE=""
+          [ "$CHANNEL" = "beta" ] && PRE="--prerelease"
+          TITLE="Desktop $VER"
+          [ "$CHANNEL" = "beta" ] && TITLE="Desktop beta (${GITHUB_REF_NAME})"
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            $PRE \
+            --title "$TITLE" \
+            --notes-file body.md \
+            dist/*
