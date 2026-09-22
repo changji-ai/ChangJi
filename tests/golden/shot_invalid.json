@@ -1,0 +1,86 @@
+[
+  {
+    "json": {
+      "order": 0,
+      "scene_id": "b",
+      "shot_id": "a",
+      "transition_dur_s": 0.5,
+      "transition_in": "cut"
+    },
+    "why": "硬切却给了转场时长"
+  },
+  {
+    "json": {
+      "order": 0,
+      "scene_id": "b",
+      "shot_id": "a",
+      "transition_dur_s": 0,
+      "transition_in": "dissolve"
+    },
+    "why": "溶解转场时长为 0"
+  },
+  {
+    "json": {
+      "characters": [
+        {
+          "char_id": "x"
+        }
+      ],
+      "dialogue": [
+        {
+          "char_id": "y",
+          "text": "谁在说话"
+        }
+      ],
+      "order": 0,
+      "scene_id": "b",
+      "shot_id": "a"
+    },
+    "why": "台词说话人不在本镜角色列表里"
+  },
+  {
+    "json": {
+      "order": 0,
+      "scene_id": "b",
+      "shot_id": "EP01"
+    },
+    "why": "shot_id 有大写字母"
+  },
+  {
+    "json": {
+      "duration_s": 31,
+      "order": 0,
+      "scene_id": "b",
+      "shot_id": "a"
+    },
+    "why": "镜头时长超过 30 秒"
+  },
+  {
+    "json": {
+      "characters": [
+        {
+          "char_id": "x"
+        }
+      ],
+      "dialogue": [
+        {
+          "char_id": "x",
+          "text": ""
+        }
+      ],
+      "order": 0,
+      "scene_id": "b",
+      "shot_id": "a"
+    },
+    "why": "台词为空串"
+  },
+  {
+    "json": {
+      "order": 0,
+      "scene_id": "b",
+      "shot_id": "a",
+      "visual_desc": "雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨雨"
+    },
+    "why": "visual_desc 超过 300 字（用汉字，字节数是 900）"
+  }
+]

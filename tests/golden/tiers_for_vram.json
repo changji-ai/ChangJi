@@ -1,0 +1,189 @@
+[
+  {
+    "tiers": {
+      "draft": {
+        "height": 256,
+        "measured_seconds": 18.0,
+        "steps": 8,
+        "width": 448
+      },
+      "final": {
+        "height": 448,
+        "measured_seconds": 245.5,
+        "steps": 20,
+        "width": 768
+      }
+    },
+    "vram_gb": 4.0
+  },
+  {
+    "tiers": {
+      "draft": {
+        "height": 256,
+        "measured_seconds": 18.0,
+        "steps": 8,
+        "width": 448
+      },
+      "final": {
+        "height": 448,
+        "measured_seconds": 245.5,
+        "steps": 20,
+        "width": 768
+      }
+    },
+    "vram_gb": 7.5
+  },
+  {
+    "tiers": {
+      "draft": {
+        "height": 256,
+        "measured_seconds": 18.0,
+        "steps": 8,
+        "width": 448
+      },
+      "final": {
+        "height": 448,
+        "measured_seconds": 245.5,
+        "steps": 20,
+        "width": 768
+      }
+    },
+    "vram_gb": 8.0
+  },
+  {
+    "tiers": {
+      "draft": {
+        "height": 288,
+        "measured_seconds": 18.7,
+        "steps": 8,
+        "width": 512
+      },
+      "final": {
+        "height": 544,
+        "measured_seconds": 299.9,
+        "steps": 20,
+        "width": 960
+      }
+    },
+    "vram_gb": 11.5
+  },
+  {
+    "tiers": {
+      "draft": {
+        "height": 288,
+        "measured_seconds": 18.7,
+        "steps": 8,
+        "width": 512
+      },
+      "final": {
+        "height": 544,
+        "measured_seconds": 299.9,
+        "steps": 20,
+        "width": 960
+      }
+    },
+    "vram_gb": 12.0
+  },
+  {
+    "tiers": {
+      "draft": {
+        "height": 352,
+        "measured_seconds": 27.0,
+        "steps": 10,
+        "width": 640
+      },
+      "final": {
+        "height": 704,
+        "measured_seconds": 392.0,
+        "steps": 20,
+        "width": 1280
+      }
+    },
+    "vram_gb": 15.5
+  },
+  {
+    "tiers": {
+      "draft": {
+        "height": 352,
+        "measured_seconds": 27.0,
+        "steps": 10,
+        "width": 640
+      },
+      "final": {
+        "height": 704,
+        "measured_seconds": 392.0,
+        "steps": 20,
+        "width": 1280
+      }
+    },
+    "vram_gb": 15.9
+  },
+  {
+    "tiers": {
+      "draft": {
+        "height": 352,
+        "measured_seconds": 27.0,
+        "steps": 10,
+        "width": 640
+      },
+      "final": {
+        "height": 704,
+        "measured_seconds": 392.0,
+        "steps": 20,
+        "width": 1280
+      }
+    },
+    "vram_gb": 16.0
+  },
+  {
+    "tiers": {
+      "draft": {
+        "height": 448,
+        "measured_seconds": 41.2,
+        "steps": 10,
+        "width": 768
+      },
+      "final": {
+        "height": 1088,
+        "measured_seconds": 908.7,
+        "steps": 20,
+        "width": 1920
+      }
+    },
+    "vram_gb": 23.5
+  },
+  {
+    "tiers": {
+      "draft": {
+        "height": 448,
+        "measured_seconds": 41.2,
+        "steps": 10,
+        "width": 768
+      },
+      "final": {
+        "height": 1088,
+        "measured_seconds": 908.7,
+        "steps": 20,
+        "width": 1920
+      }
+    },
+    "vram_gb": 24.0
+  },
+  {
+    "tiers": {
+      "draft": {
+        "height": 448,
+        "measured_seconds": 41.2,
+        "steps": 10,
+        "width": 768
+      },
+      "final": {
+        "height": 1088,
+        "measured_seconds": 908.7,
+        "steps": 20,
+        "width": 1920
+      }
+    },
+    "vram_gb": 48.0
+  }
+]

@@ -1,0 +1,182 @@
+{
+  "cases": [
+    {
+      "name": "全成功",
+      "plan": [
+        true,
+        true,
+        true
+      ],
+      "outcomes": [
+        {
+          "shot_id": "ep01_sh001",
+          "ok": true,
+          "has_error": false
+        },
+        {
+          "shot_id": "ep01_sh002",
+          "ok": true,
+          "has_error": false
+        },
+        {
+          "shot_id": "ep01_sh003",
+          "ok": true,
+          "has_error": false
+        }
+      ],
+      "shots_after": [
+        {
+          "shot_id": "ep01_sh001",
+          "status": "frame_done",
+          "attempts": 0,
+          "frame_path": "frames/ep01_sh001.png"
+        },
+        {
+          "shot_id": "ep01_sh002",
+          "status": "frame_done",
+          "attempts": 0,
+          "frame_path": "frames/ep01_sh002.png"
+        },
+        {
+          "shot_id": "ep01_sh003",
+          "status": "frame_done",
+          "attempts": 0,
+          "frame_path": "frames/ep01_sh003.png"
+        }
+      ]
+    },
+    {
+      "name": "全失败",
+      "plan": [
+        false,
+        false
+      ],
+      "outcomes": [
+        {
+          "shot_id": "ep01_sh001",
+          "ok": false,
+          "has_error": true
+        },
+        {
+          "shot_id": "ep01_sh002",
+          "ok": false,
+          "has_error": true
+        }
+      ],
+      "shots_after": [
+        {
+          "shot_id": "ep01_sh001",
+          "status": "audio_done",
+          "attempts": 1,
+          "frame_path": null
+        },
+        {
+          "shot_id": "ep01_sh002",
+          "status": "audio_done",
+          "attempts": 1,
+          "frame_path": null
+        }
+      ]
+    },
+    {
+      "name": "中间那个失败",
+      "plan": [
+        true,
+        false,
+        true
+      ],
+      "outcomes": [
+        {
+          "shot_id": "ep01_sh001",
+          "ok": true,
+          "has_error": false
+        },
+        {
+          "shot_id": "ep01_sh002",
+          "ok": false,
+          "has_error": true
+        },
+        {
+          "shot_id": "ep01_sh003",
+          "ok": true,
+          "has_error": false
+        }
+      ],
+      "shots_after": [
+        {
+          "shot_id": "ep01_sh001",
+          "status": "frame_done",
+          "attempts": 0,
+          "frame_path": "frames/ep01_sh001.png"
+        },
+        {
+          "shot_id": "ep01_sh002",
+          "status": "audio_done",
+          "attempts": 1,
+          "frame_path": null
+        },
+        {
+          "shot_id": "ep01_sh003",
+          "status": "frame_done",
+          "attempts": 0,
+          "frame_path": "frames/ep01_sh003.png"
+        }
+      ]
+    },
+    {
+      "name": "第一个就失败",
+      "plan": [
+        false,
+        true
+      ],
+      "outcomes": [
+        {
+          "shot_id": "ep01_sh001",
+          "ok": false,
+          "has_error": true
+        },
+        {
+          "shot_id": "ep01_sh002",
+          "ok": true,
+          "has_error": false
+        }
+      ],
+      "shots_after": [
+        {
+          "shot_id": "ep01_sh001",
+          "status": "audio_done",
+          "attempts": 1,
+          "frame_path": null
+        },
+        {
+          "shot_id": "ep01_sh002",
+          "status": "frame_done",
+          "attempts": 0,
+          "frame_path": "frames/ep01_sh002.png"
+        }
+      ]
+    },
+    {
+      "name": "只有一镜且成功",
+      "plan": [
+        true
+      ],
+      "outcomes": [
+        {
+          "shot_id": "ep01_sh001",
+          "ok": true,
+          "has_error": false
+        }
+      ],
+      "shots_after": [
+        {
+          "shot_id": "ep01_sh001",
+          "status": "frame_done",
+          "attempts": 0,
+          "frame_path": "frames/ep01_sh001.png"
+        }
+      ]
+    }
+  ],
+  "note": "由 cpp/tests/export_frames_stage_golden.py 生成，不要手改。只喂两边都会捕的错误类型——Python 捕 (FrameError, RenderError)，C++ 捕 std::exception，喂别的就不是在比同一件事了。"
+}

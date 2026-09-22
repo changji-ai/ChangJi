@@ -1,0 +1,276 @@
+{
+  "cases": [
+    {
+      "name": "一镜一句",
+      "synth_durations": [
+        2.0
+      ],
+      "shots_before": [
+        {
+          "shot_id": "sh001",
+          "duration_s": 5.0,
+          "dialogue": [
+            "你终于来了。"
+          ]
+        }
+      ],
+      "plans": [
+        {
+          "shot_id": "sh001",
+          "speech_duration_s": 2.0,
+          "locked_duration_s": 3.0,
+          "slack_s": 1.0,
+          "lines": 1,
+          "is_tight": false
+        }
+      ],
+      "shots_after": [
+        {
+          "shot_id": "sh001",
+          "status": "audio_done",
+          "duration_s": 3.0,
+          "duration_locked": true,
+          "dialogue": [
+            {
+              "text": "你终于来了。",
+              "actual_duration_s": 2.0,
+              "has_audio": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "一镜两句",
+      "synth_durations": [
+        2.0,
+        1.5
+      ],
+      "shots_before": [
+        {
+          "shot_id": "sh002",
+          "duration_s": 5.0,
+          "dialogue": [
+            "你终于来了。",
+            "雨下了一夜。"
+          ]
+        }
+      ],
+      "plans": [
+        {
+          "shot_id": "sh002",
+          "speech_duration_s": 3.5,
+          "locked_duration_s": 4.0,
+          "slack_s": 0.5,
+          "lines": 2,
+          "is_tight": false
+        }
+      ],
+      "shots_after": [
+        {
+          "shot_id": "sh002",
+          "status": "audio_done",
+          "duration_s": 4.0,
+          "duration_locked": true,
+          "dialogue": [
+            {
+              "text": "你终于来了。",
+              "actual_duration_s": 2.0,
+              "has_audio": true
+            },
+            {
+              "text": "雨下了一夜。",
+              "actual_duration_s": 1.5,
+              "has_audio": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "没有台词",
+      "synth_durations": [],
+      "shots_before": [
+        {
+          "shot_id": "sh003",
+          "duration_s": 5.0,
+          "dialogue": []
+        }
+      ],
+      "plans": [
+        {
+          "shot_id": "sh003",
+          "speech_duration_s": 0,
+          "locked_duration_s": 5.0,
+          "slack_s": 5.0,
+          "lines": 0,
+          "is_tight": false
+        }
+      ],
+      "shots_after": [
+        {
+          "shot_id": "sh003",
+          "status": "audio_done",
+          "duration_s": 5.0,
+          "duration_locked": false,
+          "dialogue": []
+        }
+      ]
+    },
+    {
+      "name": "两镜各一句",
+      "synth_durations": [
+        1.2,
+        2.4
+      ],
+      "shots_before": [
+        {
+          "shot_id": "sh004",
+          "duration_s": 5.0,
+          "dialogue": [
+            "第一句。"
+          ]
+        },
+        {
+          "shot_id": "sh005",
+          "duration_s": 5.0,
+          "dialogue": [
+            "第二句。"
+          ]
+        }
+      ],
+      "plans": [
+        {
+          "shot_id": "sh004",
+          "speech_duration_s": 1.2,
+          "locked_duration_s": 2.0,
+          "slack_s": 0.8,
+          "lines": 1,
+          "is_tight": false
+        },
+        {
+          "shot_id": "sh005",
+          "speech_duration_s": 2.4,
+          "locked_duration_s": 3.0,
+          "slack_s": 0.6,
+          "lines": 1,
+          "is_tight": false
+        }
+      ],
+      "shots_after": [
+        {
+          "shot_id": "sh004",
+          "status": "audio_done",
+          "duration_s": 2.0,
+          "duration_locked": true,
+          "dialogue": [
+            {
+              "text": "第一句。",
+              "actual_duration_s": 1.2,
+              "has_audio": true
+            }
+          ]
+        },
+        {
+          "shot_id": "sh005",
+          "status": "audio_done",
+          "duration_s": 3.0,
+          "duration_locked": true,
+          "dialogue": [
+            {
+              "text": "第二句。",
+              "actual_duration_s": 2.4,
+              "has_audio": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "长台词触发重新拆句",
+      "synth_durations": [
+        6.0
+      ],
+      "shots_before": [
+        {
+          "shot_id": "sh006",
+          "duration_s": 2.0,
+          "dialogue": [
+            "很长的一句台词，念起来要好一会儿。"
+          ]
+        }
+      ],
+      "plans": [
+        {
+          "shot_id": "sh006",
+          "speech_duration_s": 2.0,
+          "locked_duration_s": 3.0,
+          "slack_s": 1.0,
+          "lines": 2,
+          "is_tight": false
+        }
+      ],
+      "shots_after": [
+        {
+          "shot_id": "sh006",
+          "status": "audio_done",
+          "duration_s": 3.0,
+          "duration_locked": true,
+          "dialogue": [
+            {
+              "text": "很长的一句台词，",
+              "actual_duration_s": 1.0,
+              "has_audio": true
+            },
+            {
+              "text": "念起来要好一会儿。",
+              "actual_duration_s": 1.0,
+              "has_audio": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "语音比镜头长，直接拉长镜头",
+      "synth_durations": [
+        5.0
+      ],
+      "shots_before": [
+        {
+          "shot_id": "sh007",
+          "duration_s": 2.0,
+          "dialogue": [
+            "等等。"
+          ]
+        }
+      ],
+      "plans": [
+        {
+          "shot_id": "sh007",
+          "speech_duration_s": 5.0,
+          "locked_duration_s": 5.0,
+          "slack_s": 0.0,
+          "lines": 1,
+          "is_tight": true
+        }
+      ],
+      "shots_after": [
+        {
+          "shot_id": "sh007",
+          "status": "audio_done",
+          "duration_s": 5.0,
+          "duration_locked": true,
+          "dialogue": [
+            {
+              "text": "等等。",
+              "actual_duration_s": 5.0,
+              "has_audio": true
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "note": "由 cpp/tests/export_audio_stage_golden.py 生成，不要手改。concurrency=1 导——Python 的 run 默认并发 2，C++ 是顺序跑的。"
+}

@@ -1,0 +1,458 @@
+{
+  "cases": [
+    {
+      "name": "闸门没开：一次就完",
+      "why": "enabled=false 时不该碰 gate_video，一次渲染直接置完成",
+      "tier": "draft",
+      "gates_enabled": false,
+      "fallback_on_exhausted": true,
+      "max_attempts_per_shot": 3,
+      "preset_attempts": 0,
+      "preset_gate_notes": [],
+      "render": [
+        "ok"
+      ],
+      "gate": [],
+      "status": "draft_done",
+      "attempts": 0,
+      "gate_notes": [],
+      "has_video_path": true,
+      "render_calls": 1,
+      "gate_calls": 0,
+      "returned_verdict": null,
+      "events": [
+        {
+          "kind": "shot_done",
+          "message": "sh001 完成",
+          "shot_id": "sh001",
+          "current": 1,
+          "total": 1
+        }
+      ]
+    },
+    {
+      "name": "闸门过了",
+      "why": "最普通的一条路；gate_notes 要被清空，不能留上一轮的",
+      "tier": "draft",
+      "gates_enabled": true,
+      "fallback_on_exhausted": true,
+      "max_attempts_per_shot": 3,
+      "preset_attempts": 0,
+      "preset_gate_notes": [
+        "上一轮留下的"
+      ],
+      "render": [
+        "ok"
+      ],
+      "gate": [
+        "pass"
+      ],
+      "status": "draft_done",
+      "attempts": 0,
+      "gate_notes": [],
+      "has_video_path": true,
+      "render_calls": 1,
+      "gate_calls": 1,
+      "returned_verdict": "pass",
+      "events": [
+        {
+          "kind": "shot_done",
+          "message": "sh001 通过闸门",
+          "shot_id": "sh001",
+          "current": 1,
+          "total": 1
+        }
+      ]
+    },
+    {
+      "name": "成片档过了",
+      "why": "状态要落到 FINAL_DONE 而不是 DRAFT_DONE；两个不能混",
+      "tier": "final",
+      "gates_enabled": true,
+      "fallback_on_exhausted": true,
+      "max_attempts_per_shot": 3,
+      "preset_attempts": 0,
+      "preset_gate_notes": [],
+      "render": [
+        "ok"
+      ],
+      "gate": [
+        "pass"
+      ],
+      "status": "final_done",
+      "attempts": 0,
+      "gate_notes": [],
+      "has_video_path": true,
+      "render_calls": 1,
+      "gate_calls": 1,
+      "returned_verdict": "pass",
+      "events": [
+        {
+          "kind": "shot_done",
+          "message": "sh001 通过闸门",
+          "shot_id": "sh001",
+          "current": 1,
+          "total": 1
+        }
+      ]
+    },
+    {
+      "name": "渲染连续失败到上限",
+      "why": "attempts 每次+1，到 max 才降级；少一次是提前放弃，多一次是白烧显卡",
+      "tier": "draft",
+      "gates_enabled": true,
+      "fallback_on_exhausted": true,
+      "max_attempts_per_shot": 3,
+      "preset_attempts": 0,
+      "preset_gate_notes": [],
+      "render": [
+        "fail",
+        "fail",
+        "fail"
+      ],
+      "gate": [],
+      "status": "fallback",
+      "attempts": 3,
+      "gate_notes": [
+        "渲染连续失败：造出来的错 #3"
+      ],
+      "has_video_path": false,
+      "render_calls": 3,
+      "gate_calls": 0,
+      "returned_verdict": "fallback",
+      "events": [
+        {
+          "kind": "warn",
+          "message": "sh001 渲染失败：造出来的错 #1",
+          "shot_id": "sh001",
+          "current": 1,
+          "total": 1
+        },
+        {
+          "kind": "warn",
+          "message": "sh001 渲染失败：造出来的错 #2",
+          "shot_id": "sh001",
+          "current": 1,
+          "total": 1
+        },
+        {
+          "kind": "warn",
+          "message": "sh001 渲染失败：造出来的错 #3",
+          "shot_id": "sh001",
+          "current": 1,
+          "total": 1
+        },
+        {
+          "kind": "warn",
+          "message": "sh001 重试超限，降级处理：渲染连续失败：造出来的错 #3",
+          "shot_id": "sh001",
+          "current": 0,
+          "total": 0
+        }
+      ]
+    },
+    {
+      "name": "渲染失败一次然后过了",
+      "why": "第二次成功后 attempts 停在 1，状态照样是完成",
+      "tier": "draft",
+      "gates_enabled": true,
+      "fallback_on_exhausted": true,
+      "max_attempts_per_shot": 3,
+      "preset_attempts": 0,
+      "preset_gate_notes": [],
+      "render": [
+        "fail",
+        "ok"
+      ],
+      "gate": [
+        "pass"
+      ],
+      "status": "draft_done",
+      "attempts": 1,
+      "gate_notes": [],
+      "has_video_path": true,
+      "render_calls": 2,
+      "gate_calls": 1,
+      "returned_verdict": "pass",
+      "events": [
+        {
+          "kind": "warn",
+          "message": "sh001 渲染失败：造出来的错 #1",
+          "shot_id": "sh001",
+          "current": 1,
+          "total": 1
+        },
+        {
+          "kind": "shot_done",
+          "message": "sh001 通过闸门",
+          "shot_id": "sh001",
+          "current": 1,
+          "total": 1
+        }
+      ]
+    },
+    {
+      "name": "闸门 RETRY 一次然后过了",
+      "why": "RETRY 要 attempts+1 再渲一次（换种子），过了之后 gate_notes 清空",
+      "tier": "draft",
+      "gates_enabled": true,
+      "fallback_on_exhausted": true,
+      "max_attempts_per_shot": 3,
+      "preset_attempts": 0,
+      "preset_gate_notes": [],
+      "render": [
+        "ok",
+        "ok"
+      ],
+      "gate": [
+        "retry",
+        "pass"
+      ],
+      "status": "draft_done",
+      "attempts": 1,
+      "gate_notes": [],
+      "has_video_path": true,
+      "render_calls": 2,
+      "gate_calls": 2,
+      "returned_verdict": "pass",
+      "events": [
+        {
+          "kind": "gate",
+          "message": "sh001 未过draft 档闸门：造出来的理由 #1；第二条理由",
+          "shot_id": "sh001",
+          "current": 1,
+          "total": 1
+        },
+        {
+          "kind": "shot_done",
+          "message": "sh001 通过闸门",
+          "shot_id": "sh001",
+          "current": 1,
+          "total": 1
+        }
+      ]
+    },
+    {
+      "name": "闸门一直 RETRY 直到超限",
+      "why": "decide_next 看的是 attempts+1>=max，所以是第 2 次没过就降级，不是第 3 次",
+      "tier": "draft",
+      "gates_enabled": true,
+      "fallback_on_exhausted": true,
+      "max_attempts_per_shot": 3,
+      "preset_attempts": 0,
+      "preset_gate_notes": [],
+      "render": [
+        "ok",
+        "ok",
+        "ok",
+        "ok"
+      ],
+      "gate": [
+        "retry",
+        "retry",
+        "retry",
+        "retry"
+      ],
+      "status": "fallback",
+      "attempts": 2,
+      "gate_notes": [
+        "造出来的理由 #3；第二条理由"
+      ],
+      "has_video_path": true,
+      "render_calls": 3,
+      "gate_calls": 3,
+      "returned_verdict": "fallback",
+      "events": [
+        {
+          "kind": "gate",
+          "message": "sh001 未过draft 档闸门：造出来的理由 #1；第二条理由",
+          "shot_id": "sh001",
+          "current": 1,
+          "total": 1
+        },
+        {
+          "kind": "gate",
+          "message": "sh001 未过draft 档闸门：造出来的理由 #2；第二条理由",
+          "shot_id": "sh001",
+          "current": 1,
+          "total": 1
+        },
+        {
+          "kind": "gate",
+          "message": "sh001 未过draft 档闸门：造出来的理由 #3；第二条理由",
+          "shot_id": "sh001",
+          "current": 1,
+          "total": 1
+        },
+        {
+          "kind": "warn",
+          "message": "sh001 重试超限，降级处理：造出来的理由 #3；第二条理由",
+          "shot_id": "sh001",
+          "current": 0,
+          "total": 0
+        }
+      ]
+    },
+    {
+      "name": "闸门 REGRESS",
+      "why": "重跑没用，标 DRAFT_REJECTED 交给人；attempts 不动，不再渲染",
+      "tier": "draft",
+      "gates_enabled": true,
+      "fallback_on_exhausted": true,
+      "max_attempts_per_shot": 3,
+      "preset_attempts": 0,
+      "preset_gate_notes": [],
+      "render": [
+        "ok"
+      ],
+      "gate": [
+        "regress"
+      ],
+      "status": "draft_rejected",
+      "attempts": 0,
+      "gate_notes": [
+        "重跑也没用的那种"
+      ],
+      "has_video_path": true,
+      "render_calls": 1,
+      "gate_calls": 1,
+      "returned_verdict": "regress",
+      "events": [
+        {
+          "kind": "gate",
+          "message": "sh001 未过draft 档闸门：重跑也没用的那种",
+          "shot_id": "sh001",
+          "current": 1,
+          "total": 1
+        }
+      ]
+    },
+    {
+      "name": "成片档 REGRESS",
+      "why": "成片档退回的是 FINAL_REJECTED",
+      "tier": "final",
+      "gates_enabled": true,
+      "fallback_on_exhausted": true,
+      "max_attempts_per_shot": 3,
+      "preset_attempts": 0,
+      "preset_gate_notes": [],
+      "render": [
+        "ok"
+      ],
+      "gate": [
+        "regress"
+      ],
+      "status": "final_rejected",
+      "attempts": 0,
+      "gate_notes": [
+        "重跑也没用的那种"
+      ],
+      "has_video_path": true,
+      "render_calls": 1,
+      "gate_calls": 1,
+      "returned_verdict": "regress",
+      "events": [
+        {
+          "kind": "gate",
+          "message": "sh001 未过final 档闸门：重跑也没用的那种",
+          "shot_id": "sh001",
+          "current": 1,
+          "total": 1
+        }
+      ]
+    },
+    {
+      "name": "超限但不许降级",
+      "why": "fallback_on_exhausted=false 时超限走 REGRESS，标 *_REJECTED 而不是 FALLBACK",
+      "tier": "draft",
+      "gates_enabled": true,
+      "fallback_on_exhausted": false,
+      "max_attempts_per_shot": 3,
+      "preset_attempts": 0,
+      "preset_gate_notes": [],
+      "render": [
+        "ok",
+        "ok",
+        "ok"
+      ],
+      "gate": [
+        "retry",
+        "retry",
+        "retry"
+      ],
+      "status": "draft_rejected",
+      "attempts": 2,
+      "gate_notes": [
+        "造出来的理由 #3",
+        "第二条理由"
+      ],
+      "has_video_path": true,
+      "render_calls": 3,
+      "gate_calls": 3,
+      "returned_verdict": "retry",
+      "events": [
+        {
+          "kind": "gate",
+          "message": "sh001 未过draft 档闸门：造出来的理由 #1；第二条理由",
+          "shot_id": "sh001",
+          "current": 1,
+          "total": 1
+        },
+        {
+          "kind": "gate",
+          "message": "sh001 未过draft 档闸门：造出来的理由 #2；第二条理由",
+          "shot_id": "sh001",
+          "current": 1,
+          "total": 1
+        },
+        {
+          "kind": "gate",
+          "message": "sh001 未过draft 档闸门：造出来的理由 #3；第二条理由",
+          "shot_id": "sh001",
+          "current": 1,
+          "total": 1
+        }
+      ]
+    },
+    {
+      "name": "带着 attempts 进来",
+      "why": "断点续跑：镜头上已经有 attempts=2，再失败一次就该到上限",
+      "tier": "draft",
+      "gates_enabled": true,
+      "fallback_on_exhausted": true,
+      "max_attempts_per_shot": 3,
+      "preset_attempts": 2,
+      "preset_gate_notes": [],
+      "render": [
+        "fail",
+        "fail"
+      ],
+      "gate": [],
+      "status": "fallback",
+      "attempts": 3,
+      "gate_notes": [
+        "渲染连续失败：造出来的错 #1"
+      ],
+      "has_video_path": false,
+      "render_calls": 1,
+      "gate_calls": 0,
+      "returned_verdict": "fallback",
+      "events": [
+        {
+          "kind": "warn",
+          "message": "sh001 渲染失败：造出来的错 #1",
+          "shot_id": "sh001",
+          "current": 1,
+          "total": 1
+        },
+        {
+          "kind": "warn",
+          "message": "sh001 重试超限，降级处理：渲染连续失败：造出来的错 #1",
+          "shot_id": "sh001",
+          "current": 0,
+          "total": 0
+        }
+      ]
+    }
+  ]
+}

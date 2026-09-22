@@ -1,0 +1,248 @@
+{
+ "python_total": 48,
+ "cpp_total": 49,
+ "missing": {},
+ "cpp_only": [],
+ "routes": [
+  {
+   "method": "GET",
+   "path": "/",
+   "in_cpp": true
+  },
+  {
+   "method": "GET",
+   "path": "/api/assets",
+   "in_cpp": true
+  },
+  {
+   "method": "GET",
+   "path": "/api/connections",
+   "in_cpp": true
+  },
+  {
+   "method": "GET",
+   "path": "/api/doctor",
+   "in_cpp": true
+  },
+  {
+   "method": "GET",
+   "path": "/api/hardware",
+   "in_cpp": true
+  },
+  {
+   "method": "GET",
+   "path": "/api/health",
+   "in_cpp": true
+  },
+  {
+   "method": "GET",
+   "path": "/api/llm/models",
+   "in_cpp": true
+  },
+  {
+   "method": "GET",
+   "path": "/api/llm/providers",
+   "in_cpp": true
+  },
+  {
+   "method": "GET",
+   "path": "/api/media",
+   "in_cpp": true
+  },
+  {
+   "method": "GET",
+   "path": "/api/outputs",
+   "in_cpp": true
+  },
+  {
+   "method": "GET",
+   "path": "/api/project",
+   "in_cpp": true
+  },
+  {
+   "method": "GET",
+   "path": "/api/projects",
+   "in_cpp": true
+  },
+  {
+   "method": "GET",
+   "path": "/api/run",
+   "in_cpp": true
+  },
+  {
+   "method": "GET",
+   "path": "/api/run/preview",
+   "in_cpp": true
+  },
+  {
+   "method": "GET",
+   "path": "/api/script",
+   "in_cpp": true
+  },
+  {
+   "method": "GET",
+   "path": "/api/script/series",
+   "in_cpp": true
+  },
+  {
+   "method": "GET",
+   "path": "/api/settings",
+   "in_cpp": true
+  },
+  {
+   "method": "GET",
+   "path": "/api/shots",
+   "in_cpp": true
+  },
+  {
+   "method": "GET",
+   "path": "/api/voices",
+   "in_cpp": true
+  },
+  {
+   "method": "POST",
+   "path": "/api/bible",
+   "in_cpp": true
+  },
+  {
+   "method": "POST",
+   "path": "/api/character",
+   "in_cpp": true
+  },
+  {
+   "method": "POST",
+   "path": "/api/character/reference",
+   "in_cpp": true
+  },
+  {
+   "method": "POST",
+   "path": "/api/character/reference/clear",
+   "in_cpp": true
+  },
+  {
+   "method": "POST",
+   "path": "/api/connections",
+   "in_cpp": true
+  },
+  {
+   "method": "POST",
+   "path": "/api/episode",
+   "in_cpp": true
+  },
+  {
+   "method": "POST",
+   "path": "/api/episode/action",
+   "in_cpp": true
+  },
+  {
+   "method": "POST",
+   "path": "/api/location",
+   "in_cpp": true
+  },
+  {
+   "method": "POST",
+   "path": "/api/location/reference",
+   "in_cpp": true
+  },
+  {
+   "method": "POST",
+   "path": "/api/location/reference/clear",
+   "in_cpp": true
+  },
+  {
+   "method": "POST",
+   "path": "/api/new",
+   "in_cpp": true
+  },
+  {
+   "method": "POST",
+   "path": "/api/plan",
+   "in_cpp": true
+  },
+  {
+   "method": "POST",
+   "path": "/api/plan/all",
+   "in_cpp": true
+  },
+  {
+   "method": "POST",
+   "path": "/api/project/delete",
+   "in_cpp": true
+  },
+  {
+   "method": "POST",
+   "path": "/api/project/premise",
+   "in_cpp": true
+  },
+  {
+   "method": "POST",
+   "path": "/api/run",
+   "in_cpp": true
+  },
+  {
+   "method": "POST",
+   "path": "/api/script",
+   "in_cpp": true
+  },
+  {
+   "method": "POST",
+   "path": "/api/script/premise",
+   "in_cpp": true
+  },
+  {
+   "method": "POST",
+   "path": "/api/script/series",
+   "in_cpp": true
+  },
+  {
+   "method": "POST",
+   "path": "/api/script/series/stop",
+   "in_cpp": true
+  },
+  {
+   "method": "POST",
+   "path": "/api/script/trailer",
+   "in_cpp": true
+  },
+  {
+   "method": "POST",
+   "path": "/api/script/write",
+   "in_cpp": true
+  },
+  {
+   "method": "POST",
+   "path": "/api/settings",
+   "in_cpp": true
+  },
+  {
+   "method": "POST",
+   "path": "/api/shot",
+   "in_cpp": true
+  },
+  {
+   "method": "POST",
+   "path": "/api/shots/batch",
+   "in_cpp": true
+  },
+  {
+   "method": "POST",
+   "path": "/api/shots/link_locations",
+   "in_cpp": true
+  },
+  {
+   "method": "POST",
+   "path": "/api/shots/reorder",
+   "in_cpp": true
+  },
+  {
+   "method": "POST",
+   "path": "/api/stop",
+   "in_cpp": true
+  },
+  {
+   "method": "POST",
+   "path": "/api/style",
+   "in_cpp": true
+  }
+ ]
+}

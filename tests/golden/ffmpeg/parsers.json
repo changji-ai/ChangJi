@@ -1,0 +1,269 @@
+{
+  "probe": [
+    {
+      "name": "draft_clip",
+      "input": "{\"streams\": [{\"index\": 0, \"codec_type\": \"video\", \"codec_name\": \"h264\", \"width\": 448, \"height\": 768, \"pix_fmt\": \"yuv420p\", \"r_frame_rate\": \"24/1\", \"nb_frames\": \"121\", \"sample_aspect_ratio\": \"1:1\", \"duration\": \"5.041667\"}], \"format\": {\"duration\": \"5.041667\", \"format_name\": \"mov,mp4,m4a\"}}",
+      "expected": {
+        "duration_s": 5.041667,
+        "width": 448,
+        "height": 768,
+        "fps": 24.0,
+        "frames": 121,
+        "has_video": true,
+        "has_audio": false,
+        "pix_fmt": "yuv420p",
+        "sar": "1:1"
+      }
+    },
+    {
+      "name": "ntsc_framerate",
+      "input": "{\"streams\": [{\"index\": 0, \"codec_type\": \"video\", \"codec_name\": \"h264\", \"width\": 1920, \"height\": 1080, \"pix_fmt\": \"yuv420p\", \"r_frame_rate\": \"24000/1001\", \"nb_frames\": \"240\", \"duration\": \"10.0\"}], \"format\": {\"duration\": \"10.0\"}}",
+      "expected": {
+        "duration_s": 10.0,
+        "width": 1920,
+        "height": 1080,
+        "fps": 23.976023976023978,
+        "frames": 240,
+        "has_video": true,
+        "has_audio": false,
+        "pix_fmt": "yuv420p",
+        "sar": ""
+      }
+    },
+    {
+      "name": "duration_only_on_stream",
+      "input": "{\"streams\": [{\"index\": 0, \"codec_type\": \"video\", \"width\": 640, \"height\": 352, \"r_frame_rate\": \"24/1\", \"duration\": \"3.5\"}], \"format\": {\"format_name\": \"matroska\"}}",
+      "expected": {
+        "duration_s": 3.5,
+        "width": 640,
+        "height": 352,
+        "fps": 24.0,
+        "frames": 0,
+        "has_video": true,
+        "has_audio": false,
+        "pix_fmt": "",
+        "sar": ""
+      }
+    },
+    {
+      "name": "with_audio",
+      "input": "{\"streams\": [{\"index\": 0, \"codec_type\": \"video\", \"width\": 1280, \"height\": 704, \"r_frame_rate\": \"24/1\", \"nb_frames\": \"2880\", \"pix_fmt\": \"yuv420p\"}, {\"index\": 1, \"codec_type\": \"audio\", \"codec_name\": \"aac\", \"sample_rate\": \"48000\", \"channels\": 2}], \"format\": {\"duration\": \"120.0\"}}",
+      "expected": {
+        "duration_s": 120.0,
+        "width": 1280,
+        "height": 704,
+        "fps": 24.0,
+        "frames": 2880,
+        "has_video": true,
+        "has_audio": true,
+        "pix_fmt": "yuv420p",
+        "sar": ""
+      }
+    },
+    {
+      "name": "audio_only",
+      "input": "{\"streams\": [{\"index\": 0, \"codec_type\": \"audio\", \"codec_name\": \"pcm_s16le\", \"sample_rate\": \"24000\", \"channels\": 1}], \"format\": {\"duration\": \"3.2\"}}",
+      "expected": {
+        "duration_s": 3.2,
+        "width": 0,
+        "height": 0,
+        "fps": 0.0,
+        "frames": 0,
+        "has_video": false,
+        "has_audio": true,
+        "pix_fmt": "",
+        "sar": ""
+      }
+    },
+    {
+      "name": "na_fields",
+      "input": "{\"streams\": [{\"index\": 0, \"codec_type\": \"video\", \"width\": 448, \"height\": 768, \"r_frame_rate\": \"0/0\", \"nb_frames\": \"N/A\", \"duration\": \"N/A\"}], \"format\": {\"duration\": \"N/A\"}}",
+      "python_raises": "ValueError: invalid literal for int() with base 10: 'N/A'"
+    }
+  ],
+  "signalstats": [
+    {
+      "name": "normal_frame",
+      "input": "frame:0    pts:0       pts_time:0\nlavfi.signalstats.YMIN=16\nlavfi.signalstats.YLOW=48\nlavfi.signalstats.YAVG=112.5\nlavfi.signalstats.YHIGH=201\nlavfi.signalstats.YMAX=235\nlavfi.signalstats.YDIF=0.0\n",
+      "expected": {
+        "mean": 112.5,
+        "spread": 153.0,
+        "minimum": 16.0,
+        "maximum": 235.0,
+        "low": 48.0,
+        "high": 201.0,
+        "looks_blank": false,
+        "looks_clipped": false
+      }
+    },
+    {
+      "name": "blank_with_hotspot",
+      "input": "frame:0    pts:0       pts_time:0\nlavfi.signalstats.YMIN=16\nlavfi.signalstats.YLOW=126\nlavfi.signalstats.YAVG=127.2\nlavfi.signalstats.YHIGH=130\nlavfi.signalstats.YMAX=250\nlavfi.signalstats.YDIF=0.0\n",
+      "expected": {
+        "mean": 127.2,
+        "spread": 4.0,
+        "minimum": 16.0,
+        "maximum": 250.0,
+        "low": 126.0,
+        "high": 130.0,
+        "looks_blank": true,
+        "looks_clipped": false
+      }
+    },
+    {
+      "name": "all_black",
+      "input": "frame:0    pts:0       pts_time:0\nlavfi.signalstats.YMIN=0\nlavfi.signalstats.YLOW=0\nlavfi.signalstats.YAVG=0.4\nlavfi.signalstats.YHIGH=1\nlavfi.signalstats.YMAX=3\nlavfi.signalstats.YDIF=0.0\n",
+      "expected": {
+        "mean": 0.4,
+        "spread": 1.0,
+        "minimum": 0.0,
+        "maximum": 3.0,
+        "low": 0.0,
+        "high": 1.0,
+        "looks_blank": true,
+        "looks_clipped": true
+      }
+    },
+    {
+      "name": "clipped_white",
+      "input": "frame:0    pts:0       pts_time:0\nlavfi.signalstats.YMIN=248\nlavfi.signalstats.YLOW=250\nlavfi.signalstats.YAVG=253.1\nlavfi.signalstats.YHIGH=255\nlavfi.signalstats.YMAX=255\nlavfi.signalstats.YDIF=0.0\n",
+      "expected": {
+        "mean": 253.1,
+        "spread": 5.0,
+        "minimum": 248.0,
+        "maximum": 255.0,
+        "low": 250.0,
+        "high": 255.0,
+        "looks_blank": true,
+        "looks_clipped": true
+      }
+    },
+    {
+      "name": "no_percentiles",
+      "input": "frame:0    pts:0       pts_time:0\nlavfi.signalstats.YMIN=16\nlavfi.signalstats.YAVG=112.5\nlavfi.signalstats.YMAX=235\n",
+      "expected": {
+        "mean": 112.5,
+        "spread": 219.0,
+        "minimum": 16.0,
+        "maximum": 235.0,
+        "low": 16.0,
+        "high": 235.0,
+        "looks_blank": false,
+        "looks_clipped": false
+      }
+    },
+    {
+      "name": "with_log_noise",
+      "input": "ffmpeg version 6.1 Copyright (c) 2000-2023 the FFmpeg developers\n  Stream #0:0: Video: h264, yuv420p, 448x768\nframe:0    pts:0       pts_time:0\nlavfi.signalstats.YMIN=16\nlavfi.signalstats.YLOW=48\nlavfi.signalstats.YAVG=112.5\nlavfi.signalstats.YHIGH=201\nlavfi.signalstats.YMAX=235\nframe=    1 fps=0.0 q=-0.0 Lsize=N/A time=00:00:00.04\n",
+      "expected": {
+        "mean": 112.5,
+        "spread": 153.0,
+        "minimum": 16.0,
+        "maximum": 235.0,
+        "low": 48.0,
+        "high": 201.0,
+        "looks_blank": false,
+        "looks_clipped": false
+      }
+    }
+  ],
+  "loudnorm": {
+    "input": "ffmpeg version 6.1 Copyright (c) 2000-2023 the FFmpeg developers\n  Stream #0:0: Audio: pcm_s16le, 24000 Hz, mono, s16, 384 kb/s\n[Parsed_loudnorm_0 @ 000001d4] \n{\n\t\"input_i\" : \"-23.45\",\n\t\"input_tp\" : \"-4.32\",\n\t\"input_lra\" : \"7.10\",\n\t\"input_thresh\" : \"-33.51\",\n\t\"output_i\" : \"-16.02\",\n\t\"output_tp\" : \"-1.50\",\n\t\"output_lra\" : \"6.90\",\n\t\"output_thresh\" : \"-26.08\",\n\t\"normalization_type\" : \"dynamic\",\n\t\"target_offset\" : \"0.02\"\n}\nsize=N/A time=00:00:03.20 bitrate=N/A speed= 118x\n",
+    "expected": {
+      "input_i": -23.45,
+      "input_tp": -4.32,
+      "input_lra": 7.1,
+      "input_thresh": -33.51,
+      "output_i": -16.02,
+      "output_tp": -1.5,
+      "output_lra": 6.9,
+      "output_thresh": -26.08,
+      "target_offset": 0.02
+    }
+  },
+  "misc": {
+    "fps": [
+      {
+        "input": "24/1",
+        "expected": 24.0
+      },
+      {
+        "input": "24000/1001",
+        "expected": 23.976023976023978
+      },
+      {
+        "input": "30000/1001",
+        "expected": 29.97002997002997
+      },
+      {
+        "input": "0/0",
+        "expected": 0.0
+      },
+      {
+        "input": "25",
+        "expected": 25.0
+      },
+      {
+        "input": "",
+        "expected": 0.0
+      },
+      {
+        "input": "N/A",
+        "expected": 0.0
+      },
+      {
+        "input": "60/2",
+        "expected": 30.0
+      },
+      {
+        "input": "abc/def",
+        "expected": 0.0
+      }
+    ],
+    "sample_points": [
+      {
+        "input": 1,
+        "expected": [
+          0.5
+        ]
+      },
+      {
+        "input": 2,
+        "expected": [
+          0.1,
+          0.9
+        ]
+      },
+      {
+        "input": 3,
+        "expected": [
+          0.1,
+          0.5,
+          0.9
+        ]
+      },
+      {
+        "input": 5,
+        "expected": [
+          0.1,
+          0.30000000000000004,
+          0.5,
+          0.7000000000000001,
+          0.9
+        ]
+      },
+      {
+        "input": 0,
+        "expected": [
+          0.5
+        ]
+      },
+      {
+        "input": -1,
+        "expected": [
+          0.5
+        ]
+      }
+    ]
+  }
+}

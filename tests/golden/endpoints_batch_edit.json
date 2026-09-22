@@ -1,0 +1,379 @@
+{
+  "cases": [
+    {
+      "body": {
+        "changed": 2,
+        "skipped_locked": 0,
+        "total": 2
+      },
+      "compare": "full",
+      "name": "整章重置",
+      "req": {
+        "action": "reset",
+        "episode_id": "ep01"
+      },
+      "shots_after": [
+        {
+          "attempts": 0,
+          "gate_notes": [],
+          "location_id": "loc_rooftop",
+          "order": 6,
+          "shot_id": "ep01_s03_sh007",
+          "status": "planned"
+        },
+        {
+          "attempts": 0,
+          "gate_notes": [],
+          "location_id": null,
+          "order": 0,
+          "shot_id": "ep01_s01_sh001",
+          "status": "planned"
+        }
+      ],
+      "status": 200,
+      "url": "/api/shots/batch"
+    },
+    {
+      "body": {
+        "changed": 1,
+        "skipped_locked": 0,
+        "total": 1
+      },
+      "compare": "full",
+      "name": "只重置一个",
+      "req": {
+        "action": "reset",
+        "episode_id": "ep01",
+        "shot_ids": [
+          "ep01_s03_sh007"
+        ]
+      },
+      "shots_after": [
+        {
+          "attempts": 0,
+          "gate_notes": [],
+          "location_id": "loc_rooftop",
+          "order": 6,
+          "shot_id": "ep01_s03_sh007",
+          "status": "planned"
+        },
+        {
+          "attempts": 0,
+          "gate_notes": [],
+          "location_id": null,
+          "order": 0,
+          "shot_id": "ep01_s01_sh001",
+          "status": "planned"
+        }
+      ],
+      "status": 200,
+      "url": "/api/shots/batch"
+    },
+    {
+      "body": {
+        "changed": 2,
+        "skipped_locked": 0,
+        "total": 2
+      },
+      "compare": "full",
+      "name": "整章加锁",
+      "req": {
+        "action": "lock",
+        "episode_id": "ep01"
+      },
+      "shots_after": [
+        {
+          "attempts": 2,
+          "gate_notes": [
+            "草稿档画面偏暗，已调高曝光重跑"
+          ],
+          "location_id": "loc_rooftop",
+          "order": 6,
+          "shot_id": "ep01_s03_sh007",
+          "status": "locked"
+        },
+        {
+          "attempts": 0,
+          "gate_notes": [],
+          "location_id": null,
+          "order": 0,
+          "shot_id": "ep01_s01_sh001",
+          "status": "locked"
+        }
+      ],
+      "status": 200,
+      "url": "/api/shots/batch"
+    },
+    {
+      "body": {
+        "changed": 1,
+        "skipped_locked": 0,
+        "total": 2
+      },
+      "compare": "full",
+      "name": "整章清闸门备注",
+      "req": {
+        "action": "clear_notes",
+        "episode_id": "ep01"
+      },
+      "shots_after": [
+        {
+          "attempts": 2,
+          "gate_notes": [],
+          "location_id": "loc_rooftop",
+          "order": 6,
+          "shot_id": "ep01_s03_sh007",
+          "status": "audio_done"
+        },
+        {
+          "attempts": 0,
+          "gate_notes": [],
+          "location_id": null,
+          "order": 0,
+          "shot_id": "ep01_s01_sh001",
+          "status": "planned"
+        }
+      ],
+      "status": 200,
+      "url": "/api/shots/batch"
+    },
+    {
+      "body": {
+        "detail": "不认识的操作 explode，可选：clear_notes、lock、reset、unlock"
+      },
+      "compare": "full",
+      "name": "不认识的操作_400",
+      "req": {
+        "action": "explode",
+        "episode_id": "ep01"
+      },
+      "shots_after": null,
+      "status": 400,
+      "url": "/api/shots/batch"
+    },
+    {
+      "body": {
+        "detail": "没有这些镜头：no_such"
+      },
+      "compare": "full",
+      "name": "镜头不存在_404",
+      "req": {
+        "action": "reset",
+        "episode_id": "ep01",
+        "shot_ids": [
+          "no_such"
+        ]
+      },
+      "shots_after": null,
+      "status": 404,
+      "url": "/api/shots/batch"
+    },
+    {
+      "body": {
+        "detail": "没有章节 ep99"
+      },
+      "compare": "full",
+      "name": "章节不存在_404",
+      "req": {
+        "action": "reset",
+        "episode_id": "ep99"
+      },
+      "shots_after": null,
+      "status": 404,
+      "url": "/api/shots/batch"
+    },
+    {
+      "body": {
+        "moved": 2,
+        "total": 2
+      },
+      "compare": "full",
+      "name": "重排_对调",
+      "req": {
+        "episode_id": "ep01",
+        "shot_ids": [
+          "ep01_s03_sh007",
+          "ep01_s01_sh001"
+        ]
+      },
+      "shots_after": [
+        {
+          "attempts": 2,
+          "gate_notes": [
+            "草稿档画面偏暗，已调高曝光重跑"
+          ],
+          "location_id": "loc_rooftop",
+          "order": 0,
+          "shot_id": "ep01_s03_sh007",
+          "status": "audio_done"
+        },
+        {
+          "attempts": 0,
+          "gate_notes": [],
+          "location_id": null,
+          "order": 1,
+          "shot_id": "ep01_s01_sh001",
+          "status": "planned"
+        }
+      ],
+      "status": 200,
+      "url": "/api/shots/reorder"
+    },
+    {
+      "body": {
+        "moved": 1,
+        "total": 2
+      },
+      "compare": "full",
+      "name": "重排_保持原序",
+      "req": {
+        "episode_id": "ep01",
+        "shot_ids": [
+          "ep01_s01_sh001",
+          "ep01_s03_sh007"
+        ]
+      },
+      "shots_after": [
+        {
+          "attempts": 2,
+          "gate_notes": [
+            "草稿档画面偏暗，已调高曝光重跑"
+          ],
+          "location_id": "loc_rooftop",
+          "order": 1,
+          "shot_id": "ep01_s03_sh007",
+          "status": "audio_done"
+        },
+        {
+          "attempts": 0,
+          "gate_notes": [],
+          "location_id": null,
+          "order": 0,
+          "shot_id": "ep01_s01_sh001",
+          "status": "planned"
+        }
+      ],
+      "status": 200,
+      "url": "/api/shots/reorder"
+    },
+    {
+      "body": {
+        "detail": "顺序里有重复的镜头 id"
+      },
+      "compare": "full",
+      "name": "重排_有重复_400",
+      "req": {
+        "episode_id": "ep01",
+        "shot_ids": [
+          "ep01_s03_sh007",
+          "ep01_s03_sh007"
+        ]
+      },
+      "shots_after": null,
+      "status": 400,
+      "url": "/api/shots/reorder"
+    },
+    {
+      "body": {
+        "detail": "顺序表和这一章的镜头对不上。少了：ep01_s01_sh001。"
+      },
+      "compare": "full",
+      "name": "重排_少一个_400",
+      "req": {
+        "episode_id": "ep01",
+        "shot_ids": [
+          "ep01_s03_sh007"
+        ]
+      },
+      "shots_after": null,
+      "status": 400,
+      "url": "/api/shots/reorder"
+    },
+    {
+      "body": {
+        "detail": "顺序表和这一章的镜头对不上。多了：extra_one。"
+      },
+      "compare": "full",
+      "name": "重排_多一个_400",
+      "req": {
+        "episode_id": "ep01",
+        "shot_ids": [
+          "ep01_s03_sh007",
+          "ep01_s01_sh001",
+          "extra_one"
+        ]
+      },
+      "shots_after": null,
+      "status": 400,
+      "url": "/api/shots/reorder"
+    },
+    {
+      "body": {
+        "episodes": {},
+        "linked": 0,
+        "reset_shots": 0
+      },
+      "compare": "full",
+      "name": "接场景_整个项目",
+      "req": {
+        "episode_id": ""
+      },
+      "shots_after": [
+        {
+          "attempts": 2,
+          "gate_notes": [
+            "草稿档画面偏暗，已调高曝光重跑"
+          ],
+          "location_id": "loc_rooftop",
+          "order": 6,
+          "shot_id": "ep01_s03_sh007",
+          "status": "audio_done"
+        },
+        {
+          "attempts": 0,
+          "gate_notes": [],
+          "location_id": null,
+          "order": 0,
+          "shot_id": "ep01_s01_sh001",
+          "status": "planned"
+        }
+      ],
+      "status": 200,
+      "url": "/api/shots/link_locations"
+    },
+    {
+      "body": {
+        "episodes": {},
+        "linked": 0,
+        "reset_shots": 0
+      },
+      "compare": "full",
+      "name": "接场景_指定章",
+      "req": {
+        "episode_id": "ep01"
+      },
+      "shots_after": [
+        {
+          "attempts": 2,
+          "gate_notes": [
+            "草稿档画面偏暗，已调高曝光重跑"
+          ],
+          "location_id": "loc_rooftop",
+          "order": 6,
+          "shot_id": "ep01_s03_sh007",
+          "status": "audio_done"
+        },
+        {
+          "attempts": 0,
+          "gate_notes": [],
+          "location_id": null,
+          "order": 0,
+          "shot_id": "ep01_s01_sh001",
+          "status": "planned"
+        }
+      ],
+      "status": 200,
+      "url": "/api/shots/link_locations"
+    }
+  ]
+}

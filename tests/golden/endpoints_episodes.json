@@ -1,0 +1,2799 @@
+{
+ "note": "由 cpp/tests/export_episodes_golden.py 生成，不要手改 2026-09-11：Episode 加了 chapter_refs（这一章是从故事的哪几章切出来的），/api/script/write 的回包加了 source（照着故事写的还是照着一句梗概续的）。生成器随 Python 引擎一起删了，这份语料现在是回归夹具——接口有意改形状时照着改。 2026-09-19：Episode 加了 shots_from（这张分镜表是照哪一版剧本拆的）、Project 加了 understood_from（上一趟读故事读的是哪一版正文）。当天先加过一个 script_from 又拿掉了——「理解故事」的剧本和分镜两步定成「不勾只补缺、勾了全部重出」，用不上那一栏。 同日 Episode 又加了 shots_from（这张分镜表是照哪一版剧本拆的）——剧本重写之后分镜还是照老剧本拆的，而在这之前没有任何地方说得出来；这一栏只用来说话，不自动重拆。",
+ "cases": [
+  {
+   "name": "读剧本：ep01",
+   "method": "GET",
+   "url": "/api/script",
+   "query": {
+    "path": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_episodes_8hbmemsa\\case01",
+    "episode_id": "ep01"
+   },
+   "body": null,
+   "prep": null,
+   "status": 200,
+   "response": {
+    "script": "（雨声起）\n林渊站在栏杆前，没有回头。",
+    "target_duration_s": 180.0,
+    "title": "第一章 · 雨"
+   },
+   "compare": "full",
+   "project_after": null
+  },
+  {
+   "name": "读剧本：没剧本的那一章",
+   "method": "GET",
+   "url": "/api/script",
+   "query": {
+    "path": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_episodes_8hbmemsa\\case02",
+    "episode_id": "ep02"
+   },
+   "body": null,
+   "prep": null,
+   "status": 200,
+   "response": {
+    "script": "",
+    "target_duration_s": 200.0,
+    "title": "第二章 · 晴"
+   },
+   "compare": "full",
+   "project_after": null
+  },
+  {
+   "name": "读剧本：不存在的章",
+   "method": "GET",
+   "url": "/api/script",
+   "query": {
+    "path": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_episodes_8hbmemsa\\case03",
+    "episode_id": "ep99"
+   },
+   "body": null,
+   "prep": null,
+   "status": 404,
+   "response": {
+    "detail": "没有章节 ep99"
+   },
+   "compare": "detail_str",
+   "project_after": null
+  },
+  {
+   "name": "读剧本：项目不存在",
+   "method": "GET",
+   "url": "/api/script",
+   "query": {
+    "path": "Z:/没有这个目录",
+    "episode_id": "ep01"
+   },
+   "body": null,
+   "prep": null,
+   "status": 400,
+   "response": {
+    "detail": "这里不是一个项目目录：Z:\\没有这个目录\n先建一部，或者换一个目录"
+   },
+   "compare": "detail_str",
+   "project_after": null
+  },
+  {
+   "name": "读剧本：缺参数",
+   "method": "GET",
+   "url": "/api/script",
+   "query": {
+    "path": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_episodes_8hbmemsa\\case05"
+   },
+   "body": null,
+   "prep": null,
+   "status": 422,
+   "response": {
+    "detail": [
+     {
+      "type": "missing",
+      "loc": [
+       "query",
+       "episode_id"
+      ],
+      "msg": "Field required",
+      "input": null
+     }
+    ]
+   },
+   "compare": "detail_arr",
+   "project_after": null
+  },
+  {
+   "name": "改剧本",
+   "method": "POST",
+   "url": "/api/script",
+   "query": null,
+   "body": {
+    "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_episodes_8hbmemsa\\case06",
+    "episode_id": "ep01",
+    "script": "改过的剧本"
+   },
+   "prep": null,
+   "status": 200,
+   "response": {
+    "saved": true,
+    "regenerated": false
+   },
+   "compare": "full",
+   "project_after": {
+    "schema_version": 1,
+    "project_id": "yuye-tiantai",
+    "title": "雨夜天台",
+    "style_line": "realistic",
+    "premise": "一个关于错过与和解的都市电影。全片九十分钟，横屏。",
+    "created_at": "2026-09-07T14:56:29.511392+00:00",
+    "updated_at": "2026-09-07T17:19:41.631631+00:00",
+    "episodes": [
+     {
+      "episode_id": "ep01",
+      "title": "第一章 · 雨",
+      "synopsis": "林渊在天台等一个不会来的人。",
+      "target_duration_s": 180.0,
+      "script": "改过的剧本",
+      "shots": [
+       {
+        "shot_id": "ep01_s03_sh007",
+        "scene_id": "ep01_s03",
+        "order": 6,
+        "visual_desc": "雨夜天台，男主背对镜头站在栏杆前，远处霓虹在雨幕里散成一片光晕",
+        "first_frame_prompt": "cinematic, rooftop at night, heavy rain, neon bokeh, back view",
+        "last_frame_prompt": "cinematic, rooftop at night, man turns around, rain on face",
+        "motion_prompt": "缓慢推进，雨丝斜掠，人物微微转头",
+        "negative_prompt": "模糊, 低质量, 多余的手指",
+        "shot_size": "MCU",
+        "camera_angle": "low",
+        "camera_move": "push_in",
+        "lens": "auto",
+        "lighting": "",
+        "continuous_with_prev": false,
+        "camera_id": "cam_rooftop_a",
+        "characters": [
+         {
+          "char_id": "lin_yuan",
+          "expression": "隐忍",
+          "action": "握紧栏杆，指节发白",
+          "wardrobe_state": "suit_soaked",
+          "face_pose": "three_quarter",
+          "screen_pos": "center"
+         },
+         {
+          "char_id": "chen_mo",
+          "expression": "愕然",
+          "action": "停在门口，没有再往前",
+          "wardrobe_state": "default",
+          "face_pose": "profile",
+          "screen_pos": "left"
+         }
+        ],
+        "location_id": "loc_rooftop",
+        "prop_ids": [
+         "prop_umbrella",
+         "prop_phone"
+        ],
+        "duration_s": 6.5,
+        "duration_locked": true,
+        "dialogue": [
+         {
+          "char_id": "lin_yuan",
+          "text": "你要是早半个小时来，什么都还来得及。",
+          "emotion": "压抑",
+          "emotion_intensity": 0.8,
+          "voice_id": "voice_lin",
+          "audio_path": "audio/ep01_s03_sh007_01.wav",
+          "actual_duration_s": 3.2
+         },
+         {
+          "char_id": null,
+          "text": "雨声盖过了他后半句。",
+          "emotion": "neutral",
+          "emotion_intensity": 0.3,
+          "voice_id": null,
+          "audio_path": null,
+          "actual_duration_s": null
+         }
+        ],
+        "sfx": [
+         "雨声",
+         "远处车流"
+        ],
+        "bgm_cue": "bgm_tension_low",
+        "needs_lipsync": false,
+        "transition_in": "dissolve",
+        "transition_dur_s": 0.8,
+        "subtitle_text": "你要是早半个小时来，什么都还来得及。",
+        "beat": "反转",
+        "continuity_notes": "上一镜他还没湿透，这里服装状态要接上 suit_soaked",
+        "missing_info": [
+         "未确定陈墨是否带伞"
+        ],
+        "status": "audio_done",
+        "attempts": 2,
+        "frame_path": "frames/ep01_s03_sh007.png",
+        "end_frame_path": null,
+        "video_path": null,
+        "gate_notes": [
+         "草稿档画面偏暗，已调高曝光重跑"
+        ]
+       },
+       {
+        "shot_id": "ep01_s01_sh001",
+        "scene_id": "ep01_s01",
+        "order": 0,
+        "visual_desc": "",
+        "first_frame_prompt": "",
+        "last_frame_prompt": null,
+        "motion_prompt": "",
+        "negative_prompt": "",
+        "shot_size": "MS",
+        "camera_angle": "eye_level",
+        "camera_move": "static",
+        "lens": "auto",
+        "lighting": "",
+        "continuous_with_prev": false,
+        "camera_id": null,
+        "characters": [],
+        "location_id": null,
+        "prop_ids": [],
+        "duration_s": 5.0,
+        "duration_locked": false,
+        "dialogue": [],
+        "sfx": [],
+        "bgm_cue": null,
+        "needs_lipsync": false,
+        "transition_in": "cut",
+        "transition_dur_s": 0.0,
+        "subtitle_text": "",
+        "beat": "",
+        "continuity_notes": "",
+        "missing_info": [],
+        "status": "planned",
+        "attempts": 0,
+        "frame_path": null,
+        "end_frame_path": null,
+        "video_path": null,
+        "gate_notes": []
+       }
+      ],
+      "chapter_refs": [],
+      "shots_from": ""
+     },
+     {
+      "episode_id": "ep02",
+      "title": "第二章 · 晴",
+      "synopsis": "三年后，同一个天台。",
+      "target_duration_s": 200.0,
+      "script": "",
+      "shots": [],
+      "chapter_refs": [],
+      "shots_from": ""
+     }
+    ],
+    "understood_from": ""
+   }
+  },
+  {
+   "name": "改剧本：顺带改时长",
+   "method": "POST",
+   "url": "/api/script",
+   "query": null,
+   "body": {
+    "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_episodes_8hbmemsa\\case07",
+    "episode_id": "ep01",
+    "script": "x",
+    "duration_s": 90.0
+   },
+   "prep": null,
+   "status": 200,
+   "response": {
+    "saved": true,
+    "regenerated": false
+   },
+   "compare": "full",
+   "project_after": {
+    "schema_version": 1,
+    "project_id": "yuye-tiantai",
+    "title": "雨夜天台",
+    "style_line": "realistic",
+    "premise": "一个关于错过与和解的都市电影。全片九十分钟，横屏。",
+    "created_at": "2026-09-07T14:56:29.511392+00:00",
+    "updated_at": "2026-09-07T17:19:41.664189+00:00",
+    "episodes": [
+     {
+      "episode_id": "ep01",
+      "title": "第一章 · 雨",
+      "synopsis": "林渊在天台等一个不会来的人。",
+      "target_duration_s": 90.0,
+      "script": "x",
+      "shots": [
+       {
+        "shot_id": "ep01_s03_sh007",
+        "scene_id": "ep01_s03",
+        "order": 6,
+        "visual_desc": "雨夜天台，男主背对镜头站在栏杆前，远处霓虹在雨幕里散成一片光晕",
+        "first_frame_prompt": "cinematic, rooftop at night, heavy rain, neon bokeh, back view",
+        "last_frame_prompt": "cinematic, rooftop at night, man turns around, rain on face",
+        "motion_prompt": "缓慢推进，雨丝斜掠，人物微微转头",
+        "negative_prompt": "模糊, 低质量, 多余的手指",
+        "shot_size": "MCU",
+        "camera_angle": "low",
+        "camera_move": "push_in",
+        "lens": "auto",
+        "lighting": "",
+        "continuous_with_prev": false,
+        "camera_id": "cam_rooftop_a",
+        "characters": [
+         {
+          "char_id": "lin_yuan",
+          "expression": "隐忍",
+          "action": "握紧栏杆，指节发白",
+          "wardrobe_state": "suit_soaked",
+          "face_pose": "three_quarter",
+          "screen_pos": "center"
+         },
+         {
+          "char_id": "chen_mo",
+          "expression": "愕然",
+          "action": "停在门口，没有再往前",
+          "wardrobe_state": "default",
+          "face_pose": "profile",
+          "screen_pos": "left"
+         }
+        ],
+        "location_id": "loc_rooftop",
+        "prop_ids": [
+         "prop_umbrella",
+         "prop_phone"
+        ],
+        "duration_s": 6.5,
+        "duration_locked": true,
+        "dialogue": [
+         {
+          "char_id": "lin_yuan",
+          "text": "你要是早半个小时来，什么都还来得及。",
+          "emotion": "压抑",
+          "emotion_intensity": 0.8,
+          "voice_id": "voice_lin",
+          "audio_path": "audio/ep01_s03_sh007_01.wav",
+          "actual_duration_s": 3.2
+         },
+         {
+          "char_id": null,
+          "text": "雨声盖过了他后半句。",
+          "emotion": "neutral",
+          "emotion_intensity": 0.3,
+          "voice_id": null,
+          "audio_path": null,
+          "actual_duration_s": null
+         }
+        ],
+        "sfx": [
+         "雨声",
+         "远处车流"
+        ],
+        "bgm_cue": "bgm_tension_low",
+        "needs_lipsync": false,
+        "transition_in": "dissolve",
+        "transition_dur_s": 0.8,
+        "subtitle_text": "你要是早半个小时来，什么都还来得及。",
+        "beat": "反转",
+        "continuity_notes": "上一镜他还没湿透，这里服装状态要接上 suit_soaked",
+        "missing_info": [
+         "未确定陈墨是否带伞"
+        ],
+        "status": "audio_done",
+        "attempts": 2,
+        "frame_path": "frames/ep01_s03_sh007.png",
+        "end_frame_path": null,
+        "video_path": null,
+        "gate_notes": [
+         "草稿档画面偏暗，已调高曝光重跑"
+        ]
+       },
+       {
+        "shot_id": "ep01_s01_sh001",
+        "scene_id": "ep01_s01",
+        "order": 0,
+        "visual_desc": "",
+        "first_frame_prompt": "",
+        "last_frame_prompt": null,
+        "motion_prompt": "",
+        "negative_prompt": "",
+        "shot_size": "MS",
+        "camera_angle": "eye_level",
+        "camera_move": "static",
+        "lens": "auto",
+        "lighting": "",
+        "continuous_with_prev": false,
+        "camera_id": null,
+        "characters": [],
+        "location_id": null,
+        "prop_ids": [],
+        "duration_s": 5.0,
+        "duration_locked": false,
+        "dialogue": [],
+        "sfx": [],
+        "bgm_cue": null,
+        "needs_lipsync": false,
+        "transition_in": "cut",
+        "transition_dur_s": 0.0,
+        "subtitle_text": "",
+        "beat": "",
+        "continuity_notes": "",
+        "missing_info": [],
+        "status": "planned",
+        "attempts": 0,
+        "frame_path": null,
+        "end_frame_path": null,
+        "video_path": null,
+        "gate_notes": []
+       }
+      ],
+      "chapter_refs": [],
+      "shots_from": ""
+     },
+     {
+      "episode_id": "ep02",
+      "title": "第二章 · 晴",
+      "synopsis": "三年后，同一个天台。",
+      "target_duration_s": 200.0,
+      "script": "",
+      "shots": [],
+      "chapter_refs": [],
+      "shots_from": ""
+     }
+    ],
+    "understood_from": ""
+   }
+  },
+  {
+   "name": "改剧本：时长给 0",
+   "method": "POST",
+   "url": "/api/script",
+   "query": null,
+   "body": {
+    "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_episodes_8hbmemsa\\case08",
+    "episode_id": "ep01",
+    "script": "x",
+    "duration_s": 0
+   },
+   "prep": null,
+   "status": 200,
+   "response": {
+    "saved": true,
+    "regenerated": false
+   },
+   "compare": "full",
+   "project_after": {
+    "schema_version": 1,
+    "project_id": "yuye-tiantai",
+    "title": "雨夜天台",
+    "style_line": "realistic",
+    "premise": "一个关于错过与和解的都市电影。全片九十分钟，横屏。",
+    "created_at": "2026-09-07T14:56:29.511392+00:00",
+    "updated_at": "2026-09-07T17:19:41.698345+00:00",
+    "episodes": [
+     {
+      "episode_id": "ep01",
+      "title": "第一章 · 雨",
+      "synopsis": "林渊在天台等一个不会来的人。",
+      "target_duration_s": 180.0,
+      "script": "x",
+      "shots": [
+       {
+        "shot_id": "ep01_s03_sh007",
+        "scene_id": "ep01_s03",
+        "order": 6,
+        "visual_desc": "雨夜天台，男主背对镜头站在栏杆前，远处霓虹在雨幕里散成一片光晕",
+        "first_frame_prompt": "cinematic, rooftop at night, heavy rain, neon bokeh, back view",
+        "last_frame_prompt": "cinematic, rooftop at night, man turns around, rain on face",
+        "motion_prompt": "缓慢推进，雨丝斜掠，人物微微转头",
+        "negative_prompt": "模糊, 低质量, 多余的手指",
+        "shot_size": "MCU",
+        "camera_angle": "low",
+        "camera_move": "push_in",
+        "lens": "auto",
+        "lighting": "",
+        "continuous_with_prev": false,
+        "camera_id": "cam_rooftop_a",
+        "characters": [
+         {
+          "char_id": "lin_yuan",
+          "expression": "隐忍",
+          "action": "握紧栏杆，指节发白",
+          "wardrobe_state": "suit_soaked",
+          "face_pose": "three_quarter",
+          "screen_pos": "center"
+         },
+         {
+          "char_id": "chen_mo",
+          "expression": "愕然",
+          "action": "停在门口，没有再往前",
+          "wardrobe_state": "default",
+          "face_pose": "profile",
+          "screen_pos": "left"
+         }
+        ],
+        "location_id": "loc_rooftop",
+        "prop_ids": [
+         "prop_umbrella",
+         "prop_phone"
+        ],
+        "duration_s": 6.5,
+        "duration_locked": true,
+        "dialogue": [
+         {
+          "char_id": "lin_yuan",
+          "text": "你要是早半个小时来，什么都还来得及。",
+          "emotion": "压抑",
+          "emotion_intensity": 0.8,
+          "voice_id": "voice_lin",
+          "audio_path": "audio/ep01_s03_sh007_01.wav",
+          "actual_duration_s": 3.2
+         },
+         {
+          "char_id": null,
+          "text": "雨声盖过了他后半句。",
+          "emotion": "neutral",
+          "emotion_intensity": 0.3,
+          "voice_id": null,
+          "audio_path": null,
+          "actual_duration_s": null
+         }
+        ],
+        "sfx": [
+         "雨声",
+         "远处车流"
+        ],
+        "bgm_cue": "bgm_tension_low",
+        "needs_lipsync": false,
+        "transition_in": "dissolve",
+        "transition_dur_s": 0.8,
+        "subtitle_text": "你要是早半个小时来，什么都还来得及。",
+        "beat": "反转",
+        "continuity_notes": "上一镜他还没湿透，这里服装状态要接上 suit_soaked",
+        "missing_info": [
+         "未确定陈墨是否带伞"
+        ],
+        "status": "audio_done",
+        "attempts": 2,
+        "frame_path": "frames/ep01_s03_sh007.png",
+        "end_frame_path": null,
+        "video_path": null,
+        "gate_notes": [
+         "草稿档画面偏暗，已调高曝光重跑"
+        ]
+       },
+       {
+        "shot_id": "ep01_s01_sh001",
+        "scene_id": "ep01_s01",
+        "order": 0,
+        "visual_desc": "",
+        "first_frame_prompt": "",
+        "last_frame_prompt": null,
+        "motion_prompt": "",
+        "negative_prompt": "",
+        "shot_size": "MS",
+        "camera_angle": "eye_level",
+        "camera_move": "static",
+        "lens": "auto",
+        "lighting": "",
+        "continuous_with_prev": false,
+        "camera_id": null,
+        "characters": [],
+        "location_id": null,
+        "prop_ids": [],
+        "duration_s": 5.0,
+        "duration_locked": false,
+        "dialogue": [],
+        "sfx": [],
+        "bgm_cue": null,
+        "needs_lipsync": false,
+        "transition_in": "cut",
+        "transition_dur_s": 0.0,
+        "subtitle_text": "",
+        "beat": "",
+        "continuity_notes": "",
+        "missing_info": [],
+        "status": "planned",
+        "attempts": 0,
+        "frame_path": null,
+        "end_frame_path": null,
+        "video_path": null,
+        "gate_notes": []
+       }
+      ],
+      "chapter_refs": [],
+      "shots_from": ""
+     },
+     {
+      "episode_id": "ep02",
+      "title": "第二章 · 晴",
+      "synopsis": "三年后，同一个天台。",
+      "target_duration_s": 200.0,
+      "script": "",
+      "shots": [],
+      "chapter_refs": [],
+      "shots_from": ""
+     }
+    ],
+    "understood_from": ""
+   }
+  },
+  {
+   "name": "改剧本：不存在的章",
+   "method": "POST",
+   "url": "/api/script",
+   "query": null,
+   "body": {
+    "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_episodes_8hbmemsa\\case09",
+    "episode_id": "ep99",
+    "script": "x"
+   },
+   "prep": null,
+   "status": 404,
+   "response": {
+    "detail": "没有章节 ep99"
+   },
+   "compare": "detail_str",
+   "project_after": null
+  },
+  {
+   "name": "改剧本：缺 script",
+   "method": "POST",
+   "url": "/api/script",
+   "query": null,
+   "body": {
+    "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_episodes_8hbmemsa\\case10",
+    "episode_id": "ep01"
+   },
+   "prep": null,
+   "status": 422,
+   "response": {
+    "detail": [
+     {
+      "type": "missing",
+      "loc": [
+       "body",
+       "script"
+      ],
+      "msg": "Field required",
+      "input": {
+       "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_episodes_8hbmemsa\\case10",
+       "episode_id": "ep01"
+      }
+     }
+    ]
+   },
+   "compare": "detail_arr",
+   "project_after": null
+  },
+  {
+   "name": "改剧本：多余字段照收",
+   "method": "POST",
+   "url": "/api/script",
+   "query": null,
+   "body": {
+    "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_episodes_8hbmemsa\\case11",
+    "episode_id": "ep01",
+    "script": "x",
+    "typo": 1
+   },
+   "prep": null,
+   "status": 200,
+   "response": {
+    "saved": true,
+    "regenerated": false
+   },
+   "compare": "full",
+   "project_after": {
+    "schema_version": 1,
+    "project_id": "yuye-tiantai",
+    "title": "雨夜天台",
+    "style_line": "realistic",
+    "premise": "一个关于错过与和解的都市电影。全片九十分钟，横屏。",
+    "created_at": "2026-09-07T14:56:29.511392+00:00",
+    "updated_at": "2026-09-07T17:19:41.775012+00:00",
+    "episodes": [
+     {
+      "episode_id": "ep01",
+      "title": "第一章 · 雨",
+      "synopsis": "林渊在天台等一个不会来的人。",
+      "target_duration_s": 180.0,
+      "script": "x",
+      "shots": [
+       {
+        "shot_id": "ep01_s03_sh007",
+        "scene_id": "ep01_s03",
+        "order": 6,
+        "visual_desc": "雨夜天台，男主背对镜头站在栏杆前，远处霓虹在雨幕里散成一片光晕",
+        "first_frame_prompt": "cinematic, rooftop at night, heavy rain, neon bokeh, back view",
+        "last_frame_prompt": "cinematic, rooftop at night, man turns around, rain on face",
+        "motion_prompt": "缓慢推进，雨丝斜掠，人物微微转头",
+        "negative_prompt": "模糊, 低质量, 多余的手指",
+        "shot_size": "MCU",
+        "camera_angle": "low",
+        "camera_move": "push_in",
+        "lens": "auto",
+        "lighting": "",
+        "continuous_with_prev": false,
+        "camera_id": "cam_rooftop_a",
+        "characters": [
+         {
+          "char_id": "lin_yuan",
+          "expression": "隐忍",
+          "action": "握紧栏杆，指节发白",
+          "wardrobe_state": "suit_soaked",
+          "face_pose": "three_quarter",
+          "screen_pos": "center"
+         },
+         {
+          "char_id": "chen_mo",
+          "expression": "愕然",
+          "action": "停在门口，没有再往前",
+          "wardrobe_state": "default",
+          "face_pose": "profile",
+          "screen_pos": "left"
+         }
+        ],
+        "location_id": "loc_rooftop",
+        "prop_ids": [
+         "prop_umbrella",
+         "prop_phone"
+        ],
+        "duration_s": 6.5,
+        "duration_locked": true,
+        "dialogue": [
+         {
+          "char_id": "lin_yuan",
+          "text": "你要是早半个小时来，什么都还来得及。",
+          "emotion": "压抑",
+          "emotion_intensity": 0.8,
+          "voice_id": "voice_lin",
+          "audio_path": "audio/ep01_s03_sh007_01.wav",
+          "actual_duration_s": 3.2
+         },
+         {
+          "char_id": null,
+          "text": "雨声盖过了他后半句。",
+          "emotion": "neutral",
+          "emotion_intensity": 0.3,
+          "voice_id": null,
+          "audio_path": null,
+          "actual_duration_s": null
+         }
+        ],
+        "sfx": [
+         "雨声",
+         "远处车流"
+        ],
+        "bgm_cue": "bgm_tension_low",
+        "needs_lipsync": false,
+        "transition_in": "dissolve",
+        "transition_dur_s": 0.8,
+        "subtitle_text": "你要是早半个小时来，什么都还来得及。",
+        "beat": "反转",
+        "continuity_notes": "上一镜他还没湿透，这里服装状态要接上 suit_soaked",
+        "missing_info": [
+         "未确定陈墨是否带伞"
+        ],
+        "status": "audio_done",
+        "attempts": 2,
+        "frame_path": "frames/ep01_s03_sh007.png",
+        "end_frame_path": null,
+        "video_path": null,
+        "gate_notes": [
+         "草稿档画面偏暗，已调高曝光重跑"
+        ]
+       },
+       {
+        "shot_id": "ep01_s01_sh001",
+        "scene_id": "ep01_s01",
+        "order": 0,
+        "visual_desc": "",
+        "first_frame_prompt": "",
+        "last_frame_prompt": null,
+        "motion_prompt": "",
+        "negative_prompt": "",
+        "shot_size": "MS",
+        "camera_angle": "eye_level",
+        "camera_move": "static",
+        "lens": "auto",
+        "lighting": "",
+        "continuous_with_prev": false,
+        "camera_id": null,
+        "characters": [],
+        "location_id": null,
+        "prop_ids": [],
+        "duration_s": 5.0,
+        "duration_locked": false,
+        "dialogue": [],
+        "sfx": [],
+        "bgm_cue": null,
+        "needs_lipsync": false,
+        "transition_in": "cut",
+        "transition_dur_s": 0.0,
+        "subtitle_text": "",
+        "beat": "",
+        "continuity_notes": "",
+        "missing_info": [],
+        "status": "planned",
+        "attempts": 0,
+        "frame_path": null,
+        "end_frame_path": null,
+        "video_path": null,
+        "gate_notes": []
+       }
+      ],
+      "chapter_refs": [],
+      "shots_from": ""
+     },
+     {
+      "episode_id": "ep02",
+      "title": "第二章 · 晴",
+      "synopsis": "三年后，同一个天台。",
+      "target_duration_s": 200.0,
+      "script": "",
+      "shots": [],
+      "chapter_refs": [],
+      "shots_from": ""
+     }
+    ],
+    "understood_from": ""
+   }
+  },
+  {
+   "name": "新建一章：自动编号",
+   "method": "POST",
+   "url": "/api/episode",
+   "query": null,
+   "body": {
+    "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_episodes_8hbmemsa\\case12",
+    "title": "第三章"
+   },
+   "prep": null,
+   "status": 200,
+   "response": {
+    "episode_id": "ep03",
+    "title": "第三章"
+   },
+   "compare": "full",
+   "project_after": {
+    "schema_version": 1,
+    "project_id": "yuye-tiantai",
+    "title": "雨夜天台",
+    "style_line": "realistic",
+    "premise": "一个关于错过与和解的都市电影。全片九十分钟，横屏。",
+    "created_at": "2026-09-07T14:56:29.511392+00:00",
+    "updated_at": "2026-09-07T17:19:41.807416+00:00",
+    "episodes": [
+     {
+      "episode_id": "ep01",
+      "title": "第一章 · 雨",
+      "synopsis": "林渊在天台等一个不会来的人。",
+      "target_duration_s": 180.0,
+      "script": "（雨声起）\n林渊站在栏杆前，没有回头。",
+      "shots": [
+       {
+        "shot_id": "ep01_s03_sh007",
+        "scene_id": "ep01_s03",
+        "order": 6,
+        "visual_desc": "雨夜天台，男主背对镜头站在栏杆前，远处霓虹在雨幕里散成一片光晕",
+        "first_frame_prompt": "cinematic, rooftop at night, heavy rain, neon bokeh, back view",
+        "last_frame_prompt": "cinematic, rooftop at night, man turns around, rain on face",
+        "motion_prompt": "缓慢推进，雨丝斜掠，人物微微转头",
+        "negative_prompt": "模糊, 低质量, 多余的手指",
+        "shot_size": "MCU",
+        "camera_angle": "low",
+        "camera_move": "push_in",
+        "lens": "auto",
+        "lighting": "",
+        "continuous_with_prev": false,
+        "camera_id": "cam_rooftop_a",
+        "characters": [
+         {
+          "char_id": "lin_yuan",
+          "expression": "隐忍",
+          "action": "握紧栏杆，指节发白",
+          "wardrobe_state": "suit_soaked",
+          "face_pose": "three_quarter",
+          "screen_pos": "center"
+         },
+         {
+          "char_id": "chen_mo",
+          "expression": "愕然",
+          "action": "停在门口，没有再往前",
+          "wardrobe_state": "default",
+          "face_pose": "profile",
+          "screen_pos": "left"
+         }
+        ],
+        "location_id": "loc_rooftop",
+        "prop_ids": [
+         "prop_umbrella",
+         "prop_phone"
+        ],
+        "duration_s": 6.5,
+        "duration_locked": true,
+        "dialogue": [
+         {
+          "char_id": "lin_yuan",
+          "text": "你要是早半个小时来，什么都还来得及。",
+          "emotion": "压抑",
+          "emotion_intensity": 0.8,
+          "voice_id": "voice_lin",
+          "audio_path": "audio/ep01_s03_sh007_01.wav",
+          "actual_duration_s": 3.2
+         },
+         {
+          "char_id": null,
+          "text": "雨声盖过了他后半句。",
+          "emotion": "neutral",
+          "emotion_intensity": 0.3,
+          "voice_id": null,
+          "audio_path": null,
+          "actual_duration_s": null
+         }
+        ],
+        "sfx": [
+         "雨声",
+         "远处车流"
+        ],
+        "bgm_cue": "bgm_tension_low",
+        "needs_lipsync": false,
+        "transition_in": "dissolve",
+        "transition_dur_s": 0.8,
+        "subtitle_text": "你要是早半个小时来，什么都还来得及。",
+        "beat": "反转",
+        "continuity_notes": "上一镜他还没湿透，这里服装状态要接上 suit_soaked",
+        "missing_info": [
+         "未确定陈墨是否带伞"
+        ],
+        "status": "audio_done",
+        "attempts": 2,
+        "frame_path": "frames/ep01_s03_sh007.png",
+        "end_frame_path": null,
+        "video_path": null,
+        "gate_notes": [
+         "草稿档画面偏暗，已调高曝光重跑"
+        ]
+       },
+       {
+        "shot_id": "ep01_s01_sh001",
+        "scene_id": "ep01_s01",
+        "order": 0,
+        "visual_desc": "",
+        "first_frame_prompt": "",
+        "last_frame_prompt": null,
+        "motion_prompt": "",
+        "negative_prompt": "",
+        "shot_size": "MS",
+        "camera_angle": "eye_level",
+        "camera_move": "static",
+        "lens": "auto",
+        "lighting": "",
+        "continuous_with_prev": false,
+        "camera_id": null,
+        "characters": [],
+        "location_id": null,
+        "prop_ids": [],
+        "duration_s": 5.0,
+        "duration_locked": false,
+        "dialogue": [],
+        "sfx": [],
+        "bgm_cue": null,
+        "needs_lipsync": false,
+        "transition_in": "cut",
+        "transition_dur_s": 0.0,
+        "subtitle_text": "",
+        "beat": "",
+        "continuity_notes": "",
+        "missing_info": [],
+        "status": "planned",
+        "attempts": 0,
+        "frame_path": null,
+        "end_frame_path": null,
+        "video_path": null,
+        "gate_notes": []
+       }
+      ],
+      "chapter_refs": [],
+      "shots_from": ""
+     },
+     {
+      "episode_id": "ep02",
+      "title": "第二章 · 晴",
+      "synopsis": "三年后，同一个天台。",
+      "target_duration_s": 200.0,
+      "script": "",
+      "shots": [],
+      "chapter_refs": [],
+      "shots_from": ""
+     },
+     {
+      "episode_id": "ep03",
+      "title": "第三章",
+      "synopsis": "",
+      "target_duration_s": 60.0,
+      "script": "",
+      "shots": [],
+      "chapter_refs": [],
+      "shots_from": ""
+     }
+    ],
+    "understood_from": ""
+   }
+  },
+  {
+   "name": "新建一章：指定 id",
+   "method": "POST",
+   "url": "/api/episode",
+   "query": null,
+   "body": {
+    "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_episodes_8hbmemsa\\case13",
+    "episode_id": "special",
+    "title": "特别篇"
+   },
+   "prep": null,
+   "status": 200,
+   "response": {
+    "episode_id": "special",
+    "title": "特别篇"
+   },
+   "compare": "full",
+   "project_after": {
+    "schema_version": 1,
+    "project_id": "yuye-tiantai",
+    "title": "雨夜天台",
+    "style_line": "realistic",
+    "premise": "一个关于错过与和解的都市电影。全片九十分钟，横屏。",
+    "created_at": "2026-09-07T14:56:29.511392+00:00",
+    "updated_at": "2026-09-07T17:19:41.839981+00:00",
+    "episodes": [
+     {
+      "episode_id": "ep01",
+      "title": "第一章 · 雨",
+      "synopsis": "林渊在天台等一个不会来的人。",
+      "target_duration_s": 180.0,
+      "script": "（雨声起）\n林渊站在栏杆前，没有回头。",
+      "shots": [
+       {
+        "shot_id": "ep01_s03_sh007",
+        "scene_id": "ep01_s03",
+        "order": 6,
+        "visual_desc": "雨夜天台，男主背对镜头站在栏杆前，远处霓虹在雨幕里散成一片光晕",
+        "first_frame_prompt": "cinematic, rooftop at night, heavy rain, neon bokeh, back view",
+        "last_frame_prompt": "cinematic, rooftop at night, man turns around, rain on face",
+        "motion_prompt": "缓慢推进，雨丝斜掠，人物微微转头",
+        "negative_prompt": "模糊, 低质量, 多余的手指",
+        "shot_size": "MCU",
+        "camera_angle": "low",
+        "camera_move": "push_in",
+        "lens": "auto",
+        "lighting": "",
+        "continuous_with_prev": false,
+        "camera_id": "cam_rooftop_a",
+        "characters": [
+         {
+          "char_id": "lin_yuan",
+          "expression": "隐忍",
+          "action": "握紧栏杆，指节发白",
+          "wardrobe_state": "suit_soaked",
+          "face_pose": "three_quarter",
+          "screen_pos": "center"
+         },
+         {
+          "char_id": "chen_mo",
+          "expression": "愕然",
+          "action": "停在门口，没有再往前",
+          "wardrobe_state": "default",
+          "face_pose": "profile",
+          "screen_pos": "left"
+         }
+        ],
+        "location_id": "loc_rooftop",
+        "prop_ids": [
+         "prop_umbrella",
+         "prop_phone"
+        ],
+        "duration_s": 6.5,
+        "duration_locked": true,
+        "dialogue": [
+         {
+          "char_id": "lin_yuan",
+          "text": "你要是早半个小时来，什么都还来得及。",
+          "emotion": "压抑",
+          "emotion_intensity": 0.8,
+          "voice_id": "voice_lin",
+          "audio_path": "audio/ep01_s03_sh007_01.wav",
+          "actual_duration_s": 3.2
+         },
+         {
+          "char_id": null,
+          "text": "雨声盖过了他后半句。",
+          "emotion": "neutral",
+          "emotion_intensity": 0.3,
+          "voice_id": null,
+          "audio_path": null,
+          "actual_duration_s": null
+         }
+        ],
+        "sfx": [
+         "雨声",
+         "远处车流"
+        ],
+        "bgm_cue": "bgm_tension_low",
+        "needs_lipsync": false,
+        "transition_in": "dissolve",
+        "transition_dur_s": 0.8,
+        "subtitle_text": "你要是早半个小时来，什么都还来得及。",
+        "beat": "反转",
+        "continuity_notes": "上一镜他还没湿透，这里服装状态要接上 suit_soaked",
+        "missing_info": [
+         "未确定陈墨是否带伞"
+        ],
+        "status": "audio_done",
+        "attempts": 2,
+        "frame_path": "frames/ep01_s03_sh007.png",
+        "end_frame_path": null,
+        "video_path": null,
+        "gate_notes": [
+         "草稿档画面偏暗，已调高曝光重跑"
+        ]
+       },
+       {
+        "shot_id": "ep01_s01_sh001",
+        "scene_id": "ep01_s01",
+        "order": 0,
+        "visual_desc": "",
+        "first_frame_prompt": "",
+        "last_frame_prompt": null,
+        "motion_prompt": "",
+        "negative_prompt": "",
+        "shot_size": "MS",
+        "camera_angle": "eye_level",
+        "camera_move": "static",
+        "lens": "auto",
+        "lighting": "",
+        "continuous_with_prev": false,
+        "camera_id": null,
+        "characters": [],
+        "location_id": null,
+        "prop_ids": [],
+        "duration_s": 5.0,
+        "duration_locked": false,
+        "dialogue": [],
+        "sfx": [],
+        "bgm_cue": null,
+        "needs_lipsync": false,
+        "transition_in": "cut",
+        "transition_dur_s": 0.0,
+        "subtitle_text": "",
+        "beat": "",
+        "continuity_notes": "",
+        "missing_info": [],
+        "status": "planned",
+        "attempts": 0,
+        "frame_path": null,
+        "end_frame_path": null,
+        "video_path": null,
+        "gate_notes": []
+       }
+      ],
+      "chapter_refs": [],
+      "shots_from": ""
+     },
+     {
+      "episode_id": "ep02",
+      "title": "第二章 · 晴",
+      "synopsis": "三年后，同一个天台。",
+      "target_duration_s": 200.0,
+      "script": "",
+      "shots": [],
+      "chapter_refs": [],
+      "shots_from": ""
+     },
+     {
+      "episode_id": "special",
+      "title": "特别篇",
+      "synopsis": "",
+      "target_duration_s": 60.0,
+      "script": "",
+      "shots": [],
+      "chapter_refs": [],
+      "shots_from": ""
+     }
+    ],
+    "understood_from": ""
+   }
+  },
+  {
+   "name": "新建一章：id 非法",
+   "method": "POST",
+   "url": "/api/episode",
+   "query": null,
+   "body": {
+    "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_episodes_8hbmemsa\\case14",
+    "episode_id": "EP-03"
+   },
+   "prep": null,
+   "status": 400,
+   "response": {
+    "detail": "章节 id 只能用小写字母、数字和下划线"
+   },
+   "compare": "detail_str",
+   "project_after": null
+  },
+  {
+   "name": "新建一章：id 已存在",
+   "method": "POST",
+   "url": "/api/episode",
+   "query": null,
+   "body": {
+    "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_episodes_8hbmemsa\\case15",
+    "episode_id": "ep01"
+   },
+   "prep": null,
+   "status": 409,
+   "response": {
+    "detail": "章节 ep01 已存在"
+   },
+   "compare": "detail_str",
+   "project_after": null
+  },
+  {
+   "name": "新建一章：自定时长",
+   "method": "POST",
+   "url": "/api/episode",
+   "query": null,
+   "body": {
+    "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_episodes_8hbmemsa\\case16",
+    "target_duration_s": 120.0
+   },
+   "prep": null,
+   "status": 200,
+   "response": {
+    "episode_id": "ep03",
+    "title": ""
+   },
+   "compare": "full",
+   "project_after": {
+    "schema_version": 1,
+    "project_id": "yuye-tiantai",
+    "title": "雨夜天台",
+    "style_line": "realistic",
+    "premise": "一个关于错过与和解的都市电影。全片九十分钟，横屏。",
+    "created_at": "2026-09-07T14:56:29.511392+00:00",
+    "updated_at": "2026-09-07T17:19:41.918272+00:00",
+    "episodes": [
+     {
+      "episode_id": "ep01",
+      "title": "第一章 · 雨",
+      "synopsis": "林渊在天台等一个不会来的人。",
+      "target_duration_s": 180.0,
+      "script": "（雨声起）\n林渊站在栏杆前，没有回头。",
+      "shots": [
+       {
+        "shot_id": "ep01_s03_sh007",
+        "scene_id": "ep01_s03",
+        "order": 6,
+        "visual_desc": "雨夜天台，男主背对镜头站在栏杆前，远处霓虹在雨幕里散成一片光晕",
+        "first_frame_prompt": "cinematic, rooftop at night, heavy rain, neon bokeh, back view",
+        "last_frame_prompt": "cinematic, rooftop at night, man turns around, rain on face",
+        "motion_prompt": "缓慢推进，雨丝斜掠，人物微微转头",
+        "negative_prompt": "模糊, 低质量, 多余的手指",
+        "shot_size": "MCU",
+        "camera_angle": "low",
+        "camera_move": "push_in",
+        "lens": "auto",
+        "lighting": "",
+        "continuous_with_prev": false,
+        "camera_id": "cam_rooftop_a",
+        "characters": [
+         {
+          "char_id": "lin_yuan",
+          "expression": "隐忍",
+          "action": "握紧栏杆，指节发白",
+          "wardrobe_state": "suit_soaked",
+          "face_pose": "three_quarter",
+          "screen_pos": "center"
+         },
+         {
+          "char_id": "chen_mo",
+          "expression": "愕然",
+          "action": "停在门口，没有再往前",
+          "wardrobe_state": "default",
+          "face_pose": "profile",
+          "screen_pos": "left"
+         }
+        ],
+        "location_id": "loc_rooftop",
+        "prop_ids": [
+         "prop_umbrella",
+         "prop_phone"
+        ],
+        "duration_s": 6.5,
+        "duration_locked": true,
+        "dialogue": [
+         {
+          "char_id": "lin_yuan",
+          "text": "你要是早半个小时来，什么都还来得及。",
+          "emotion": "压抑",
+          "emotion_intensity": 0.8,
+          "voice_id": "voice_lin",
+          "audio_path": "audio/ep01_s03_sh007_01.wav",
+          "actual_duration_s": 3.2
+         },
+         {
+          "char_id": null,
+          "text": "雨声盖过了他后半句。",
+          "emotion": "neutral",
+          "emotion_intensity": 0.3,
+          "voice_id": null,
+          "audio_path": null,
+          "actual_duration_s": null
+         }
+        ],
+        "sfx": [
+         "雨声",
+         "远处车流"
+        ],
+        "bgm_cue": "bgm_tension_low",
+        "needs_lipsync": false,
+        "transition_in": "dissolve",
+        "transition_dur_s": 0.8,
+        "subtitle_text": "你要是早半个小时来，什么都还来得及。",
+        "beat": "反转",
+        "continuity_notes": "上一镜他还没湿透，这里服装状态要接上 suit_soaked",
+        "missing_info": [
+         "未确定陈墨是否带伞"
+        ],
+        "status": "audio_done",
+        "attempts": 2,
+        "frame_path": "frames/ep01_s03_sh007.png",
+        "end_frame_path": null,
+        "video_path": null,
+        "gate_notes": [
+         "草稿档画面偏暗，已调高曝光重跑"
+        ]
+       },
+       {
+        "shot_id": "ep01_s01_sh001",
+        "scene_id": "ep01_s01",
+        "order": 0,
+        "visual_desc": "",
+        "first_frame_prompt": "",
+        "last_frame_prompt": null,
+        "motion_prompt": "",
+        "negative_prompt": "",
+        "shot_size": "MS",
+        "camera_angle": "eye_level",
+        "camera_move": "static",
+        "lens": "auto",
+        "lighting": "",
+        "continuous_with_prev": false,
+        "camera_id": null,
+        "characters": [],
+        "location_id": null,
+        "prop_ids": [],
+        "duration_s": 5.0,
+        "duration_locked": false,
+        "dialogue": [],
+        "sfx": [],
+        "bgm_cue": null,
+        "needs_lipsync": false,
+        "transition_in": "cut",
+        "transition_dur_s": 0.0,
+        "subtitle_text": "",
+        "beat": "",
+        "continuity_notes": "",
+        "missing_info": [],
+        "status": "planned",
+        "attempts": 0,
+        "frame_path": null,
+        "end_frame_path": null,
+        "video_path": null,
+        "gate_notes": []
+       }
+      ],
+      "chapter_refs": [],
+      "shots_from": ""
+     },
+     {
+      "episode_id": "ep02",
+      "title": "第二章 · 晴",
+      "synopsis": "三年后，同一个天台。",
+      "target_duration_s": 200.0,
+      "script": "",
+      "shots": [],
+      "chapter_refs": [],
+      "shots_from": ""
+     },
+     {
+      "episode_id": "ep03",
+      "title": "",
+      "synopsis": "",
+      "target_duration_s": 120.0,
+      "script": "",
+      "shots": [],
+      "chapter_refs": [],
+      "shots_from": ""
+     }
+    ],
+    "understood_from": ""
+   }
+  },
+  {
+   "name": "新建一章：项目里有预告，不该跳号",
+   "method": "POST",
+   "url": "/api/episode",
+   "query": null,
+   "body": {
+    "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_episodes_8hbmemsa\\case17"
+   },
+   "prep": "add_trailer",
+   "status": 200,
+   "response": {
+    "episode_id": "ep03",
+    "title": ""
+   },
+   "compare": "full",
+   "project_after": {
+    "schema_version": 1,
+    "project_id": "yuye-tiantai",
+    "title": "雨夜天台",
+    "style_line": "realistic",
+    "premise": "一个关于错过与和解的都市电影。全片九十分钟，横屏。",
+    "created_at": "2026-09-07T14:56:29.511392+00:00",
+    "updated_at": "2026-09-07T17:19:41.960367+00:00",
+    "episodes": [
+     {
+      "episode_id": "ep01",
+      "title": "第一章 · 雨",
+      "synopsis": "林渊在天台等一个不会来的人。",
+      "target_duration_s": 180.0,
+      "script": "（雨声起）\n林渊站在栏杆前，没有回头。",
+      "shots": [
+       {
+        "shot_id": "ep01_s03_sh007",
+        "scene_id": "ep01_s03",
+        "order": 6,
+        "visual_desc": "雨夜天台，男主背对镜头站在栏杆前，远处霓虹在雨幕里散成一片光晕",
+        "first_frame_prompt": "cinematic, rooftop at night, heavy rain, neon bokeh, back view",
+        "last_frame_prompt": "cinematic, rooftop at night, man turns around, rain on face",
+        "motion_prompt": "缓慢推进，雨丝斜掠，人物微微转头",
+        "negative_prompt": "模糊, 低质量, 多余的手指",
+        "shot_size": "MCU",
+        "camera_angle": "low",
+        "camera_move": "push_in",
+        "lens": "auto",
+        "lighting": "",
+        "continuous_with_prev": false,
+        "camera_id": "cam_rooftop_a",
+        "characters": [
+         {
+          "char_id": "lin_yuan",
+          "expression": "隐忍",
+          "action": "握紧栏杆，指节发白",
+          "wardrobe_state": "suit_soaked",
+          "face_pose": "three_quarter",
+          "screen_pos": "center"
+         },
+         {
+          "char_id": "chen_mo",
+          "expression": "愕然",
+          "action": "停在门口，没有再往前",
+          "wardrobe_state": "default",
+          "face_pose": "profile",
+          "screen_pos": "left"
+         }
+        ],
+        "location_id": "loc_rooftop",
+        "prop_ids": [
+         "prop_umbrella",
+         "prop_phone"
+        ],
+        "duration_s": 6.5,
+        "duration_locked": true,
+        "dialogue": [
+         {
+          "char_id": "lin_yuan",
+          "text": "你要是早半个小时来，什么都还来得及。",
+          "emotion": "压抑",
+          "emotion_intensity": 0.8,
+          "voice_id": "voice_lin",
+          "audio_path": "audio/ep01_s03_sh007_01.wav",
+          "actual_duration_s": 3.2
+         },
+         {
+          "char_id": null,
+          "text": "雨声盖过了他后半句。",
+          "emotion": "neutral",
+          "emotion_intensity": 0.3,
+          "voice_id": null,
+          "audio_path": null,
+          "actual_duration_s": null
+         }
+        ],
+        "sfx": [
+         "雨声",
+         "远处车流"
+        ],
+        "bgm_cue": "bgm_tension_low",
+        "needs_lipsync": false,
+        "transition_in": "dissolve",
+        "transition_dur_s": 0.8,
+        "subtitle_text": "你要是早半个小时来，什么都还来得及。",
+        "beat": "反转",
+        "continuity_notes": "上一镜他还没湿透，这里服装状态要接上 suit_soaked",
+        "missing_info": [
+         "未确定陈墨是否带伞"
+        ],
+        "status": "audio_done",
+        "attempts": 2,
+        "frame_path": "frames/ep01_s03_sh007.png",
+        "end_frame_path": null,
+        "video_path": null,
+        "gate_notes": [
+         "草稿档画面偏暗，已调高曝光重跑"
+        ]
+       },
+       {
+        "shot_id": "ep01_s01_sh001",
+        "scene_id": "ep01_s01",
+        "order": 0,
+        "visual_desc": "",
+        "first_frame_prompt": "",
+        "last_frame_prompt": null,
+        "motion_prompt": "",
+        "negative_prompt": "",
+        "shot_size": "MS",
+        "camera_angle": "eye_level",
+        "camera_move": "static",
+        "lens": "auto",
+        "lighting": "",
+        "continuous_with_prev": false,
+        "camera_id": null,
+        "characters": [],
+        "location_id": null,
+        "prop_ids": [],
+        "duration_s": 5.0,
+        "duration_locked": false,
+        "dialogue": [],
+        "sfx": [],
+        "bgm_cue": null,
+        "needs_lipsync": false,
+        "transition_in": "cut",
+        "transition_dur_s": 0.0,
+        "subtitle_text": "",
+        "beat": "",
+        "continuity_notes": "",
+        "missing_info": [],
+        "status": "planned",
+        "attempts": 0,
+        "frame_path": null,
+        "end_frame_path": null,
+        "video_path": null,
+        "gate_notes": []
+       }
+      ],
+      "chapter_refs": [],
+      "shots_from": ""
+     },
+     {
+      "episode_id": "ep02",
+      "title": "第二章 · 晴",
+      "synopsis": "三年后，同一个天台。",
+      "target_duration_s": 200.0,
+      "script": "",
+      "shots": [],
+      "chapter_refs": [],
+      "shots_from": ""
+     },
+     {
+      "episode_id": "trailer",
+      "title": "预告",
+      "synopsis": "",
+      "target_duration_s": 20.0,
+      "script": "",
+      "shots": [],
+      "chapter_refs": [],
+      "shots_from": ""
+     },
+     {
+      "episode_id": "ep03",
+      "title": "",
+      "synopsis": "",
+      "target_duration_s": 60.0,
+      "script": "",
+      "shots": [],
+      "chapter_refs": [],
+      "shots_from": ""
+     }
+    ],
+    "understood_from": ""
+   }
+  },
+  {
+   "name": "删一章",
+   "method": "POST",
+   "url": "/api/episode/action",
+   "query": null,
+   "body": {
+    "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_episodes_8hbmemsa\\case18",
+    "episode_id": "ep02",
+    "action": "delete"
+   },
+   "prep": null,
+   "status": 200,
+   "response": {
+    "deleted": "ep02"
+   },
+   "compare": "full",
+   "project_after": {
+    "schema_version": 1,
+    "project_id": "yuye-tiantai",
+    "title": "雨夜天台",
+    "style_line": "realistic",
+    "premise": "一个关于错过与和解的都市电影。全片九十分钟，横屏。",
+    "created_at": "2026-09-07T14:56:29.511392+00:00",
+    "updated_at": "2026-09-07T17:19:41.994042+00:00",
+    "episodes": [
+     {
+      "episode_id": "ep01",
+      "title": "第一章 · 雨",
+      "synopsis": "林渊在天台等一个不会来的人。",
+      "target_duration_s": 180.0,
+      "script": "（雨声起）\n林渊站在栏杆前，没有回头。",
+      "shots": [
+       {
+        "shot_id": "ep01_s03_sh007",
+        "scene_id": "ep01_s03",
+        "order": 6,
+        "visual_desc": "雨夜天台，男主背对镜头站在栏杆前，远处霓虹在雨幕里散成一片光晕",
+        "first_frame_prompt": "cinematic, rooftop at night, heavy rain, neon bokeh, back view",
+        "last_frame_prompt": "cinematic, rooftop at night, man turns around, rain on face",
+        "motion_prompt": "缓慢推进，雨丝斜掠，人物微微转头",
+        "negative_prompt": "模糊, 低质量, 多余的手指",
+        "shot_size": "MCU",
+        "camera_angle": "low",
+        "camera_move": "push_in",
+        "lens": "auto",
+        "lighting": "",
+        "continuous_with_prev": false,
+        "camera_id": "cam_rooftop_a",
+        "characters": [
+         {
+          "char_id": "lin_yuan",
+          "expression": "隐忍",
+          "action": "握紧栏杆，指节发白",
+          "wardrobe_state": "suit_soaked",
+          "face_pose": "three_quarter",
+          "screen_pos": "center"
+         },
+         {
+          "char_id": "chen_mo",
+          "expression": "愕然",
+          "action": "停在门口，没有再往前",
+          "wardrobe_state": "default",
+          "face_pose": "profile",
+          "screen_pos": "left"
+         }
+        ],
+        "location_id": "loc_rooftop",
+        "prop_ids": [
+         "prop_umbrella",
+         "prop_phone"
+        ],
+        "duration_s": 6.5,
+        "duration_locked": true,
+        "dialogue": [
+         {
+          "char_id": "lin_yuan",
+          "text": "你要是早半个小时来，什么都还来得及。",
+          "emotion": "压抑",
+          "emotion_intensity": 0.8,
+          "voice_id": "voice_lin",
+          "audio_path": "audio/ep01_s03_sh007_01.wav",
+          "actual_duration_s": 3.2
+         },
+         {
+          "char_id": null,
+          "text": "雨声盖过了他后半句。",
+          "emotion": "neutral",
+          "emotion_intensity": 0.3,
+          "voice_id": null,
+          "audio_path": null,
+          "actual_duration_s": null
+         }
+        ],
+        "sfx": [
+         "雨声",
+         "远处车流"
+        ],
+        "bgm_cue": "bgm_tension_low",
+        "needs_lipsync": false,
+        "transition_in": "dissolve",
+        "transition_dur_s": 0.8,
+        "subtitle_text": "你要是早半个小时来，什么都还来得及。",
+        "beat": "反转",
+        "continuity_notes": "上一镜他还没湿透，这里服装状态要接上 suit_soaked",
+        "missing_info": [
+         "未确定陈墨是否带伞"
+        ],
+        "status": "audio_done",
+        "attempts": 2,
+        "frame_path": "frames/ep01_s03_sh007.png",
+        "end_frame_path": null,
+        "video_path": null,
+        "gate_notes": [
+         "草稿档画面偏暗，已调高曝光重跑"
+        ]
+       },
+       {
+        "shot_id": "ep01_s01_sh001",
+        "scene_id": "ep01_s01",
+        "order": 0,
+        "visual_desc": "",
+        "first_frame_prompt": "",
+        "last_frame_prompt": null,
+        "motion_prompt": "",
+        "negative_prompt": "",
+        "shot_size": "MS",
+        "camera_angle": "eye_level",
+        "camera_move": "static",
+        "lens": "auto",
+        "lighting": "",
+        "continuous_with_prev": false,
+        "camera_id": null,
+        "characters": [],
+        "location_id": null,
+        "prop_ids": [],
+        "duration_s": 5.0,
+        "duration_locked": false,
+        "dialogue": [],
+        "sfx": [],
+        "bgm_cue": null,
+        "needs_lipsync": false,
+        "transition_in": "cut",
+        "transition_dur_s": 0.0,
+        "subtitle_text": "",
+        "beat": "",
+        "continuity_notes": "",
+        "missing_info": [],
+        "status": "planned",
+        "attempts": 0,
+        "frame_path": null,
+        "end_frame_path": null,
+        "video_path": null,
+        "gate_notes": []
+       }
+      ],
+      "chapter_refs": [],
+      "shots_from": ""
+     }
+    ],
+    "understood_from": ""
+   }
+  },
+  {
+   "name": "改名",
+   "method": "POST",
+   "url": "/api/episode/action",
+   "query": null,
+   "body": {
+    "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_episodes_8hbmemsa\\case19",
+    "episode_id": "ep01",
+    "action": "rename",
+    "new_title": "新标题"
+   },
+   "prep": null,
+   "status": 200,
+   "response": {
+    "renamed": "ep01",
+    "title": "新标题"
+   },
+   "compare": "full",
+   "project_after": {
+    "schema_version": 1,
+    "project_id": "yuye-tiantai",
+    "title": "雨夜天台",
+    "style_line": "realistic",
+    "premise": "一个关于错过与和解的都市电影。全片九十分钟，横屏。",
+    "created_at": "2026-09-07T14:56:29.511392+00:00",
+    "updated_at": "2026-09-07T17:19:42.029200+00:00",
+    "episodes": [
+     {
+      "episode_id": "ep01",
+      "title": "新标题",
+      "synopsis": "林渊在天台等一个不会来的人。",
+      "target_duration_s": 180.0,
+      "script": "（雨声起）\n林渊站在栏杆前，没有回头。",
+      "shots": [
+       {
+        "shot_id": "ep01_s03_sh007",
+        "scene_id": "ep01_s03",
+        "order": 6,
+        "visual_desc": "雨夜天台，男主背对镜头站在栏杆前，远处霓虹在雨幕里散成一片光晕",
+        "first_frame_prompt": "cinematic, rooftop at night, heavy rain, neon bokeh, back view",
+        "last_frame_prompt": "cinematic, rooftop at night, man turns around, rain on face",
+        "motion_prompt": "缓慢推进，雨丝斜掠，人物微微转头",
+        "negative_prompt": "模糊, 低质量, 多余的手指",
+        "shot_size": "MCU",
+        "camera_angle": "low",
+        "camera_move": "push_in",
+        "lens": "auto",
+        "lighting": "",
+        "continuous_with_prev": false,
+        "camera_id": "cam_rooftop_a",
+        "characters": [
+         {
+          "char_id": "lin_yuan",
+          "expression": "隐忍",
+          "action": "握紧栏杆，指节发白",
+          "wardrobe_state": "suit_soaked",
+          "face_pose": "three_quarter",
+          "screen_pos": "center"
+         },
+         {
+          "char_id": "chen_mo",
+          "expression": "愕然",
+          "action": "停在门口，没有再往前",
+          "wardrobe_state": "default",
+          "face_pose": "profile",
+          "screen_pos": "left"
+         }
+        ],
+        "location_id": "loc_rooftop",
+        "prop_ids": [
+         "prop_umbrella",
+         "prop_phone"
+        ],
+        "duration_s": 6.5,
+        "duration_locked": true,
+        "dialogue": [
+         {
+          "char_id": "lin_yuan",
+          "text": "你要是早半个小时来，什么都还来得及。",
+          "emotion": "压抑",
+          "emotion_intensity": 0.8,
+          "voice_id": "voice_lin",
+          "audio_path": "audio/ep01_s03_sh007_01.wav",
+          "actual_duration_s": 3.2
+         },
+         {
+          "char_id": null,
+          "text": "雨声盖过了他后半句。",
+          "emotion": "neutral",
+          "emotion_intensity": 0.3,
+          "voice_id": null,
+          "audio_path": null,
+          "actual_duration_s": null
+         }
+        ],
+        "sfx": [
+         "雨声",
+         "远处车流"
+        ],
+        "bgm_cue": "bgm_tension_low",
+        "needs_lipsync": false,
+        "transition_in": "dissolve",
+        "transition_dur_s": 0.8,
+        "subtitle_text": "你要是早半个小时来，什么都还来得及。",
+        "beat": "反转",
+        "continuity_notes": "上一镜他还没湿透，这里服装状态要接上 suit_soaked",
+        "missing_info": [
+         "未确定陈墨是否带伞"
+        ],
+        "status": "audio_done",
+        "attempts": 2,
+        "frame_path": "frames/ep01_s03_sh007.png",
+        "end_frame_path": null,
+        "video_path": null,
+        "gate_notes": [
+         "草稿档画面偏暗，已调高曝光重跑"
+        ]
+       },
+       {
+        "shot_id": "ep01_s01_sh001",
+        "scene_id": "ep01_s01",
+        "order": 0,
+        "visual_desc": "",
+        "first_frame_prompt": "",
+        "last_frame_prompt": null,
+        "motion_prompt": "",
+        "negative_prompt": "",
+        "shot_size": "MS",
+        "camera_angle": "eye_level",
+        "camera_move": "static",
+        "lens": "auto",
+        "lighting": "",
+        "continuous_with_prev": false,
+        "camera_id": null,
+        "characters": [],
+        "location_id": null,
+        "prop_ids": [],
+        "duration_s": 5.0,
+        "duration_locked": false,
+        "dialogue": [],
+        "sfx": [],
+        "bgm_cue": null,
+        "needs_lipsync": false,
+        "transition_in": "cut",
+        "transition_dur_s": 0.0,
+        "subtitle_text": "",
+        "beat": "",
+        "continuity_notes": "",
+        "missing_info": [],
+        "status": "planned",
+        "attempts": 0,
+        "frame_path": null,
+        "end_frame_path": null,
+        "video_path": null,
+        "gate_notes": []
+       }
+      ],
+      "chapter_refs": [],
+      "shots_from": ""
+     },
+     {
+      "episode_id": "ep02",
+      "title": "第二章 · 晴",
+      "synopsis": "三年后，同一个天台。",
+      "target_duration_s": 200.0,
+      "script": "",
+      "shots": [],
+      "chapter_refs": [],
+      "shots_from": ""
+     }
+    ],
+    "understood_from": ""
+   }
+  },
+  {
+   "name": "改名：不给新名字",
+   "method": "POST",
+   "url": "/api/episode/action",
+   "query": null,
+   "body": {
+    "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_episodes_8hbmemsa\\case20",
+    "episode_id": "ep01",
+    "action": "rename"
+   },
+   "prep": null,
+   "status": 200,
+   "response": {
+    "renamed": "ep01",
+    "title": ""
+   },
+   "compare": "full",
+   "project_after": {
+    "schema_version": 1,
+    "project_id": "yuye-tiantai",
+    "title": "雨夜天台",
+    "style_line": "realistic",
+    "premise": "一个关于错过与和解的都市电影。全片九十分钟，横屏。",
+    "created_at": "2026-09-07T14:56:29.511392+00:00",
+    "updated_at": "2026-09-07T17:19:42.063258+00:00",
+    "episodes": [
+     {
+      "episode_id": "ep01",
+      "title": "",
+      "synopsis": "林渊在天台等一个不会来的人。",
+      "target_duration_s": 180.0,
+      "script": "（雨声起）\n林渊站在栏杆前，没有回头。",
+      "shots": [
+       {
+        "shot_id": "ep01_s03_sh007",
+        "scene_id": "ep01_s03",
+        "order": 6,
+        "visual_desc": "雨夜天台，男主背对镜头站在栏杆前，远处霓虹在雨幕里散成一片光晕",
+        "first_frame_prompt": "cinematic, rooftop at night, heavy rain, neon bokeh, back view",
+        "last_frame_prompt": "cinematic, rooftop at night, man turns around, rain on face",
+        "motion_prompt": "缓慢推进，雨丝斜掠，人物微微转头",
+        "negative_prompt": "模糊, 低质量, 多余的手指",
+        "shot_size": "MCU",
+        "camera_angle": "low",
+        "camera_move": "push_in",
+        "lens": "auto",
+        "lighting": "",
+        "continuous_with_prev": false,
+        "camera_id": "cam_rooftop_a",
+        "characters": [
+         {
+          "char_id": "lin_yuan",
+          "expression": "隐忍",
+          "action": "握紧栏杆，指节发白",
+          "wardrobe_state": "suit_soaked",
+          "face_pose": "three_quarter",
+          "screen_pos": "center"
+         },
+         {
+          "char_id": "chen_mo",
+          "expression": "愕然",
+          "action": "停在门口，没有再往前",
+          "wardrobe_state": "default",
+          "face_pose": "profile",
+          "screen_pos": "left"
+         }
+        ],
+        "location_id": "loc_rooftop",
+        "prop_ids": [
+         "prop_umbrella",
+         "prop_phone"
+        ],
+        "duration_s": 6.5,
+        "duration_locked": true,
+        "dialogue": [
+         {
+          "char_id": "lin_yuan",
+          "text": "你要是早半个小时来，什么都还来得及。",
+          "emotion": "压抑",
+          "emotion_intensity": 0.8,
+          "voice_id": "voice_lin",
+          "audio_path": "audio/ep01_s03_sh007_01.wav",
+          "actual_duration_s": 3.2
+         },
+         {
+          "char_id": null,
+          "text": "雨声盖过了他后半句。",
+          "emotion": "neutral",
+          "emotion_intensity": 0.3,
+          "voice_id": null,
+          "audio_path": null,
+          "actual_duration_s": null
+         }
+        ],
+        "sfx": [
+         "雨声",
+         "远处车流"
+        ],
+        "bgm_cue": "bgm_tension_low",
+        "needs_lipsync": false,
+        "transition_in": "dissolve",
+        "transition_dur_s": 0.8,
+        "subtitle_text": "你要是早半个小时来，什么都还来得及。",
+        "beat": "反转",
+        "continuity_notes": "上一镜他还没湿透，这里服装状态要接上 suit_soaked",
+        "missing_info": [
+         "未确定陈墨是否带伞"
+        ],
+        "status": "audio_done",
+        "attempts": 2,
+        "frame_path": "frames/ep01_s03_sh007.png",
+        "end_frame_path": null,
+        "video_path": null,
+        "gate_notes": [
+         "草稿档画面偏暗，已调高曝光重跑"
+        ]
+       },
+       {
+        "shot_id": "ep01_s01_sh001",
+        "scene_id": "ep01_s01",
+        "order": 0,
+        "visual_desc": "",
+        "first_frame_prompt": "",
+        "last_frame_prompt": null,
+        "motion_prompt": "",
+        "negative_prompt": "",
+        "shot_size": "MS",
+        "camera_angle": "eye_level",
+        "camera_move": "static",
+        "lens": "auto",
+        "lighting": "",
+        "continuous_with_prev": false,
+        "camera_id": null,
+        "characters": [],
+        "location_id": null,
+        "prop_ids": [],
+        "duration_s": 5.0,
+        "duration_locked": false,
+        "dialogue": [],
+        "sfx": [],
+        "bgm_cue": null,
+        "needs_lipsync": false,
+        "transition_in": "cut",
+        "transition_dur_s": 0.0,
+        "subtitle_text": "",
+        "beat": "",
+        "continuity_notes": "",
+        "missing_info": [],
+        "status": "planned",
+        "attempts": 0,
+        "frame_path": null,
+        "end_frame_path": null,
+        "video_path": null,
+        "gate_notes": []
+       }
+      ],
+      "chapter_refs": [],
+      "shots_from": ""
+     },
+     {
+      "episode_id": "ep02",
+      "title": "第二章 · 晴",
+      "synopsis": "三年后，同一个天台。",
+      "target_duration_s": 200.0,
+      "script": "",
+      "shots": [],
+      "chapter_refs": [],
+      "shots_from": ""
+     }
+    ],
+    "understood_from": ""
+   }
+  },
+  {
+   "name": "复制：带分镜的那一章",
+   "method": "POST",
+   "url": "/api/episode/action",
+   "query": null,
+   "body": {
+    "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_episodes_8hbmemsa\\case21",
+    "episode_id": "ep01",
+    "action": "duplicate"
+   },
+   "prep": null,
+   "status": 200,
+   "response": {
+    "episode_id": "ep03",
+    "shots": 2
+   },
+   "compare": "full",
+   "project_after": {
+    "schema_version": 1,
+    "project_id": "yuye-tiantai",
+    "title": "雨夜天台",
+    "style_line": "realistic",
+    "premise": "一个关于错过与和解的都市电影。全片九十分钟，横屏。",
+    "created_at": "2026-09-07T14:56:29.511392+00:00",
+    "updated_at": "2026-09-07T17:19:42.095736+00:00",
+    "episodes": [
+     {
+      "episode_id": "ep01",
+      "title": "第一章 · 雨",
+      "synopsis": "林渊在天台等一个不会来的人。",
+      "target_duration_s": 180.0,
+      "script": "（雨声起）\n林渊站在栏杆前，没有回头。",
+      "shots": [
+       {
+        "shot_id": "ep01_s03_sh007",
+        "scene_id": "ep01_s03",
+        "order": 6,
+        "visual_desc": "雨夜天台，男主背对镜头站在栏杆前，远处霓虹在雨幕里散成一片光晕",
+        "first_frame_prompt": "cinematic, rooftop at night, heavy rain, neon bokeh, back view",
+        "last_frame_prompt": "cinematic, rooftop at night, man turns around, rain on face",
+        "motion_prompt": "缓慢推进，雨丝斜掠，人物微微转头",
+        "negative_prompt": "模糊, 低质量, 多余的手指",
+        "shot_size": "MCU",
+        "camera_angle": "low",
+        "camera_move": "push_in",
+        "lens": "auto",
+        "lighting": "",
+        "continuous_with_prev": false,
+        "camera_id": "cam_rooftop_a",
+        "characters": [
+         {
+          "char_id": "lin_yuan",
+          "expression": "隐忍",
+          "action": "握紧栏杆，指节发白",
+          "wardrobe_state": "suit_soaked",
+          "face_pose": "three_quarter",
+          "screen_pos": "center"
+         },
+         {
+          "char_id": "chen_mo",
+          "expression": "愕然",
+          "action": "停在门口，没有再往前",
+          "wardrobe_state": "default",
+          "face_pose": "profile",
+          "screen_pos": "left"
+         }
+        ],
+        "location_id": "loc_rooftop",
+        "prop_ids": [
+         "prop_umbrella",
+         "prop_phone"
+        ],
+        "duration_s": 6.5,
+        "duration_locked": true,
+        "dialogue": [
+         {
+          "char_id": "lin_yuan",
+          "text": "你要是早半个小时来，什么都还来得及。",
+          "emotion": "压抑",
+          "emotion_intensity": 0.8,
+          "voice_id": "voice_lin",
+          "audio_path": "audio/ep01_s03_sh007_01.wav",
+          "actual_duration_s": 3.2
+         },
+         {
+          "char_id": null,
+          "text": "雨声盖过了他后半句。",
+          "emotion": "neutral",
+          "emotion_intensity": 0.3,
+          "voice_id": null,
+          "audio_path": null,
+          "actual_duration_s": null
+         }
+        ],
+        "sfx": [
+         "雨声",
+         "远处车流"
+        ],
+        "bgm_cue": "bgm_tension_low",
+        "needs_lipsync": false,
+        "transition_in": "dissolve",
+        "transition_dur_s": 0.8,
+        "subtitle_text": "你要是早半个小时来，什么都还来得及。",
+        "beat": "反转",
+        "continuity_notes": "上一镜他还没湿透，这里服装状态要接上 suit_soaked",
+        "missing_info": [
+         "未确定陈墨是否带伞"
+        ],
+        "status": "audio_done",
+        "attempts": 2,
+        "frame_path": "frames/ep01_s03_sh007.png",
+        "end_frame_path": null,
+        "video_path": null,
+        "gate_notes": [
+         "草稿档画面偏暗，已调高曝光重跑"
+        ]
+       },
+       {
+        "shot_id": "ep01_s01_sh001",
+        "scene_id": "ep01_s01",
+        "order": 0,
+        "visual_desc": "",
+        "first_frame_prompt": "",
+        "last_frame_prompt": null,
+        "motion_prompt": "",
+        "negative_prompt": "",
+        "shot_size": "MS",
+        "camera_angle": "eye_level",
+        "camera_move": "static",
+        "lens": "auto",
+        "lighting": "",
+        "continuous_with_prev": false,
+        "camera_id": null,
+        "characters": [],
+        "location_id": null,
+        "prop_ids": [],
+        "duration_s": 5.0,
+        "duration_locked": false,
+        "dialogue": [],
+        "sfx": [],
+        "bgm_cue": null,
+        "needs_lipsync": false,
+        "transition_in": "cut",
+        "transition_dur_s": 0.0,
+        "subtitle_text": "",
+        "beat": "",
+        "continuity_notes": "",
+        "missing_info": [],
+        "status": "planned",
+        "attempts": 0,
+        "frame_path": null,
+        "end_frame_path": null,
+        "video_path": null,
+        "gate_notes": []
+       }
+      ],
+      "chapter_refs": [],
+      "shots_from": ""
+     },
+     {
+      "episode_id": "ep02",
+      "title": "第二章 · 晴",
+      "synopsis": "三年后，同一个天台。",
+      "target_duration_s": 200.0,
+      "script": "",
+      "shots": [],
+      "chapter_refs": [],
+      "shots_from": ""
+     },
+     {
+      "episode_id": "ep03",
+      "title": "第一章 · 雨 副本",
+      "synopsis": "",
+      "target_duration_s": 180.0,
+      "script": "（雨声起）\n林渊站在栏杆前，没有回头。",
+      "shots": [
+       {
+        "shot_id": "ep03_s01_sh001",
+        "scene_id": "ep03_s01",
+        "order": 0,
+        "visual_desc": "",
+        "first_frame_prompt": "",
+        "last_frame_prompt": null,
+        "motion_prompt": "",
+        "negative_prompt": "",
+        "shot_size": "MS",
+        "camera_angle": "eye_level",
+        "camera_move": "static",
+        "lens": "auto",
+        "lighting": "",
+        "continuous_with_prev": false,
+        "camera_id": null,
+        "characters": [],
+        "location_id": null,
+        "prop_ids": [],
+        "duration_s": 5.0,
+        "duration_locked": false,
+        "dialogue": [],
+        "sfx": [],
+        "bgm_cue": null,
+        "needs_lipsync": false,
+        "transition_in": "cut",
+        "transition_dur_s": 0.0,
+        "subtitle_text": "",
+        "beat": "",
+        "continuity_notes": "",
+        "missing_info": [],
+        "status": "planned",
+        "attempts": 0,
+        "frame_path": null,
+        "end_frame_path": null,
+        "video_path": null,
+        "gate_notes": []
+       },
+       {
+        "shot_id": "ep03_s03_sh007",
+        "scene_id": "ep03_s03",
+        "order": 6,
+        "visual_desc": "雨夜天台，男主背对镜头站在栏杆前，远处霓虹在雨幕里散成一片光晕",
+        "first_frame_prompt": "cinematic, rooftop at night, heavy rain, neon bokeh, back view",
+        "last_frame_prompt": "cinematic, rooftop at night, man turns around, rain on face",
+        "motion_prompt": "缓慢推进，雨丝斜掠，人物微微转头",
+        "negative_prompt": "模糊, 低质量, 多余的手指",
+        "shot_size": "MCU",
+        "camera_angle": "low",
+        "camera_move": "push_in",
+        "lens": "auto",
+        "lighting": "",
+        "continuous_with_prev": false,
+        "camera_id": "cam_rooftop_a",
+        "characters": [
+         {
+          "char_id": "lin_yuan",
+          "expression": "隐忍",
+          "action": "握紧栏杆，指节发白",
+          "wardrobe_state": "suit_soaked",
+          "face_pose": "three_quarter",
+          "screen_pos": "center"
+         },
+         {
+          "char_id": "chen_mo",
+          "expression": "愕然",
+          "action": "停在门口，没有再往前",
+          "wardrobe_state": "default",
+          "face_pose": "profile",
+          "screen_pos": "left"
+         }
+        ],
+        "location_id": "loc_rooftop",
+        "prop_ids": [
+         "prop_umbrella",
+         "prop_phone"
+        ],
+        "duration_s": 6.5,
+        "duration_locked": false,
+        "dialogue": [
+         {
+          "char_id": "lin_yuan",
+          "text": "你要是早半个小时来，什么都还来得及。",
+          "emotion": "压抑",
+          "emotion_intensity": 0.8,
+          "voice_id": "voice_lin",
+          "audio_path": null,
+          "actual_duration_s": null
+         },
+         {
+          "char_id": null,
+          "text": "雨声盖过了他后半句。",
+          "emotion": "neutral",
+          "emotion_intensity": 0.3,
+          "voice_id": null,
+          "audio_path": null,
+          "actual_duration_s": null
+         }
+        ],
+        "sfx": [
+         "雨声",
+         "远处车流"
+        ],
+        "bgm_cue": "bgm_tension_low",
+        "needs_lipsync": false,
+        "transition_in": "dissolve",
+        "transition_dur_s": 0.8,
+        "subtitle_text": "你要是早半个小时来，什么都还来得及。",
+        "beat": "反转",
+        "continuity_notes": "上一镜他还没湿透，这里服装状态要接上 suit_soaked",
+        "missing_info": [
+         "未确定陈墨是否带伞"
+        ],
+        "status": "planned",
+        "attempts": 0,
+        "frame_path": null,
+        "end_frame_path": null,
+        "video_path": null,
+        "gate_notes": []
+       }
+      ],
+      "chapter_refs": [],
+      "shots_from": ""
+     }
+    ],
+    "understood_from": ""
+   }
+  },
+  {
+   "name": "复制：项目里有预告",
+   "method": "POST",
+   "url": "/api/episode/action",
+   "query": null,
+   "body": {
+    "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_episodes_8hbmemsa\\case22",
+    "episode_id": "ep01",
+    "action": "duplicate"
+   },
+   "prep": "add_trailer",
+   "status": 200,
+   "response": {
+    "episode_id": "ep04",
+    "shots": 2
+   },
+   "compare": "full",
+   "project_after": {
+    "schema_version": 1,
+    "project_id": "yuye-tiantai",
+    "title": "雨夜天台",
+    "style_line": "realistic",
+    "premise": "一个关于错过与和解的都市电影。全片九十分钟，横屏。",
+    "created_at": "2026-09-07T14:56:29.511392+00:00",
+    "updated_at": "2026-09-07T17:19:42.130390+00:00",
+    "episodes": [
+     {
+      "episode_id": "ep01",
+      "title": "第一章 · 雨",
+      "synopsis": "林渊在天台等一个不会来的人。",
+      "target_duration_s": 180.0,
+      "script": "（雨声起）\n林渊站在栏杆前，没有回头。",
+      "shots": [
+       {
+        "shot_id": "ep01_s03_sh007",
+        "scene_id": "ep01_s03",
+        "order": 6,
+        "visual_desc": "雨夜天台，男主背对镜头站在栏杆前，远处霓虹在雨幕里散成一片光晕",
+        "first_frame_prompt": "cinematic, rooftop at night, heavy rain, neon bokeh, back view",
+        "last_frame_prompt": "cinematic, rooftop at night, man turns around, rain on face",
+        "motion_prompt": "缓慢推进，雨丝斜掠，人物微微转头",
+        "negative_prompt": "模糊, 低质量, 多余的手指",
+        "shot_size": "MCU",
+        "camera_angle": "low",
+        "camera_move": "push_in",
+        "lens": "auto",
+        "lighting": "",
+        "continuous_with_prev": false,
+        "camera_id": "cam_rooftop_a",
+        "characters": [
+         {
+          "char_id": "lin_yuan",
+          "expression": "隐忍",
+          "action": "握紧栏杆，指节发白",
+          "wardrobe_state": "suit_soaked",
+          "face_pose": "three_quarter",
+          "screen_pos": "center"
+         },
+         {
+          "char_id": "chen_mo",
+          "expression": "愕然",
+          "action": "停在门口，没有再往前",
+          "wardrobe_state": "default",
+          "face_pose": "profile",
+          "screen_pos": "left"
+         }
+        ],
+        "location_id": "loc_rooftop",
+        "prop_ids": [
+         "prop_umbrella",
+         "prop_phone"
+        ],
+        "duration_s": 6.5,
+        "duration_locked": true,
+        "dialogue": [
+         {
+          "char_id": "lin_yuan",
+          "text": "你要是早半个小时来，什么都还来得及。",
+          "emotion": "压抑",
+          "emotion_intensity": 0.8,
+          "voice_id": "voice_lin",
+          "audio_path": "audio/ep01_s03_sh007_01.wav",
+          "actual_duration_s": 3.2
+         },
+         {
+          "char_id": null,
+          "text": "雨声盖过了他后半句。",
+          "emotion": "neutral",
+          "emotion_intensity": 0.3,
+          "voice_id": null,
+          "audio_path": null,
+          "actual_duration_s": null
+         }
+        ],
+        "sfx": [
+         "雨声",
+         "远处车流"
+        ],
+        "bgm_cue": "bgm_tension_low",
+        "needs_lipsync": false,
+        "transition_in": "dissolve",
+        "transition_dur_s": 0.8,
+        "subtitle_text": "你要是早半个小时来，什么都还来得及。",
+        "beat": "反转",
+        "continuity_notes": "上一镜他还没湿透，这里服装状态要接上 suit_soaked",
+        "missing_info": [
+         "未确定陈墨是否带伞"
+        ],
+        "status": "audio_done",
+        "attempts": 2,
+        "frame_path": "frames/ep01_s03_sh007.png",
+        "end_frame_path": null,
+        "video_path": null,
+        "gate_notes": [
+         "草稿档画面偏暗，已调高曝光重跑"
+        ]
+       },
+       {
+        "shot_id": "ep01_s01_sh001",
+        "scene_id": "ep01_s01",
+        "order": 0,
+        "visual_desc": "",
+        "first_frame_prompt": "",
+        "last_frame_prompt": null,
+        "motion_prompt": "",
+        "negative_prompt": "",
+        "shot_size": "MS",
+        "camera_angle": "eye_level",
+        "camera_move": "static",
+        "lens": "auto",
+        "lighting": "",
+        "continuous_with_prev": false,
+        "camera_id": null,
+        "characters": [],
+        "location_id": null,
+        "prop_ids": [],
+        "duration_s": 5.0,
+        "duration_locked": false,
+        "dialogue": [],
+        "sfx": [],
+        "bgm_cue": null,
+        "needs_lipsync": false,
+        "transition_in": "cut",
+        "transition_dur_s": 0.0,
+        "subtitle_text": "",
+        "beat": "",
+        "continuity_notes": "",
+        "missing_info": [],
+        "status": "planned",
+        "attempts": 0,
+        "frame_path": null,
+        "end_frame_path": null,
+        "video_path": null,
+        "gate_notes": []
+       }
+      ],
+      "chapter_refs": [],
+      "shots_from": ""
+     },
+     {
+      "episode_id": "ep02",
+      "title": "第二章 · 晴",
+      "synopsis": "三年后，同一个天台。",
+      "target_duration_s": 200.0,
+      "script": "",
+      "shots": [],
+      "chapter_refs": [],
+      "shots_from": ""
+     },
+     {
+      "episode_id": "trailer",
+      "title": "预告",
+      "synopsis": "",
+      "target_duration_s": 20.0,
+      "script": "",
+      "shots": [],
+      "chapter_refs": [],
+      "shots_from": ""
+     },
+     {
+      "episode_id": "ep04",
+      "title": "第一章 · 雨 副本",
+      "synopsis": "",
+      "target_duration_s": 180.0,
+      "script": "（雨声起）\n林渊站在栏杆前，没有回头。",
+      "shots": [
+       {
+        "shot_id": "ep04_s01_sh001",
+        "scene_id": "ep04_s01",
+        "order": 0,
+        "visual_desc": "",
+        "first_frame_prompt": "",
+        "last_frame_prompt": null,
+        "motion_prompt": "",
+        "negative_prompt": "",
+        "shot_size": "MS",
+        "camera_angle": "eye_level",
+        "camera_move": "static",
+        "lens": "auto",
+        "lighting": "",
+        "continuous_with_prev": false,
+        "camera_id": null,
+        "characters": [],
+        "location_id": null,
+        "prop_ids": [],
+        "duration_s": 5.0,
+        "duration_locked": false,
+        "dialogue": [],
+        "sfx": [],
+        "bgm_cue": null,
+        "needs_lipsync": false,
+        "transition_in": "cut",
+        "transition_dur_s": 0.0,
+        "subtitle_text": "",
+        "beat": "",
+        "continuity_notes": "",
+        "missing_info": [],
+        "status": "planned",
+        "attempts": 0,
+        "frame_path": null,
+        "end_frame_path": null,
+        "video_path": null,
+        "gate_notes": []
+       },
+       {
+        "shot_id": "ep04_s03_sh007",
+        "scene_id": "ep04_s03",
+        "order": 6,
+        "visual_desc": "雨夜天台，男主背对镜头站在栏杆前，远处霓虹在雨幕里散成一片光晕",
+        "first_frame_prompt": "cinematic, rooftop at night, heavy rain, neon bokeh, back view",
+        "last_frame_prompt": "cinematic, rooftop at night, man turns around, rain on face",
+        "motion_prompt": "缓慢推进，雨丝斜掠，人物微微转头",
+        "negative_prompt": "模糊, 低质量, 多余的手指",
+        "shot_size": "MCU",
+        "camera_angle": "low",
+        "camera_move": "push_in",
+        "lens": "auto",
+        "lighting": "",
+        "continuous_with_prev": false,
+        "camera_id": "cam_rooftop_a",
+        "characters": [
+         {
+          "char_id": "lin_yuan",
+          "expression": "隐忍",
+          "action": "握紧栏杆，指节发白",
+          "wardrobe_state": "suit_soaked",
+          "face_pose": "three_quarter",
+          "screen_pos": "center"
+         },
+         {
+          "char_id": "chen_mo",
+          "expression": "愕然",
+          "action": "停在门口，没有再往前",
+          "wardrobe_state": "default",
+          "face_pose": "profile",
+          "screen_pos": "left"
+         }
+        ],
+        "location_id": "loc_rooftop",
+        "prop_ids": [
+         "prop_umbrella",
+         "prop_phone"
+        ],
+        "duration_s": 6.5,
+        "duration_locked": false,
+        "dialogue": [
+         {
+          "char_id": "lin_yuan",
+          "text": "你要是早半个小时来，什么都还来得及。",
+          "emotion": "压抑",
+          "emotion_intensity": 0.8,
+          "voice_id": "voice_lin",
+          "audio_path": null,
+          "actual_duration_s": null
+         },
+         {
+          "char_id": null,
+          "text": "雨声盖过了他后半句。",
+          "emotion": "neutral",
+          "emotion_intensity": 0.3,
+          "voice_id": null,
+          "audio_path": null,
+          "actual_duration_s": null
+         }
+        ],
+        "sfx": [
+         "雨声",
+         "远处车流"
+        ],
+        "bgm_cue": "bgm_tension_low",
+        "needs_lipsync": false,
+        "transition_in": "dissolve",
+        "transition_dur_s": 0.8,
+        "subtitle_text": "你要是早半个小时来，什么都还来得及。",
+        "beat": "反转",
+        "continuity_notes": "上一镜他还没湿透，这里服装状态要接上 suit_soaked",
+        "missing_info": [
+         "未确定陈墨是否带伞"
+        ],
+        "status": "planned",
+        "attempts": 0,
+        "frame_path": null,
+        "end_frame_path": null,
+        "video_path": null,
+        "gate_notes": []
+       }
+      ],
+      "chapter_refs": [],
+      "shots_from": ""
+     }
+    ],
+    "understood_from": ""
+   }
+  },
+  {
+   "name": "不认识的操作",
+   "method": "POST",
+   "url": "/api/episode/action",
+   "query": null,
+   "body": {
+    "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_episodes_8hbmemsa\\case23",
+    "episode_id": "ep01",
+    "action": "explode"
+   },
+   "prep": null,
+   "status": 400,
+   "response": {
+    "detail": "不认识的操作 explode，可选：delete、duplicate、rename"
+   },
+   "compare": "detail_str",
+   "project_after": null
+  },
+  {
+   "name": "操作不存在的章",
+   "method": "POST",
+   "url": "/api/episode/action",
+   "query": null,
+   "body": {
+    "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_episodes_8hbmemsa\\case24",
+    "episode_id": "ep99",
+    "action": "delete"
+   },
+   "prep": null,
+   "status": 404,
+   "response": {
+    "detail": "没有章节 ep99"
+   },
+   "compare": "detail_str",
+   "project_after": null
+  },
+  {
+   "name": "删最后一章要拒绝",
+   "method": "POST",
+   "url": "/api/episode/action",
+   "query": null,
+   "body": {
+    "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_episodes_8hbmemsa\\case25",
+    "episode_id": "ep01",
+    "action": "delete"
+   },
+   "prep": "only_one",
+   "status": 400,
+   "response": {
+    "detail": "至少要留一章"
+   },
+   "compare": "detail_str",
+   "project_after": null
+  }
+ ]
+}

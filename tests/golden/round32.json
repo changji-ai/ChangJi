@@ -1,0 +1,98 @@
+[
+  {
+    "expected": 32,
+    "n": 0
+  },
+  {
+    "expected": 32,
+    "n": 1
+  },
+  {
+    "expected": 32,
+    "n": 16
+  },
+  {
+    "expected": 32,
+    "n": 17
+  },
+  {
+    "expected": 32,
+    "n": 31
+  },
+  {
+    "expected": 32,
+    "n": 32
+  },
+  {
+    "expected": 32,
+    "n": 33
+  },
+  {
+    "expected": 384,
+    "n": 400
+  },
+  {
+    "expected": 416,
+    "n": 416
+  },
+  {
+    "expected": 448,
+    "n": 432
+  },
+  {
+    "expected": 448,
+    "n": 448
+  },
+  {
+    "expected": 448,
+    "n": 464
+  },
+  {
+    "expected": 480,
+    "n": 480
+  },
+  {
+    "expected": 352,
+    "n": 352
+  },
+  {
+    "expected": 288,
+    "n": 288
+  },
+  {
+    "expected": 256,
+    "n": 256
+  },
+  {
+    "expected": 544,
+    "n": 544
+  },
+  {
+    "expected": 704,
+    "n": 704
+  },
+  {
+    "expected": 1088,
+    "n": 1088
+  },
+  {
+    "expected": 32,
+    "n": -5
+  },
+  {
+    "expected": 32,
+    "n": 15
+  },
+  {
+    "expected": 32,
+    "n": 47
+  },
+  {
+    "expected": 64,
+    "n": 48
+  },
+  {
+    "expected": 64,
+    "n": 49
+  }
+]

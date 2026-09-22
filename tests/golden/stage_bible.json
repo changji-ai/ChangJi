@@ -1,0 +1,644 @@
+{
+ "note": "由 cpp/tests/export_bible_golden.py 生成，不要手改",
+ "schema": {
+  "type": "object",
+  "properties": {
+   "characters": {
+    "type": "array",
+    "description": "剧本里所有有名有姓或有台词的角色",
+    "items": {
+     "type": "object",
+     "properties": {
+      "key": {
+       "type": "string",
+       "description": "英文小写下划线短标识，按这个角色的中文名音译"
+      },
+      "name": {
+       "type": "string",
+       "description": "剧本里的中文称呼"
+      },
+      "identity": {
+       "type": "string",
+       "description": "身份：性别、年龄段、气质。一句话"
+      },
+      "body": {
+       "type": "string",
+       "description": "体型和身高感"
+      },
+      "face": {
+       "type": "string",
+       "description": "五官、发型、发色、瞳色。这段会在几十个镜头里逐字复用，写得具体且不要含糊"
+      },
+      "attire": {
+       "type": "string",
+       "description": "默认服装"
+      }
+     },
+     "required": [
+      "key",
+      "name",
+      "identity",
+      "face",
+      "attire"
+     ],
+     "additionalProperties": false
+    }
+   },
+   "locations": {
+    "type": "array",
+    "description": "剧本里出现的场景",
+    "items": {
+     "type": "object",
+     "properties": {
+      "key": {
+       "type": "string",
+       "description": "英文小写下划线短标识"
+      },
+      "name": {
+       "type": "string",
+       "description": "中文场景名"
+      },
+      "space": {
+       "type": "string",
+       "description": "空间结构和布景"
+      },
+      "lighting": {
+       "type": "string",
+       "description": "光线基调"
+      },
+      "palette": {
+       "type": "string",
+       "description": "色彩方案"
+      }
+     },
+     "required": [
+      "key",
+      "name",
+      "space",
+      "lighting"
+     ],
+     "additionalProperties": false
+    }
+   },
+   "global_style": {
+    "type": "string",
+    "description": "全片统一的画风、色温、质感。一句话"
+   }
+  },
+  "required": [
+   "characters",
+   "locations",
+   "global_style"
+  ],
+  "additionalProperties": false
+ },
+ "prompts": [
+  {
+   "style_line": "realistic",
+   "script": "第一章《雨夜天台》\n\n林晚站在天台边缘，雨水打湿了她的白衬衫。\n林晚：你说过会来的。\n陈默从阴影里走出来，手里攥着一把伞。\n陈默：我来了。晚了七年。\n",
+   "prompt": "你是一位电影美术指导。读下面的剧本，产出角色设定和场景设定。\n\n画风是真人写实，描述用自然的中文短句。\n\n要求：\n\n1. 只写剧本里真实出现的角色和场景，不要自己加人加景。\n2. face 这一段会在几十个镜头里被逐字复用，是角色能不能保持一致的关键。\n   写具体的、可画出来的特征：发型、发色、脸型、眼型。\n   不要写\"好看\"\"气质佳\"这类无法转成画面的词。\n3. identity 用一句话说清性别、年龄段、气质。\n4. attire 写这个角色的默认服装。剧情中的换装不在这里写。\n5. key 用英文小写和下划线：角色按中文名音译，场景按这个地方的英文说法，\n   都加上区分用的后缀（哪个时段、哪一间）。\n6. lighting 要说清时间和光质：什么时段、光从哪儿来、冷还是暖、硬还是软。\n7. global_style 是全片统一的调子，所有镜头都会带上它。写成配方，四样都要有：\n   胶片或画质的质感、焦段倾向和景深、色板（饱和度、冷暖）、光的性格\n   （硬软、暗部占多少）。不要写「电影感」这三个字，它没有信息量。\n\n剧本：\n\n第一章《雨夜天台》\n\n林晚站在天台边缘，雨水打湿了她的白衬衫。\n林晚：你说过会来的。\n陈默从阴影里走出来，手里攥着一把伞。\n陈默：我来了。晚了七年。\n\n\n只输出 JSON，不要任何解释文字。"
+  },
+  {
+   "style_line": "anime",
+   "script": "第一章《雨夜天台》\n\n林晚站在天台边缘，雨水打湿了她的白衬衫。\n林晚：你说过会来的。\n陈默从阴影里走出来，手里攥着一把伞。\n陈默：我来了。晚了七年。\n",
+   "prompt": "你是一位电影美术指导。读下面的剧本，产出角色设定和场景设定。\n\n画风是二次元动漫，描述用简洁的标签式短语。\n\n要求：\n\n1. 只写剧本里真实出现的角色和场景，不要自己加人加景。\n2. face 这一段会在几十个镜头里被逐字复用，是角色能不能保持一致的关键。\n   写具体的、可画出来的特征：发型、发色、脸型、眼型。\n   不要写\"好看\"\"气质佳\"这类无法转成画面的词。\n3. identity 用一句话说清性别、年龄段、气质。\n4. attire 写这个角色的默认服装。剧情中的换装不在这里写。\n5. key 用英文小写和下划线：角色按中文名音译，场景按这个地方的英文说法，\n   都加上区分用的后缀（哪个时段、哪一间）。\n6. lighting 要说清时间和光质：什么时段、光从哪儿来、冷还是暖、硬还是软。\n7. global_style 是全片统一的调子，所有镜头都会带上它。写成配方，四样都要有：\n   胶片或画质的质感、焦段倾向和景深、色板（饱和度、冷暖）、光的性格\n   （硬软、暗部占多少）。不要写「电影感」这三个字，它没有信息量。\n\n剧本：\n\n第一章《雨夜天台》\n\n林晚站在天台边缘，雨水打湿了她的白衬衫。\n林晚：你说过会来的。\n陈默从阴影里走出来，手里攥着一把伞。\n陈默：我来了。晚了七年。\n\n\n只输出 JSON，不要任何解释文字。"
+  },
+  {
+   "style_line": "realistic",
+   "script": "",
+   "prompt": "你是一位电影美术指导。读下面的剧本，产出角色设定和场景设定。\n\n画风是真人写实，描述用自然的中文短句。\n\n要求：\n\n1. 只写剧本里真实出现的角色和场景，不要自己加人加景。\n2. face 这一段会在几十个镜头里被逐字复用，是角色能不能保持一致的关键。\n   写具体的、可画出来的特征：发型、发色、脸型、眼型。\n   不要写\"好看\"\"气质佳\"这类无法转成画面的词。\n3. identity 用一句话说清性别、年龄段、气质。\n4. attire 写这个角色的默认服装。剧情中的换装不在这里写。\n5. key 用英文小写和下划线：角色按中文名音译，场景按这个地方的英文说法，\n   都加上区分用的后缀（哪个时段、哪一间）。\n6. lighting 要说清时间和光质：什么时段、光从哪儿来、冷还是暖、硬还是软。\n7. global_style 是全片统一的调子，所有镜头都会带上它。写成配方，四样都要有：\n   胶片或画质的质感、焦段倾向和景深、色板（饱和度、冷暖）、光的性格\n   （硬软、暗部占多少）。不要写「电影感」这三个字，它没有信息量。\n\n剧本：\n\n\n\n只输出 JSON，不要任何解释文字。"
+  }
+ ],
+ "slugs": [
+  {
+   "input": "lin_wan",
+   "output": "lin_wan"
+  },
+  {
+   "input": "Lin Wan",
+   "output": "lin_wan"
+  },
+  {
+   "input": "LIN-WAN",
+   "output": "lin_wan"
+  },
+  {
+   "input": "  lin__wan  ",
+   "output": "lin__wan"
+  },
+  {
+   "input": "office_night",
+   "output": "office_night"
+  },
+  {
+   "input": "林晚",
+   "output": "x3d9e06"
+  },
+  {
+   "input": "陈默 Chen Mo",
+   "output": "chen_mo"
+  },
+  {
+   "input": "",
+   "output": "xda39a3"
+  },
+  {
+   "input": "___",
+   "output": "xbf2957"
+  },
+  {
+   "input": "123",
+   "output": "123"
+  },
+  {
+   "input": "a1_b2",
+   "output": "a1_b2"
+  },
+  {
+   "input": "天台",
+   "output": "x4ca353"
+  },
+  {
+   "input": "雨夜天台-A",
+   "output": "a"
+  },
+  {
+   "input": "café",
+   "output": "caf"
+  },
+  {
+   "input": "a好b",
+   "output": "a_b"
+  }
+ ],
+ "cleans": [
+  {
+   "input": "冷静克制。",
+   "output": "冷静克制"
+  },
+  {
+   "input": "  多余   空白  ",
+   "output": "多余 空白"
+  },
+  {
+   "input": "身姿笔挺，",
+   "output": "身姿笔挺"
+  },
+  {
+   "input": "结尾一堆标点。，、；;,. ",
+   "output": "结尾一堆标点"
+  },
+  {
+   "input": "中间。不动。的句号。",
+   "output": "中间。不动。的句号"
+  },
+  {
+   "input": "",
+   "output": ""
+  },
+  {
+   "input": "只有标点。。。",
+   "output": "只有标点"
+  },
+  {
+   "input": "换行\n和\t制表符",
+   "output": "换行 和 制表符"
+  }
+ ],
+ "extracts": [
+  {
+   "raw": "{\"a\": 1}",
+   "ok": true,
+   "value": {
+    "a": 1
+   }
+  },
+  {
+   "raw": "  {\"a\": 1}  ",
+   "ok": true,
+   "value": {
+    "a": 1
+   }
+  },
+  {
+   "raw": "```json\n{\"a\": 1}\n```",
+   "ok": true,
+   "value": {
+    "a": 1
+   }
+  },
+  {
+   "raw": "```\n{\"a\": 1}\n```",
+   "ok": true,
+   "value": {
+    "a": 1
+   }
+  },
+  {
+   "raw": "这是我的回答：\n```json\n{\"a\": 1}\n```\n希望有帮助",
+   "ok": true,
+   "value": {
+    "a": 1
+   }
+  },
+  {
+   "raw": "好的，结果是 {\"a\": 1} 就这样",
+   "ok": true,
+   "value": {
+    "a": 1
+   }
+  },
+  {
+   "raw": "[1, 2, 3]",
+   "ok": true,
+   "value": [
+    1,
+    2,
+    3
+   ]
+  },
+  {
+   "raw": "前面一句话\n[1, 2, 3]",
+   "ok": true,
+   "value": [
+    1,
+    2,
+    3
+   ]
+  },
+  {
+   "raw": "```json\n[{\"x\": 1}]\n```",
+   "ok": true,
+   "value": [
+    {
+     "x": 1
+    }
+   ]
+  },
+  {
+   "raw": "```json\n不是 JSON\n```\n{\"b\": 2}",
+   "ok": false,
+   "error_type": "StoryboardError"
+  },
+  {
+   "raw": "答：{\"a\": {\"b\": [1, 2]}, \"c\": 3} 完毕",
+   "ok": true,
+   "value": {
+    "a": {
+     "b": [
+      1,
+      2
+     ]
+    },
+    "c": 3
+   }
+  },
+  {
+   "raw": "",
+   "ok": false,
+   "error_type": "StoryboardError"
+  },
+  {
+   "raw": "完全没有 JSON",
+   "ok": false,
+   "error_type": "StoryboardError"
+  },
+  {
+   "raw": "{不平衡的括号",
+   "ok": false,
+   "error_type": "StoryboardError"
+  }
+ ],
+ "negatives": [
+  {
+   "style_line": "realistic",
+   "output": "低质量，模糊，过曝，畸形，多余的手指，画得不好的手部，画得不好的脸部，静止不动的画面，字幕，水印"
+  },
+  {
+   "style_line": "anime",
+   "output": "低质量，模糊，过曝，畸形，多余的手指，画得不好的手部，画得不好的脸部，静止不动的画面，字幕，水印，写实，照片质感，真人"
+  }
+ ],
+ "parses": [
+  {
+   "style_line": "realistic",
+   "aspect_ratio": "9:16",
+   "raw": "{\"characters\": [{\"key\": \"lin_wan\", \"name\": \"林晚\", \"identity\": \"二十七岁女性，外表冷静，内里执拗。\", \"body\": \"偏瘦，中等身高\", \"face\": \"黑色长直发，鹅蛋脸，杏眼，眼尾微垂，薄唇。\", \"attire\": \"白色衬衫，深色西装裤\"}, {\"key\": \"chen_mo\", \"name\": \"陈默\", \"identity\": \"三十出头男性，沉默寡言\", \"body\": \"高瘦\", \"face\": \"短寸黑发，方脸，浓眉，单眼皮\", \"attire\": \"黑色风衣\"}, {\"key\": \"\", \"name\": \"路人甲\", \"identity\": \"中年男性\", \"body\": \"\", \"face\": \"圆脸，秃顶\", \"attire\": \"工装\"}], \"locations\": [{\"key\": \"rooftop_night\", \"name\": \"夜间天台\", \"space\": \"水泥地面，锈蚀的护栏，远处是楼群\", \"lighting\": \"夜间冷调顶光，霓虹反光。\", \"palette\": \"冷蓝为主，霓虹粉点缀\"}, {\"key\": \"office\", \"name\": \"办公室\", \"space\": \"开放式工位\", \"lighting\": \"白天，日光灯\", \"palette\": \"\"}], \"global_style\": \"电影感，浅景深，冷色调，胶片颗粒。\"}",
+   "assets": {
+    "characters": {
+     "c_lin_wan": {
+      "char_id": "c_lin_wan",
+      "name": "林晚",
+      "appearance": {
+       "identity": "二十七岁女性，外表冷静，内里执拗",
+       "body": "偏瘦，中等身高",
+       "face": "黑色长直发，鹅蛋脸，杏眼，眼尾微垂，薄唇",
+       "attire": "白色衬衫，深色西装裤",
+       "style": ""
+      },
+      "wardrobe": [],
+      "ref_front": null,
+      "ref_three_quarter": null,
+      "ref_back": null,
+      "lora_path": null,
+      "lora_trigger": null,
+      "lora_strength": 1.0,
+      "voice_id": null,
+      "voice_ref_audio": null,
+      "voice_gender": "female",
+      "voice_order": 0
+     },
+     "c_chen_mo": {
+      "char_id": "c_chen_mo",
+      "name": "陈默",
+      "appearance": {
+       "identity": "三十出头男性，沉默寡言",
+       "body": "高瘦",
+       "face": "短寸黑发，方脸，浓眉，单眼皮",
+       "attire": "黑色风衣",
+       "style": ""
+      },
+      "wardrobe": [],
+      "ref_front": null,
+      "ref_three_quarter": null,
+      "ref_back": null,
+      "lora_path": null,
+      "lora_trigger": null,
+      "lora_strength": 1.0,
+      "voice_id": null,
+      "voice_ref_audio": null,
+      "voice_gender": "male",
+      "voice_order": 1
+     },
+     "c_xbff70b": {
+      "char_id": "c_xbff70b",
+      "name": "路人甲",
+      "appearance": {
+       "identity": "中年男性",
+       "body": "",
+       "face": "圆脸，秃顶",
+       "attire": "工装",
+       "style": ""
+      },
+      "wardrobe": [],
+      "ref_front": null,
+      "ref_three_quarter": null,
+      "ref_back": null,
+      "lora_path": null,
+      "lora_trigger": null,
+      "lora_strength": 1.0,
+      "voice_id": null,
+      "voice_ref_audio": null,
+      "voice_gender": "male",
+      "voice_order": 2
+     }
+    },
+    "locations": {
+     "loc_rooftop_night": {
+      "location_id": "loc_rooftop_night",
+      "name": "夜间天台",
+      "space": "水泥地面，锈蚀的护栏，远处是楼群",
+      "lighting": "夜间冷调顶光，霓虹反光",
+      "palette": "冷蓝为主，霓虹粉点缀",
+      "ref_empty": null
+     },
+     "loc_office": {
+      "location_id": "loc_office",
+      "name": "办公室",
+      "space": "开放式工位",
+      "lighting": "白天，日光灯",
+      "palette": "",
+      "ref_empty": null
+     }
+    },
+    "style": {
+     "style_line": "realistic",
+     "global_style": "电影感，浅景深，冷色调，胶片颗粒",
+     "negative_prompt": "低质量，模糊，过曝，畸形，多余的手指，画得不好的手部，画得不好的脸部，静止不动的画面，字幕，水印",
+     "aspect_ratio": "9:16"
+    }
+   }
+  },
+  {
+   "style_line": "anime",
+   "aspect_ratio": "9:16",
+   "raw": "{\"characters\": [{\"key\": \"lin_wan\", \"name\": \"林晚\", \"identity\": \"二十七岁女性，外表冷静，内里执拗。\", \"body\": \"偏瘦，中等身高\", \"face\": \"黑色长直发，鹅蛋脸，杏眼，眼尾微垂，薄唇。\", \"attire\": \"白色衬衫，深色西装裤\"}, {\"key\": \"chen_mo\", \"name\": \"陈默\", \"identity\": \"三十出头男性，沉默寡言\", \"body\": \"高瘦\", \"face\": \"短寸黑发，方脸，浓眉，单眼皮\", \"attire\": \"黑色风衣\"}, {\"key\": \"\", \"name\": \"路人甲\", \"identity\": \"中年男性\", \"body\": \"\", \"face\": \"圆脸，秃顶\", \"attire\": \"工装\"}], \"locations\": [{\"key\": \"rooftop_night\", \"name\": \"夜间天台\", \"space\": \"水泥地面，锈蚀的护栏，远处是楼群\", \"lighting\": \"夜间冷调顶光，霓虹反光。\", \"palette\": \"冷蓝为主，霓虹粉点缀\"}, {\"key\": \"office\", \"name\": \"办公室\", \"space\": \"开放式工位\", \"lighting\": \"白天，日光灯\", \"palette\": \"\"}], \"global_style\": \"电影感，浅景深，冷色调，胶片颗粒。\"}",
+   "assets": {
+    "characters": {
+     "c_lin_wan": {
+      "char_id": "c_lin_wan",
+      "name": "林晚",
+      "appearance": {
+       "identity": "二十七岁女性，外表冷静，内里执拗",
+       "body": "偏瘦，中等身高",
+       "face": "黑色长直发，鹅蛋脸，杏眼，眼尾微垂，薄唇",
+       "attire": "白色衬衫，深色西装裤",
+       "style": ""
+      },
+      "wardrobe": [],
+      "ref_front": null,
+      "ref_three_quarter": null,
+      "ref_back": null,
+      "lora_path": null,
+      "lora_trigger": null,
+      "lora_strength": 1.0,
+      "voice_id": null,
+      "voice_ref_audio": null,
+      "voice_gender": "female",
+      "voice_order": 0
+     },
+     "c_chen_mo": {
+      "char_id": "c_chen_mo",
+      "name": "陈默",
+      "appearance": {
+       "identity": "三十出头男性，沉默寡言",
+       "body": "高瘦",
+       "face": "短寸黑发，方脸，浓眉，单眼皮",
+       "attire": "黑色风衣",
+       "style": ""
+      },
+      "wardrobe": [],
+      "ref_front": null,
+      "ref_three_quarter": null,
+      "ref_back": null,
+      "lora_path": null,
+      "lora_trigger": null,
+      "lora_strength": 1.0,
+      "voice_id": null,
+      "voice_ref_audio": null,
+      "voice_gender": "male",
+      "voice_order": 1
+     },
+     "c_xbff70b": {
+      "char_id": "c_xbff70b",
+      "name": "路人甲",
+      "appearance": {
+       "identity": "中年男性",
+       "body": "",
+       "face": "圆脸，秃顶",
+       "attire": "工装",
+       "style": ""
+      },
+      "wardrobe": [],
+      "ref_front": null,
+      "ref_three_quarter": null,
+      "ref_back": null,
+      "lora_path": null,
+      "lora_trigger": null,
+      "lora_strength": 1.0,
+      "voice_id": null,
+      "voice_ref_audio": null,
+      "voice_gender": "male",
+      "voice_order": 2
+     }
+    },
+    "locations": {
+     "loc_rooftop_night": {
+      "location_id": "loc_rooftop_night",
+      "name": "夜间天台",
+      "space": "水泥地面，锈蚀的护栏，远处是楼群",
+      "lighting": "夜间冷调顶光，霓虹反光",
+      "palette": "冷蓝为主，霓虹粉点缀",
+      "ref_empty": null
+     },
+     "loc_office": {
+      "location_id": "loc_office",
+      "name": "办公室",
+      "space": "开放式工位",
+      "lighting": "白天，日光灯",
+      "palette": "",
+      "ref_empty": null
+     }
+    },
+    "style": {
+     "style_line": "anime",
+     "global_style": "电影感，浅景深，冷色调，胶片颗粒",
+     "negative_prompt": "低质量，模糊，过曝，畸形，多余的手指，画得不好的手部，画得不好的脸部，静止不动的画面，字幕，水印，写实，照片质感，真人",
+     "aspect_ratio": "9:16"
+    }
+   }
+  },
+  {
+   "style_line": "realistic",
+   "aspect_ratio": "16:9",
+   "raw": "```json\n{\"characters\": [{\"key\": \"lin_wan\", \"name\": \"林晚\", \"identity\": \"二十七岁女性，外表冷静，内里执拗。\", \"body\": \"偏瘦，中等身高\", \"face\": \"黑色长直发，鹅蛋脸，杏眼，眼尾微垂，薄唇。\", \"attire\": \"白色衬衫，深色西装裤\"}, {\"key\": \"chen_mo\", \"name\": \"陈默\", \"identity\": \"三十出头男性，沉默寡言\", \"body\": \"高瘦\", \"face\": \"短寸黑发，方脸，浓眉，单眼皮\", \"attire\": \"黑色风衣\"}, {\"key\": \"\", \"name\": \"路人甲\", \"identity\": \"中年男性\", \"body\": \"\", \"face\": \"圆脸，秃顶\", \"attire\": \"工装\"}], \"locations\": [{\"key\": \"rooftop_night\", \"name\": \"夜间天台\", \"space\": \"水泥地面，锈蚀的护栏，远处是楼群\", \"lighting\": \"夜间冷调顶光，霓虹反光。\", \"palette\": \"冷蓝为主，霓虹粉点缀\"}, {\"key\": \"office\", \"name\": \"办公室\", \"space\": \"开放式工位\", \"lighting\": \"白天，日光灯\", \"palette\": \"\"}], \"global_style\": \"电影感，浅景深，冷色调，胶片颗粒。\"}\n```",
+   "assets": {
+    "characters": {
+     "c_lin_wan": {
+      "char_id": "c_lin_wan",
+      "name": "林晚",
+      "appearance": {
+       "identity": "二十七岁女性，外表冷静，内里执拗",
+       "body": "偏瘦，中等身高",
+       "face": "黑色长直发，鹅蛋脸，杏眼，眼尾微垂，薄唇",
+       "attire": "白色衬衫，深色西装裤",
+       "style": ""
+      },
+      "wardrobe": [],
+      "ref_front": null,
+      "ref_three_quarter": null,
+      "ref_back": null,
+      "lora_path": null,
+      "lora_trigger": null,
+      "lora_strength": 1.0,
+      "voice_id": null,
+      "voice_ref_audio": null,
+      "voice_gender": "female",
+      "voice_order": 0
+     },
+     "c_chen_mo": {
+      "char_id": "c_chen_mo",
+      "name": "陈默",
+      "appearance": {
+       "identity": "三十出头男性，沉默寡言",
+       "body": "高瘦",
+       "face": "短寸黑发，方脸，浓眉，单眼皮",
+       "attire": "黑色风衣",
+       "style": ""
+      },
+      "wardrobe": [],
+      "ref_front": null,
+      "ref_three_quarter": null,
+      "ref_back": null,
+      "lora_path": null,
+      "lora_trigger": null,
+      "lora_strength": 1.0,
+      "voice_id": null,
+      "voice_ref_audio": null,
+      "voice_gender": "male",
+      "voice_order": 1
+     },
+     "c_xbff70b": {
+      "char_id": "c_xbff70b",
+      "name": "路人甲",
+      "appearance": {
+       "identity": "中年男性",
+       "body": "",
+       "face": "圆脸，秃顶",
+       "attire": "工装",
+       "style": ""
+      },
+      "wardrobe": [],
+      "ref_front": null,
+      "ref_three_quarter": null,
+      "ref_back": null,
+      "lora_path": null,
+      "lora_trigger": null,
+      "lora_strength": 1.0,
+      "voice_id": null,
+      "voice_ref_audio": null,
+      "voice_gender": "male",
+      "voice_order": 2
+     }
+    },
+    "locations": {
+     "loc_rooftop_night": {
+      "location_id": "loc_rooftop_night",
+      "name": "夜间天台",
+      "space": "水泥地面，锈蚀的护栏，远处是楼群",
+      "lighting": "夜间冷调顶光，霓虹反光",
+      "palette": "冷蓝为主，霓虹粉点缀",
+      "ref_empty": null
+     },
+     "loc_office": {
+      "location_id": "loc_office",
+      "name": "办公室",
+      "space": "开放式工位",
+      "lighting": "白天，日光灯",
+      "palette": "",
+      "ref_empty": null
+     }
+    },
+    "style": {
+     "style_line": "realistic",
+     "global_style": "电影感，浅景深，冷色调，胶片颗粒",
+     "negative_prompt": "低质量，模糊，过曝，畸形，多余的手指，画得不好的手部，画得不好的脸部，静止不动的画面，字幕，水印",
+     "aspect_ratio": "16:9"
+    }
+   }
+  }
+ ],
+ "parse_failures": [
+  {
+   "name": "没有角色",
+   "raw": "{\"characters\": [], \"locations\": [], \"global_style\": \"x\"}",
+   "raises": true,
+   "python_error": "BibleError",
+   "python_http_status": 400
+  },
+  {
+   "name": "返回数组不是对象",
+   "raw": "[1, 2, 3]",
+   "raises": true,
+   "python_error": "BibleError",
+   "python_http_status": 400
+  },
+  {
+   "name": "根本不是 JSON",
+   "raw": "抱歉，我无法完成这个请求。",
+   "raises": true,
+   "python_error": "StoryboardError",
+   "python_http_status": 500
+  }
+ ]
+}

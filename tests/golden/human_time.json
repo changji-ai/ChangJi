@@ -1,0 +1,108 @@
+{
+  "cases": [
+    {
+      "seconds": -5,
+      "text": "0 秒"
+    },
+    {
+      "seconds": -0.4,
+      "text": "0 秒"
+    },
+    {
+      "seconds": 0,
+      "text": "0 秒"
+    },
+    {
+      "seconds": 0.4,
+      "text": "0 秒"
+    },
+    {
+      "seconds": 0.5,
+      "text": "0 秒"
+    },
+    {
+      "seconds": 1.5,
+      "text": "2 秒"
+    },
+    {
+      "seconds": 2.5,
+      "text": "2 秒"
+    },
+    {
+      "seconds": 30,
+      "text": "30 秒"
+    },
+    {
+      "seconds": 59,
+      "text": "59 秒"
+    },
+    {
+      "seconds": 59.4,
+      "text": "59 秒"
+    },
+    {
+      "seconds": 59.5,
+      "text": "60 秒"
+    },
+    {
+      "seconds": 59.6,
+      "text": "60 秒"
+    },
+    {
+      "seconds": 60,
+      "text": "1 分钟"
+    },
+    {
+      "seconds": 89,
+      "text": "1 分钟"
+    },
+    {
+      "seconds": 90,
+      "text": "2 分钟"
+    },
+    {
+      "seconds": 90.5,
+      "text": "2 分钟"
+    },
+    {
+      "seconds": 149,
+      "text": "2 分钟"
+    },
+    {
+      "seconds": 150,
+      "text": "2 分钟"
+    },
+    {
+      "seconds": 3599,
+      "text": "60 分钟"
+    },
+    {
+      "seconds": 3600,
+      "text": "1.0 小时"
+    },
+    {
+      "seconds": 3629,
+      "text": "1.0 小时"
+    },
+    {
+      "seconds": 3630,
+      "text": "1.0 小时"
+    },
+    {
+      "seconds": 5400,
+      "text": "1.5 小时"
+    },
+    {
+      "seconds": 7200,
+      "text": "2.0 小时"
+    },
+    {
+      "seconds": 86400,
+      "text": "24.0 小时"
+    },
+    {
+      "seconds": 359999,
+      "text": "100.0 小时"
+    }
+  ]
+}

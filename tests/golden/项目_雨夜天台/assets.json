@@ -1,0 +1,59 @@
+{
+  "characters": {
+    "c_lin_yuan": {
+      "char_id": "c_lin_yuan",
+      "name": "林渊",
+      "appearance": {
+        "identity": "三十岁上下的男性，沉默寡言。",
+        "body": "偏瘦，肩背挺直",
+        "face": "单眼皮，短碎发，眼下有一道旧疤",
+        "attire": "深灰西装，衬衫领口松着",
+        "style": "低饱和，胶片颗粒"
+      },
+      "wardrobe": [
+        {
+          "wardrobe_id": "suit_soaked",
+          "description": "西装被雨淋透，紧贴身体"
+        },
+        {
+          "wardrobe_id": "casual",
+          "description": "灰色卫衣，牛仔裤"
+        }
+      ],
+      "ref_front": "refs/c_lin_yuan_front.png",
+      "ref_three_quarter": "refs/c_lin_yuan_tq.png",
+      "ref_back": null,
+      "lora_path": null,
+      "lora_trigger": "linyuan_v3",
+      "lora_strength": 0.85,
+      "voice_id": null,
+      "voice_ref_audio": null,
+      "voice_gender": "male",
+      "voice_order": 1
+    }
+  },
+  "locations": {
+    "loc_rooftop": {
+      "location_id": "loc_rooftop",
+      "name": "天台",
+      "space": "老式写字楼顶层，水泥地面，一圈锈蚀铁栏杆",
+      "lighting": "冷调顶光，远处霓虹反光",
+      "palette": "青灰为主，点缀品红",
+      "ref_empty": "refs/loc_rooftop_empty.png"
+    },
+    "loc_alley": {
+      "location_id": "loc_alley",
+      "name": "小巷",
+      "space": "两侧是斑驳砖墙的窄巷",
+      "lighting": "暖调侧逆光",
+      "palette": "",
+      "ref_empty": null
+    }
+  },
+  "style": {
+    "style_line": "realistic",
+    "global_style": "写实电影感，浅景深",
+    "negative_prompt": "模糊，低质量",
+    "aspect_ratio": "9:16"
+  }
+}

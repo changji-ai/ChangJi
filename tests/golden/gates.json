@@ -1,0 +1,500 @@
+{
+  "cases": [
+    {
+      "name": "正常一镜",
+      "file_bytes": 4096,
+      "probe": {
+        "duration_s": 4.0,
+        "width": 480,
+        "height": 854,
+        "has_video": true
+      },
+      "probe_raises": false,
+      "stats_raises": false,
+      "samples": [
+        {
+          "mean": 120.0,
+          "spread": 45.0
+        },
+        {
+          "mean": 122.0,
+          "spread": 44.0
+        },
+        {
+          "mean": 118.0,
+          "spread": 46.0
+        }
+      ],
+      "expected_duration_s": 4.0,
+      "expected_size": [
+        480,
+        854
+      ],
+      "verdict": "pass",
+      "reasons": [],
+      "metrics": {
+        "duration_drift_s": 0.0,
+        "duration_s": 4.0,
+        "height": 854.0,
+        "mean_avg": 120.0,
+        "mean_swing": 4.0,
+        "spread_min": 44.0,
+        "width": 480.0
+      }
+    },
+    {
+      "name": "文件不存在",
+      "file_bytes": null,
+      "probe": {
+        "duration_s": 4.0,
+        "width": 480,
+        "height": 854,
+        "has_video": true
+      },
+      "probe_raises": false,
+      "stats_raises": false,
+      "samples": [
+        {
+          "mean": 120.0,
+          "spread": 45.0
+        },
+        {
+          "mean": 122.0,
+          "spread": 44.0
+        },
+        {
+          "mean": 118.0,
+          "spread": 46.0
+        }
+      ],
+      "expected_duration_s": null,
+      "expected_size": null,
+      "verdict": "retry",
+      "reasons": [
+        "视频文件不存在"
+      ],
+      "metrics": {}
+    },
+    {
+      "name": "文件几乎是空的",
+      "file_bytes": 100,
+      "probe": {
+        "duration_s": 4.0,
+        "width": 480,
+        "height": 854,
+        "has_video": true
+      },
+      "probe_raises": false,
+      "stats_raises": false,
+      "samples": [
+        {
+          "mean": 120.0,
+          "spread": 45.0
+        },
+        {
+          "mean": 122.0,
+          "spread": 44.0
+        },
+        {
+          "mean": 118.0,
+          "spread": 46.0
+        }
+      ],
+      "expected_duration_s": null,
+      "expected_size": null,
+      "verdict": "retry",
+      "reasons": [
+        "视频文件几乎是空的"
+      ],
+      "metrics": {}
+    },
+    {
+      "name": "探测失败",
+      "file_bytes": 4096,
+      "probe": null,
+      "probe_raises": true,
+      "stats_raises": false,
+      "samples": [
+        {
+          "mean": 120.0,
+          "spread": 45.0
+        },
+        {
+          "mean": 122.0,
+          "spread": 44.0
+        },
+        {
+          "mean": 118.0,
+          "spread": 46.0
+        }
+      ],
+      "expected_duration_s": null,
+      "expected_size": null,
+      "verdict": "retry",
+      "reasons": [
+        "视频文件读不出来：探测失败"
+      ],
+      "metrics": {}
+    },
+    {
+      "name": "没有视频轨",
+      "file_bytes": 4096,
+      "probe": {
+        "duration_s": 4.0,
+        "width": 480,
+        "height": 854,
+        "has_video": false
+      },
+      "probe_raises": false,
+      "stats_raises": false,
+      "samples": [
+        {
+          "mean": 120.0,
+          "spread": 45.0
+        },
+        {
+          "mean": 122.0,
+          "spread": 44.0
+        },
+        {
+          "mean": 118.0,
+          "spread": 46.0
+        }
+      ],
+      "expected_duration_s": null,
+      "expected_size": null,
+      "verdict": "retry",
+      "reasons": [
+        "文件里没有视频轨"
+      ],
+      "metrics": {}
+    },
+    {
+      "name": "时长对不上",
+      "file_bytes": 4096,
+      "probe": {
+        "duration_s": 9.0,
+        "width": 480,
+        "height": 854,
+        "has_video": true
+      },
+      "probe_raises": false,
+      "stats_raises": false,
+      "samples": [
+        {
+          "mean": 120.0,
+          "spread": 45.0
+        },
+        {
+          "mean": 122.0,
+          "spread": 44.0
+        },
+        {
+          "mean": 118.0,
+          "spread": 46.0
+        }
+      ],
+      "expected_duration_s": 4.0,
+      "expected_size": null,
+      "verdict": "regress",
+      "reasons": [
+        "时长 9.00 秒，期望 4.00 秒，差 5.00 秒，多半是帧数算错了"
+      ],
+      "metrics": {
+        "duration_drift_s": 5.0,
+        "duration_s": 9.0,
+        "height": 854.0,
+        "width": 480.0
+      }
+    },
+    {
+      "name": "分辨率对不上",
+      "file_bytes": 4096,
+      "probe": {
+        "duration_s": 4.0,
+        "width": 640,
+        "height": 360,
+        "has_video": true
+      },
+      "probe_raises": false,
+      "stats_raises": false,
+      "samples": [
+        {
+          "mean": 120.0,
+          "spread": 45.0
+        },
+        {
+          "mean": 122.0,
+          "spread": 44.0
+        },
+        {
+          "mean": 118.0,
+          "spread": 46.0
+        }
+      ],
+      "expected_duration_s": null,
+      "expected_size": [
+        480,
+        854
+      ],
+      "verdict": "regress",
+      "reasons": [
+        "分辨率 640x360，期望 480x854，档位参数没生效"
+      ],
+      "metrics": {
+        "duration_s": 4.0,
+        "height": 360.0,
+        "width": 640.0
+      }
+    },
+    {
+      "name": "取样失败",
+      "file_bytes": 4096,
+      "probe": {
+        "duration_s": 4.0,
+        "width": 480,
+        "height": 854,
+        "has_video": true
+      },
+      "probe_raises": false,
+      "stats_raises": true,
+      "samples": [],
+      "expected_duration_s": null,
+      "expected_size": null,
+      "verdict": "retry",
+      "reasons": [
+        "读不出画面统计：取样失败"
+      ],
+      "metrics": {
+        "duration_s": 4.0,
+        "height": 854.0,
+        "width": 480.0
+      }
+    },
+    {
+      "name": "取不到画面",
+      "file_bytes": 4096,
+      "probe": {
+        "duration_s": 4.0,
+        "width": 480,
+        "height": 854,
+        "has_video": true
+      },
+      "probe_raises": false,
+      "stats_raises": false,
+      "samples": [],
+      "expected_duration_s": null,
+      "expected_size": null,
+      "verdict": "retry",
+      "reasons": [
+        "取不到任何画面"
+      ],
+      "metrics": {
+        "duration_s": 4.0,
+        "height": 854.0,
+        "width": 480.0
+      }
+    },
+    {
+      "name": "纯色画面",
+      "file_bytes": 4096,
+      "probe": {
+        "duration_s": 4.0,
+        "width": 480,
+        "height": 854,
+        "has_video": true
+      },
+      "probe_raises": false,
+      "stats_raises": false,
+      "samples": [
+        {
+          "mean": 120.0,
+          "spread": 2.0
+        },
+        {
+          "mean": 120.0,
+          "spread": 2.1
+        },
+        {
+          "mean": 120.0,
+          "spread": 1.9
+        }
+      ],
+      "expected_duration_s": null,
+      "expected_size": null,
+      "verdict": "retry",
+      "reasons": [
+        "片头、片中、片尾的画面近乎纯色，展布只有 1.9"
+      ],
+      "metrics": {
+        "duration_s": 4.0,
+        "height": 854.0,
+        "mean_avg": 120.0,
+        "mean_swing": 0.0,
+        "spread_min": 1.9,
+        "width": 480.0
+      }
+    },
+    {
+      "name": "全黑",
+      "file_bytes": 4096,
+      "probe": {
+        "duration_s": 4.0,
+        "width": 480,
+        "height": 854,
+        "has_video": true
+      },
+      "probe_raises": false,
+      "stats_raises": false,
+      "samples": [
+        {
+          "mean": 3.0,
+          "spread": 40.0
+        },
+        {
+          "mean": 3.1,
+          "spread": 41.0
+        },
+        {
+          "mean": 2.9,
+          "spread": 39.0
+        }
+      ],
+      "expected_duration_s": null,
+      "expected_size": null,
+      "verdict": "retry",
+      "reasons": [
+        "片头、片中、片尾的画面整体过暗或过曝"
+      ],
+      "metrics": {
+        "duration_s": 4.0,
+        "height": 854.0,
+        "mean_avg": 3.0,
+        "mean_swing": 0.2,
+        "spread_min": 39.0,
+        "width": 480.0
+      }
+    },
+    {
+      "name": "过曝",
+      "file_bytes": 4096,
+      "probe": {
+        "duration_s": 4.0,
+        "width": 480,
+        "height": 854,
+        "has_video": true
+      },
+      "probe_raises": false,
+      "stats_raises": false,
+      "samples": [
+        {
+          "mean": 252.0,
+          "spread": 40.0
+        },
+        {
+          "mean": 251.0,
+          "spread": 41.0
+        },
+        {
+          "mean": 253.0,
+          "spread": 39.0
+        }
+      ],
+      "expected_duration_s": null,
+      "expected_size": null,
+      "verdict": "retry",
+      "reasons": [
+        "片头、片中、片尾的画面整体过暗或过曝"
+      ],
+      "metrics": {
+        "duration_s": 4.0,
+        "height": 854.0,
+        "mean_avg": 252.0,
+        "mean_swing": 2.0,
+        "spread_min": 39.0,
+        "width": 480.0
+      }
+    },
+    {
+      "name": "细节偏少但不是纯色",
+      "file_bytes": 4096,
+      "probe": {
+        "duration_s": 4.0,
+        "width": 480,
+        "height": 854,
+        "has_video": true
+      },
+      "probe_raises": false,
+      "stats_raises": false,
+      "samples": [
+        {
+          "mean": 120.0,
+          "spread": 9.0
+        },
+        {
+          "mean": 121.0,
+          "spread": 9.5
+        },
+        {
+          "mean": 119.0,
+          "spread": 9.2
+        }
+      ],
+      "expected_duration_s": null,
+      "expected_size": null,
+      "verdict": "retry",
+      "reasons": [
+        "画面细节偏少，展布 9.0 低于阈值 12"
+      ],
+      "metrics": {
+        "duration_s": 4.0,
+        "height": 854.0,
+        "mean_avg": 120.0,
+        "mean_swing": 2.0,
+        "spread_min": 9.0,
+        "width": 480.0
+      }
+    },
+    {
+      "name": "亮度中途跳变",
+      "file_bytes": 4096,
+      "probe": {
+        "duration_s": 4.0,
+        "width": 480,
+        "height": 854,
+        "has_video": true
+      },
+      "probe_raises": false,
+      "stats_raises": false,
+      "samples": [
+        {
+          "mean": 30.0,
+          "spread": 40.0
+        },
+        {
+          "mean": 200.0,
+          "spread": 41.0
+        },
+        {
+          "mean": 35.0,
+          "spread": 39.0
+        }
+      ],
+      "expected_duration_s": null,
+      "expected_size": null,
+      "verdict": "retry",
+      "reasons": [
+        "片中亮度剧烈跳变 170，可能中途崩坏"
+      ],
+      "metrics": {
+        "duration_s": 4.0,
+        "height": 854.0,
+        "mean_avg": 88.33,
+        "mean_swing": 170.0,
+        "spread_min": 39.0,
+        "width": 480.0
+      }
+    }
+  ],
+  "note": "由 cpp/tests/export_gates_golden.py 生成，不要手改。探测和取样都是注入的固定值，所以判定是确定性的。"
+}

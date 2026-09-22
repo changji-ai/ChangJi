@@ -1,0 +1,378 @@
+{
+  "wrap": [
+    {
+      "text": "你来了。",
+      "max_width": 15.0,
+      "max_lines": 2,
+      "expected": [
+        "你来了。"
+      ]
+    },
+    {
+      "text": "我等了你三年，从来没有一天不在等。",
+      "max_width": 15.0,
+      "max_lines": 2,
+      "expected": [
+        "我等了你三年，从来没有一天不在",
+        "等。"
+      ]
+    },
+    {
+      "text": "这是一句没有任何标点符号的很长很长的中文台词需要按宽度断开",
+      "max_width": 15.0,
+      "max_lines": 2,
+      "expected": [
+        "这是一句没有任何标点符号的很长",
+        "很长的中文台词需要按宽度断开"
+      ]
+    },
+    {
+      "text": "他终于说出了那句话，好。",
+      "max_width": 11.0,
+      "max_lines": 2,
+      "expected": [
+        "他终于说出了那句话，",
+        "好。"
+      ]
+    },
+    {
+      "text": "她看着窗外（雨已经下了一整夜）轻声说。",
+      "max_width": 9.0,
+      "max_lines": 2,
+      "expected": [
+        "她看着窗外（雨已经",
+        "下了一整夜）轻声说。"
+      ]
+    },
+    {
+      "text": "第一句话说完了，第二句话也说完了，第三句话还在继续说个不停。",
+      "max_width": 10.0,
+      "max_lines": 2,
+      "expected": [
+        "第一句话说完了，",
+        "第二句话也说完了，第三句话还在继续说个不停。"
+      ]
+    },
+    {
+      "text": "他说 OK let us go 然后转身走了。",
+      "max_width": 12.0,
+      "max_lines": 2,
+      "expected": [
+        "他说 OK let us go 然后转",
+        "身走了。"
+      ]
+    },
+    {
+      "text": "什么？！你说什么？！",
+      "max_width": 6.0,
+      "max_lines": 2,
+      "expected": [
+        "什么？！",
+        "你说什么？！"
+      ]
+    },
+    {
+      "text": "啊",
+      "max_width": 0.5,
+      "max_lines": 2,
+      "expected": [
+        "啊"
+      ]
+    },
+    {
+      "text": "   ",
+      "max_width": 15.0,
+      "max_lines": 2,
+      "expected": []
+    },
+    {
+      "text": "",
+      "max_width": 15.0,
+      "max_lines": 2,
+      "expected": []
+    },
+    {
+      "text": "我等了你三年，从来没有一天不在等。",
+      "max_width": 15.0,
+      "max_lines": 1,
+      "expected": [
+        "我等了你三年，从来没有一天不在等。"
+      ]
+    },
+    {
+      "text": "好耶🎉🎉🎉真的成了",
+      "max_width": 6.0,
+      "max_lines": 2,
+      "expected": [
+        "好耶🎉🎉🎉真",
+        "的成了"
+      ]
+    }
+  ],
+  "width": [
+    {
+      "text": "你好",
+      "expected": 2.0
+    },
+    {
+      "text": "hello",
+      "expected": 2.5
+    },
+    {
+      "text": "你好hello",
+      "expected": 4.5
+    },
+    {
+      "text": "",
+      "expected": 0.0
+    },
+    {
+      "text": "！？，。",
+      "expected": 4.0
+    },
+    {
+      "text": "!?,.",
+      "expected": 2.0
+    },
+    {
+      "text": "🎉",
+      "expected": 1.0
+    },
+    {
+      "text": "ü",
+      "expected": 0.5
+    },
+    {
+      "text": "Ａ",
+      "expected": 1.0
+    },
+    {
+      "text": "①",
+      "expected": 0.5
+    }
+  ],
+  "ass": [
+    {
+      "name": "typical",
+      "cues": [
+        {
+          "start_s": 0.0,
+          "end_s": 2.5,
+          "text": "我等了你三年。",
+          "style": "dialogue"
+        },
+        {
+          "start_s": 2.5,
+          "end_s": 6.0,
+          "text": "从来没有一天不在等，一天也没有。",
+          "style": "dialogue"
+        },
+        {
+          "start_s": 6.0,
+          "end_s": 8.0,
+          "text": "雨夜天台",
+          "style": "title"
+        },
+        {
+          "start_s": 8.0,
+          "end_s": 11.0,
+          "text": "那一夜之后，她再没回来过。",
+          "style": "narration"
+        }
+      ],
+      "expected": "[Script Info]\nScriptType: v4.00+\nPlayResX: 1080\nPlayResY: 1920\nWrapStyle: 2\nScaledBorderAndShadow: yes\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: dialogue,Source Han Sans SC,54,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,0,0,0,0,100,100,0,0,1,3,1,2,60,60,180,1\nStyle: narration,Source Han Sans SC,49,&H00E8E8E8,&H000000FF,&H00000000,&H64000000,0,1,0,0,100,100,0,0,1,3,1,2,60,60,180,1\nStyle: title,Source Han Sans SC,75,&H00FFFFFF,&H000000FF,&H00000000,&H96000000,1,0,0,0,100,100,2,0,1,4,2,5,60,60,0,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n\nDialogue: 0,0:00:00.00,0:00:02.50,dialogue,,0,0,0,,我等了你三年。\nDialogue: 0,0:00:02.50,0:00:06.00,dialogue,,0,0,0,,从来没有一天不在等，\\N一天也没有。\nDialogue: 0,0:00:06.00,0:00:08.00,title,,0,0,0,,雨夜天台\nDialogue: 0,0:00:08.00,0:00:11.00,narration,,0,0,0,,那一夜之后，她再没回来过。\n"
+    },
+    {
+      "name": "unknown_style",
+      "cues": [
+        {
+          "start_s": 0.0,
+          "end_s": 2.0,
+          "text": "你好",
+          "style": "根本没有这个样式"
+        }
+      ],
+      "expected": "[Script Info]\nScriptType: v4.00+\nPlayResX: 1080\nPlayResY: 1920\nWrapStyle: 2\nScaledBorderAndShadow: yes\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: dialogue,Source Han Sans SC,54,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,0,0,0,0,100,100,0,0,1,3,1,2,60,60,180,1\nStyle: narration,Source Han Sans SC,49,&H00E8E8E8,&H000000FF,&H00000000,&H64000000,0,1,0,0,100,100,0,0,1,3,1,2,60,60,180,1\nStyle: title,Source Han Sans SC,75,&H00FFFFFF,&H000000FF,&H00000000,&H96000000,1,0,0,0,100,100,2,0,1,4,2,5,60,60,0,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n\nDialogue: 0,0:00:00.00,0:00:02.00,dialogue,,0,0,0,,你好\n"
+    },
+    {
+      "name": "empty_text",
+      "cues": [
+        {
+          "start_s": 0.0,
+          "end_s": 2.0,
+          "text": "有内容",
+          "style": "dialogue"
+        },
+        {
+          "start_s": 2.0,
+          "end_s": 3.0,
+          "text": "   ",
+          "style": "dialogue"
+        },
+        {
+          "start_s": 3.0,
+          "end_s": 5.0,
+          "text": "还有内容",
+          "style": "dialogue"
+        }
+      ],
+      "expected": "[Script Info]\nScriptType: v4.00+\nPlayResX: 1080\nPlayResY: 1920\nWrapStyle: 2\nScaledBorderAndShadow: yes\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: dialogue,Source Han Sans SC,54,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,0,0,0,0,100,100,0,0,1,3,1,2,60,60,180,1\nStyle: narration,Source Han Sans SC,49,&H00E8E8E8,&H000000FF,&H00000000,&H64000000,0,1,0,0,100,100,0,0,1,3,1,2,60,60,180,1\nStyle: title,Source Han Sans SC,75,&H00FFFFFF,&H000000FF,&H00000000,&H96000000,1,0,0,0,100,100,2,0,1,4,2,5,60,60,0,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n\nDialogue: 0,0:00:00.00,0:00:02.00,dialogue,,0,0,0,,有内容\nDialogue: 0,0:00:03.00,0:00:05.00,dialogue,,0,0,0,,还有内容\n"
+    },
+    {
+      "name": "no_cues",
+      "cues": [],
+      "expected": "[Script Info]\nScriptType: v4.00+\nPlayResX: 1080\nPlayResY: 1920\nWrapStyle: 2\nScaledBorderAndShadow: yes\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: dialogue,Source Han Sans SC,54,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,0,0,0,0,100,100,0,0,1,3,1,2,60,60,180,1\nStyle: narration,Source Han Sans SC,49,&H00E8E8E8,&H000000FF,&H00000000,&H64000000,0,1,0,0,100,100,0,0,1,3,1,2,60,60,180,1\nStyle: title,Source Han Sans SC,75,&H00FFFFFF,&H000000FF,&H00000000,&H96000000,1,0,0,0,100,100,2,0,1,4,2,5,60,60,0,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n\n"
+    },
+    {
+      "name": "long_timeline",
+      "cues": [
+        {
+          "start_s": 3661.5,
+          "end_s": 3665.25,
+          "text": "一小时之后",
+          "style": "dialogue"
+        }
+      ],
+      "expected": "[Script Info]\nScriptType: v4.00+\nPlayResX: 1080\nPlayResY: 1920\nWrapStyle: 2\nScaledBorderAndShadow: yes\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: dialogue,Source Han Sans SC,54,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,0,0,0,0,100,100,0,0,1,3,1,2,60,60,180,1\nStyle: narration,Source Han Sans SC,49,&H00E8E8E8,&H000000FF,&H00000000,&H64000000,0,1,0,0,100,100,0,0,1,3,1,2,60,60,180,1\nStyle: title,Source Han Sans SC,75,&H00FFFFFF,&H000000FF,&H00000000,&H96000000,1,0,0,0,100,100,2,0,1,4,2,5,60,60,0,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n\nDialogue: 0,1:01:01.50,1:01:05.25,dialogue,,0,0,0,,一小时之后\n"
+    }
+  ],
+  "ass_time": [
+    {
+      "input": 0.0,
+      "expected": "0:00:00.00"
+    },
+    {
+      "input": 0.5,
+      "expected": "0:00:00.50"
+    },
+    {
+      "input": 1.005,
+      "expected": "0:00:01.00"
+    },
+    {
+      "input": 59.99,
+      "expected": "0:00:59.99"
+    },
+    {
+      "input": 60.0,
+      "expected": "0:01:00.00"
+    },
+    {
+      "input": 3599.99,
+      "expected": "0:59:59.99"
+    },
+    {
+      "input": 3600.0,
+      "expected": "1:00:00.00"
+    },
+    {
+      "input": 3661.5,
+      "expected": "1:01:01.50"
+    },
+    {
+      "input": -1.0,
+      "expected": "0:00:00.00"
+    },
+    {
+      "input": 7265.125,
+      "expected": "2:01:05.12"
+    }
+  ],
+  "validate": [
+    {
+      "name": "all_good",
+      "cues": [
+        {
+          "start_s": 0.0,
+          "end_s": 2.0,
+          "text": "第一句",
+          "style": "dialogue"
+        },
+        {
+          "start_s": 2.0,
+          "end_s": 4.0,
+          "text": "第二句",
+          "style": "dialogue"
+        }
+      ],
+      "expected": []
+    },
+    {
+      "name": "reversed_time",
+      "cues": [
+        {
+          "start_s": 3.0,
+          "end_s": 1.0,
+          "text": "时间倒挂",
+          "style": "dialogue"
+        }
+      ],
+      "expected": [
+        "第 1 条字幕时间倒挂",
+        "第 1 条字幕只显示 -2.00 秒，看不清"
+      ]
+    },
+    {
+      "name": "too_short",
+      "cues": [
+        {
+          "start_s": 0.0,
+          "end_s": 0.2,
+          "text": "一闪而过",
+          "style": "dialogue"
+        }
+      ],
+      "expected": [
+        "第 1 条字幕只显示 0.20 秒，看不清"
+      ]
+    },
+    {
+      "name": "empty",
+      "cues": [
+        {
+          "start_s": 0.0,
+          "end_s": 2.0,
+          "text": "  ",
+          "style": "dialogue"
+        }
+      ],
+      "expected": [
+        "第 1 条字幕是空的"
+      ]
+    },
+    {
+      "name": "overlap",
+      "cues": [
+        {
+          "start_s": 0.0,
+          "end_s": 3.0,
+          "text": "前一条字幕的内容",
+          "style": "dialogue"
+        },
+        {
+          "start_s": 2.0,
+          "end_s": 5.0,
+          "text": "后一条字幕的内容",
+          "style": "dialogue"
+        }
+      ],
+      "expected": [
+        "字幕重叠：前一条字幕的内容 与 后一条字幕的内容"
+      ]
+    },
+    {
+      "name": "way_too_long",
+      "cues": [
+        {
+          "start_s": 0.0,
+          "end_s": 5.0,
+          "text": "这是一句长到断成两行之后每一行还是超出上限很多很多很多很多很多很多很多很多的台词",
+          "style": "dialogue"
+        }
+      ],
+      "expected": [
+        "第 1 条字幕断行后仍然超长"
+      ]
+    }
+  ]
+}

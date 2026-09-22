@@ -1,0 +1,30 @@
+[
+  {
+    "expected": "female",
+    "identity": "一位年轻的女性，短发"
+  },
+  {
+    "expected": "male",
+    "identity": "中年男人，络腮胡"
+  },
+  {
+    "expected": "",
+    "identity": "他是这家店的老板"
+  },
+  {
+    "expected": "female",
+    "identity": "她的妈妈"
+  },
+  {
+    "expected": "",
+    "identity": "一个孩子"
+  },
+  {
+    "expected": "",
+    "identity": ""
+  },
+  {
+    "expected": "",
+    "identity": "父女二人"
+  }
+]

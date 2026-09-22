@@ -1,0 +1,39 @@
+{
+  "ep01": {
+    "counts_by_status": {
+      "audio_done": 1,
+      "planned": 1
+    },
+    "planned_duration_s": 11.5,
+    "shots_needing_audio_done": [
+      "ep01_s03_sh007"
+    ],
+    "shots_needing_planned": [
+      "ep01_s01_sh001"
+    ],
+    "sorted_shot_ids": [
+      "ep01_s01_sh001",
+      "ep01_s03_sh007"
+    ]
+  },
+  "episode_ids": [
+    "ep01",
+    "ep02"
+  ],
+  "premise": "一个关于错过与和解的都市电影。全片九十分钟，横屏。",
+  "project_id": "yuye-tiantai",
+  "rel_of_frames_file": "frames/a.png",
+  "rel_of_nested": "shots/draft/b.mp4",
+  "root_name": "项目_雨夜天台",
+  "schema_version": 1,
+  "subdirs": [
+    "audio",
+    "frames",
+    "logs",
+    "output",
+    "refs",
+    "shots",
+    "subtitles"
+  ],
+  "title": "雨夜天台"
+}

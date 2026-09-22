@@ -1,0 +1,78 @@
+[
+  {
+    "16:9": {
+      "height": 704,
+      "width": 1280
+    },
+    "1:1": {
+      "height": 992,
+      "width": 992
+    },
+    "9:16": {
+      "height": 1280,
+      "width": 704
+    },
+    "input": {
+      "height": 704,
+      "steps": 30,
+      "width": 1280
+    }
+  },
+  {
+    "16:9": {
+      "height": 352,
+      "width": 640
+    },
+    "1:1": {
+      "height": 512,
+      "width": 512
+    },
+    "9:16": {
+      "height": 640,
+      "width": 352
+    },
+    "input": {
+      "height": 352,
+      "steps": 10,
+      "width": 640
+    }
+  },
+  {
+    "16:9": {
+      "height": 448,
+      "width": 768
+    },
+    "1:1": {
+      "height": 608,
+      "width": 608
+    },
+    "9:16": {
+      "height": 768,
+      "width": 448
+    },
+    "input": {
+      "height": 432,
+      "steps": 18,
+      "width": 768
+    }
+  },
+  {
+    "16:9": {
+      "height": 544,
+      "width": 960
+    },
+    "1:1": {
+      "height": 768,
+      "width": 768
+    },
+    "9:16": {
+      "height": 960,
+      "width": 544
+    },
+    "input": {
+      "height": 544,
+      "steps": 20,
+      "width": 960
+    }
+  }
+]

@@ -1,0 +1,795 @@
+{
+  "cases": [
+    {
+      "body": {
+        "reset_to_planned": true,
+        "saved": true,
+        "status": "planned"
+      },
+      "compare": "full",
+      "dir": "c00",
+      "name": "改提示词_退回未开工",
+      "patch": {
+        "first_frame_prompt": "改过的提示词"
+      },
+      "shot_after": {
+        "attempts": 0,
+        "beat": "反转",
+        "bgm_cue": "bgm_tension_low",
+        "camera_angle": "low",
+        "camera_id": "cam_rooftop_a",
+        "camera_move": "push_in",
+        "lens": "auto",
+        "lighting": "",
+        "continuous_with_prev": false,
+        "characters": [
+          {
+            "action": "握紧栏杆，指节发白",
+            "char_id": "lin_yuan",
+            "expression": "隐忍",
+            "face_pose": "three_quarter",
+            "screen_pos": "center",
+            "wardrobe_state": "suit_soaked"
+          },
+          {
+            "action": "停在门口，没有再往前",
+            "char_id": "chen_mo",
+            "expression": "愕然",
+            "face_pose": "profile",
+            "screen_pos": "left",
+            "wardrobe_state": "default"
+          }
+        ],
+        "continuity_notes": "上一镜他还没湿透，这里服装状态要接上 suit_soaked",
+        "dialogue": [
+          {
+            "actual_duration_s": 3.2,
+            "audio_path": "audio/ep01_s03_sh007_01.wav",
+            "char_id": "lin_yuan",
+            "emotion": "压抑",
+            "emotion_intensity": 0.8,
+            "text": "你要是早半个小时来，什么都还来得及。",
+            "voice_id": "voice_lin"
+          },
+          {
+            "actual_duration_s": null,
+            "audio_path": null,
+            "char_id": null,
+            "emotion": "neutral",
+            "emotion_intensity": 0.3,
+            "text": "雨声盖过了他后半句。",
+            "voice_id": null
+          }
+        ],
+        "duration_locked": true,
+        "duration_s": 6.5,
+        "first_frame_prompt": "改过的提示词",
+        "frame_path": "frames/ep01_s03_sh007.png",
+        "end_frame_path": null,
+        "gate_notes": [],
+        "last_frame_prompt": "cinematic, rooftop at night, man turns around, rain on face",
+        "location_id": "loc_rooftop",
+        "missing_info": [
+          "未确定陈墨是否带伞"
+        ],
+        "motion_prompt": "缓慢推进，雨丝斜掠，人物微微转头",
+        "needs_lipsync": false,
+        "negative_prompt": "模糊, 低质量, 多余的手指",
+        "order": 6,
+        "prop_ids": [
+          "prop_umbrella",
+          "prop_phone"
+        ],
+        "scene_id": "ep01_s03",
+        "sfx": [
+          "雨声",
+          "远处车流"
+        ],
+        "shot_id": "ep01_s03_sh007",
+        "shot_size": "MCU",
+        "status": "planned",
+        "subtitle_text": "你要是早半个小时来，什么都还来得及。",
+        "transition_dur_s": 0.8,
+        "transition_in": "dissolve",
+        "video_path": null,
+        "visual_desc": "雨夜天台，男主背对镜头站在栏杆前，远处霓虹在雨幕里散成一片光晕"
+      },
+      "status": 200
+    },
+    {
+      "body": {
+        "reset_to_planned": true,
+        "saved": true,
+        "status": "planned"
+      },
+      "compare": "full",
+      "dir": "c01",
+      "name": "改景别_退回未开工",
+      "patch": {
+        "shot_size": "CU"
+      },
+      "shot_after": {
+        "attempts": 0,
+        "beat": "反转",
+        "bgm_cue": "bgm_tension_low",
+        "camera_angle": "low",
+        "camera_id": "cam_rooftop_a",
+        "camera_move": "push_in",
+        "lens": "auto",
+        "lighting": "",
+        "continuous_with_prev": false,
+        "characters": [
+          {
+            "action": "握紧栏杆，指节发白",
+            "char_id": "lin_yuan",
+            "expression": "隐忍",
+            "face_pose": "three_quarter",
+            "screen_pos": "center",
+            "wardrobe_state": "suit_soaked"
+          },
+          {
+            "action": "停在门口，没有再往前",
+            "char_id": "chen_mo",
+            "expression": "愕然",
+            "face_pose": "profile",
+            "screen_pos": "left",
+            "wardrobe_state": "default"
+          }
+        ],
+        "continuity_notes": "上一镜他还没湿透，这里服装状态要接上 suit_soaked",
+        "dialogue": [
+          {
+            "actual_duration_s": 3.2,
+            "audio_path": "audio/ep01_s03_sh007_01.wav",
+            "char_id": "lin_yuan",
+            "emotion": "压抑",
+            "emotion_intensity": 0.8,
+            "text": "你要是早半个小时来，什么都还来得及。",
+            "voice_id": "voice_lin"
+          },
+          {
+            "actual_duration_s": null,
+            "audio_path": null,
+            "char_id": null,
+            "emotion": "neutral",
+            "emotion_intensity": 0.3,
+            "text": "雨声盖过了他后半句。",
+            "voice_id": null
+          }
+        ],
+        "duration_locked": true,
+        "duration_s": 6.5,
+        "first_frame_prompt": "cinematic, rooftop at night, heavy rain, neon bokeh, back view",
+        "frame_path": "frames/ep01_s03_sh007.png",
+        "end_frame_path": null,
+        "gate_notes": [],
+        "last_frame_prompt": "cinematic, rooftop at night, man turns around, rain on face",
+        "location_id": "loc_rooftop",
+        "missing_info": [
+          "未确定陈墨是否带伞"
+        ],
+        "motion_prompt": "缓慢推进，雨丝斜掠，人物微微转头",
+        "needs_lipsync": false,
+        "negative_prompt": "模糊, 低质量, 多余的手指",
+        "order": 6,
+        "prop_ids": [
+          "prop_umbrella",
+          "prop_phone"
+        ],
+        "scene_id": "ep01_s03",
+        "sfx": [
+          "雨声",
+          "远处车流"
+        ],
+        "shot_id": "ep01_s03_sh007",
+        "shot_size": "CU",
+        "status": "planned",
+        "subtitle_text": "你要是早半个小时来，什么都还来得及。",
+        "transition_dur_s": 0.8,
+        "transition_in": "dissolve",
+        "video_path": null,
+        "visual_desc": "雨夜天台，男主背对镜头站在栏杆前，远处霓虹在雨幕里散成一片光晕"
+      },
+      "status": 200
+    },
+    {
+      "body": {
+        "reset_to_planned": false,
+        "saved": true,
+        "status": "audio_done"
+      },
+      "compare": "full",
+      "dir": "c02",
+      "name": "改字幕_不退回",
+      "patch": {
+        "subtitle_text": "换一句字幕"
+      },
+      "shot_after": {
+        "attempts": 2,
+        "beat": "反转",
+        "bgm_cue": "bgm_tension_low",
+        "camera_angle": "low",
+        "camera_id": "cam_rooftop_a",
+        "camera_move": "push_in",
+        "lens": "auto",
+        "lighting": "",
+        "continuous_with_prev": false,
+        "characters": [
+          {
+            "action": "握紧栏杆，指节发白",
+            "char_id": "lin_yuan",
+            "expression": "隐忍",
+            "face_pose": "three_quarter",
+            "screen_pos": "center",
+            "wardrobe_state": "suit_soaked"
+          },
+          {
+            "action": "停在门口，没有再往前",
+            "char_id": "chen_mo",
+            "expression": "愕然",
+            "face_pose": "profile",
+            "screen_pos": "left",
+            "wardrobe_state": "default"
+          }
+        ],
+        "continuity_notes": "上一镜他还没湿透，这里服装状态要接上 suit_soaked",
+        "dialogue": [
+          {
+            "actual_duration_s": 3.2,
+            "audio_path": "audio/ep01_s03_sh007_01.wav",
+            "char_id": "lin_yuan",
+            "emotion": "压抑",
+            "emotion_intensity": 0.8,
+            "text": "你要是早半个小时来，什么都还来得及。",
+            "voice_id": "voice_lin"
+          },
+          {
+            "actual_duration_s": null,
+            "audio_path": null,
+            "char_id": null,
+            "emotion": "neutral",
+            "emotion_intensity": 0.3,
+            "text": "雨声盖过了他后半句。",
+            "voice_id": null
+          }
+        ],
+        "duration_locked": true,
+        "duration_s": 6.5,
+        "first_frame_prompt": "cinematic, rooftop at night, heavy rain, neon bokeh, back view",
+        "frame_path": "frames/ep01_s03_sh007.png",
+        "end_frame_path": null,
+        "gate_notes": [
+          "草稿档画面偏暗，已调高曝光重跑"
+        ],
+        "last_frame_prompt": "cinematic, rooftop at night, man turns around, rain on face",
+        "location_id": "loc_rooftop",
+        "missing_info": [
+          "未确定陈墨是否带伞"
+        ],
+        "motion_prompt": "缓慢推进，雨丝斜掠，人物微微转头",
+        "needs_lipsync": false,
+        "negative_prompt": "模糊, 低质量, 多余的手指",
+        "order": 6,
+        "prop_ids": [
+          "prop_umbrella",
+          "prop_phone"
+        ],
+        "scene_id": "ep01_s03",
+        "sfx": [
+          "雨声",
+          "远处车流"
+        ],
+        "shot_id": "ep01_s03_sh007",
+        "shot_size": "MCU",
+        "status": "audio_done",
+        "subtitle_text": "换一句字幕",
+        "transition_dur_s": 0.8,
+        "transition_in": "dissolve",
+        "video_path": null,
+        "visual_desc": "雨夜天台，男主背对镜头站在栏杆前，远处霓虹在雨幕里散成一片光晕"
+      },
+      "status": 200
+    },
+    {
+      "body": {
+        "reset_to_planned": false,
+        "saved": true,
+        "status": "audio_done"
+      },
+      "compare": "full",
+      "dir": "c03",
+      "name": "改叙事功能_不退回",
+      "patch": {
+        "beat": "铺垫"
+      },
+      "shot_after": {
+        "attempts": 2,
+        "beat": "铺垫",
+        "bgm_cue": "bgm_tension_low",
+        "camera_angle": "low",
+        "camera_id": "cam_rooftop_a",
+        "camera_move": "push_in",
+        "lens": "auto",
+        "lighting": "",
+        "continuous_with_prev": false,
+        "characters": [
+          {
+            "action": "握紧栏杆，指节发白",
+            "char_id": "lin_yuan",
+            "expression": "隐忍",
+            "face_pose": "three_quarter",
+            "screen_pos": "center",
+            "wardrobe_state": "suit_soaked"
+          },
+          {
+            "action": "停在门口，没有再往前",
+            "char_id": "chen_mo",
+            "expression": "愕然",
+            "face_pose": "profile",
+            "screen_pos": "left",
+            "wardrobe_state": "default"
+          }
+        ],
+        "continuity_notes": "上一镜他还没湿透，这里服装状态要接上 suit_soaked",
+        "dialogue": [
+          {
+            "actual_duration_s": 3.2,
+            "audio_path": "audio/ep01_s03_sh007_01.wav",
+            "char_id": "lin_yuan",
+            "emotion": "压抑",
+            "emotion_intensity": 0.8,
+            "text": "你要是早半个小时来，什么都还来得及。",
+            "voice_id": "voice_lin"
+          },
+          {
+            "actual_duration_s": null,
+            "audio_path": null,
+            "char_id": null,
+            "emotion": "neutral",
+            "emotion_intensity": 0.3,
+            "text": "雨声盖过了他后半句。",
+            "voice_id": null
+          }
+        ],
+        "duration_locked": true,
+        "duration_s": 6.5,
+        "first_frame_prompt": "cinematic, rooftop at night, heavy rain, neon bokeh, back view",
+        "frame_path": "frames/ep01_s03_sh007.png",
+        "end_frame_path": null,
+        "gate_notes": [
+          "草稿档画面偏暗，已调高曝光重跑"
+        ],
+        "last_frame_prompt": "cinematic, rooftop at night, man turns around, rain on face",
+        "location_id": "loc_rooftop",
+        "missing_info": [
+          "未确定陈墨是否带伞"
+        ],
+        "motion_prompt": "缓慢推进，雨丝斜掠，人物微微转头",
+        "needs_lipsync": false,
+        "negative_prompt": "模糊, 低质量, 多余的手指",
+        "order": 6,
+        "prop_ids": [
+          "prop_umbrella",
+          "prop_phone"
+        ],
+        "scene_id": "ep01_s03",
+        "sfx": [
+          "雨声",
+          "远处车流"
+        ],
+        "shot_id": "ep01_s03_sh007",
+        "shot_size": "MCU",
+        "status": "audio_done",
+        "subtitle_text": "你要是早半个小时来，什么都还来得及。",
+        "transition_dur_s": 0.8,
+        "transition_in": "dissolve",
+        "video_path": null,
+        "visual_desc": "雨夜天台，男主背对镜头站在栏杆前，远处霓虹在雨幕里散成一片光晕"
+      },
+      "status": 200
+    },
+    {
+      "body": {
+        "reset_to_planned": false,
+        "saved": true,
+        "status": "locked"
+      },
+      "compare": "full",
+      "dir": "c04",
+      "name": "显式给了状态_即使改画面也不退回",
+      "patch": {
+        "first_frame_prompt": "又改了",
+        "status": "locked"
+      },
+      "shot_after": {
+        "attempts": 2,
+        "beat": "反转",
+        "bgm_cue": "bgm_tension_low",
+        "camera_angle": "low",
+        "camera_id": "cam_rooftop_a",
+        "camera_move": "push_in",
+        "lens": "auto",
+        "lighting": "",
+        "continuous_with_prev": false,
+        "characters": [
+          {
+            "action": "握紧栏杆，指节发白",
+            "char_id": "lin_yuan",
+            "expression": "隐忍",
+            "face_pose": "three_quarter",
+            "screen_pos": "center",
+            "wardrobe_state": "suit_soaked"
+          },
+          {
+            "action": "停在门口，没有再往前",
+            "char_id": "chen_mo",
+            "expression": "愕然",
+            "face_pose": "profile",
+            "screen_pos": "left",
+            "wardrobe_state": "default"
+          }
+        ],
+        "continuity_notes": "上一镜他还没湿透，这里服装状态要接上 suit_soaked",
+        "dialogue": [
+          {
+            "actual_duration_s": 3.2,
+            "audio_path": "audio/ep01_s03_sh007_01.wav",
+            "char_id": "lin_yuan",
+            "emotion": "压抑",
+            "emotion_intensity": 0.8,
+            "text": "你要是早半个小时来，什么都还来得及。",
+            "voice_id": "voice_lin"
+          },
+          {
+            "actual_duration_s": null,
+            "audio_path": null,
+            "char_id": null,
+            "emotion": "neutral",
+            "emotion_intensity": 0.3,
+            "text": "雨声盖过了他后半句。",
+            "voice_id": null
+          }
+        ],
+        "duration_locked": true,
+        "duration_s": 6.5,
+        "first_frame_prompt": "又改了",
+        "frame_path": "frames/ep01_s03_sh007.png",
+        "end_frame_path": null,
+        "gate_notes": [
+          "草稿档画面偏暗，已调高曝光重跑"
+        ],
+        "last_frame_prompt": "cinematic, rooftop at night, man turns around, rain on face",
+        "location_id": "loc_rooftop",
+        "missing_info": [
+          "未确定陈墨是否带伞"
+        ],
+        "motion_prompt": "缓慢推进，雨丝斜掠，人物微微转头",
+        "needs_lipsync": false,
+        "negative_prompt": "模糊, 低质量, 多余的手指",
+        "order": 6,
+        "prop_ids": [
+          "prop_umbrella",
+          "prop_phone"
+        ],
+        "scene_id": "ep01_s03",
+        "sfx": [
+          "雨声",
+          "远处车流"
+        ],
+        "shot_id": "ep01_s03_sh007",
+        "shot_size": "MCU",
+        "status": "locked",
+        "subtitle_text": "你要是早半个小时来，什么都还来得及。",
+        "transition_dur_s": 0.8,
+        "transition_in": "dissolve",
+        "video_path": null,
+        "visual_desc": "雨夜天台，男主背对镜头站在栏杆前，远处霓虹在雨幕里散成一片光晕"
+      },
+      "status": 200
+    },
+    {
+      "body": {
+        "reset_to_planned": true,
+        "saved": true,
+        "status": "planned"
+      },
+      "compare": "full",
+      "dir": "c05",
+      "name": "改台词_清配音并解锁时长",
+      "patch": {
+        "dialogue_texts": [
+          "换了的第一句。",
+          "雨声盖过了他后半句。"
+        ]
+      },
+      "shot_after": {
+        "attempts": 0,
+        "beat": "反转",
+        "bgm_cue": "bgm_tension_low",
+        "camera_angle": "low",
+        "camera_id": "cam_rooftop_a",
+        "camera_move": "push_in",
+        "lens": "auto",
+        "lighting": "",
+        "continuous_with_prev": false,
+        "characters": [
+          {
+            "action": "握紧栏杆，指节发白",
+            "char_id": "lin_yuan",
+            "expression": "隐忍",
+            "face_pose": "three_quarter",
+            "screen_pos": "center",
+            "wardrobe_state": "suit_soaked"
+          },
+          {
+            "action": "停在门口，没有再往前",
+            "char_id": "chen_mo",
+            "expression": "愕然",
+            "face_pose": "profile",
+            "screen_pos": "left",
+            "wardrobe_state": "default"
+          }
+        ],
+        "continuity_notes": "上一镜他还没湿透，这里服装状态要接上 suit_soaked",
+        "dialogue": [
+          {
+            "actual_duration_s": null,
+            "audio_path": null,
+            "char_id": "lin_yuan",
+            "emotion": "压抑",
+            "emotion_intensity": 0.8,
+            "text": "换了的第一句。",
+            "voice_id": "voice_lin"
+          },
+          {
+            "actual_duration_s": null,
+            "audio_path": null,
+            "char_id": null,
+            "emotion": "neutral",
+            "emotion_intensity": 0.3,
+            "text": "雨声盖过了他后半句。",
+            "voice_id": null
+          }
+        ],
+        "duration_locked": false,
+        "duration_s": 6.5,
+        "first_frame_prompt": "cinematic, rooftop at night, heavy rain, neon bokeh, back view",
+        "frame_path": "frames/ep01_s03_sh007.png",
+        "end_frame_path": null,
+        "gate_notes": [],
+        "last_frame_prompt": "cinematic, rooftop at night, man turns around, rain on face",
+        "location_id": "loc_rooftop",
+        "missing_info": [
+          "未确定陈墨是否带伞"
+        ],
+        "motion_prompt": "缓慢推进，雨丝斜掠，人物微微转头",
+        "needs_lipsync": false,
+        "negative_prompt": "模糊, 低质量, 多余的手指",
+        "order": 6,
+        "prop_ids": [
+          "prop_umbrella",
+          "prop_phone"
+        ],
+        "scene_id": "ep01_s03",
+        "sfx": [
+          "雨声",
+          "远处车流"
+        ],
+        "shot_id": "ep01_s03_sh007",
+        "shot_size": "MCU",
+        "status": "planned",
+        "subtitle_text": "你要是早半个小时来，什么都还来得及。",
+        "transition_dur_s": 0.8,
+        "transition_in": "dissolve",
+        "video_path": null,
+        "visual_desc": "雨夜天台，男主背对镜头站在栏杆前，远处霓虹在雨幕里散成一片光晕"
+      },
+      "status": 200
+    },
+    {
+      "body": {
+        "detail": "台词条数对不上：给了 1 条，这个镜头有 2 条"
+      },
+      "compare": "full",
+      "dir": "c06",
+      "name": "台词条数对不上_400",
+      "patch": {
+        "dialogue_texts": [
+          "只给一条"
+        ]
+      },
+      "shot_after": null,
+      "status": 400
+    },
+    {
+      "body": {
+        "detail": [
+          {
+            "input": "x",
+            "loc": [
+              "body",
+              "patch",
+              "没这个字段"
+            ],
+            "msg": "Extra inputs are not permitted",
+            "type": "extra_forbidden"
+          }
+        ]
+      },
+      "compare": "full",
+      "dir": "c07",
+      "name": "不认识的字段_400",
+      "patch": {
+        "没这个字段": "x"
+      },
+      "shot_after": null,
+      "status": 422
+    },
+    {
+      "body": {
+        "detail": "改动不合法：1 validation error for Shot\nshot_size\n  Input should be 'ECU', 'CU', 'MCU', 'MS', 'MLS', 'LS' or 'ELS' [type=enum, input_value='XXL', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/enum"
+      },
+      "compare": "shape",
+      "dir": "c08",
+      "name": "枚举取值非法_400",
+      "patch": {
+        "shot_size": "XXL"
+      },
+      "shot_after": null,
+      "status": 400
+    },
+    {
+      "body": {
+        "detail": "改动不合法：1 validation error for Shot\nduration_s\n  Input should be less than or equal to 30 [type=less_than_equal, input_value=99.0, input_type=float]\n    For further information visit https://errors.pydantic.dev/2.13/v/less_than_equal"
+      },
+      "compare": "shape",
+      "dir": "c09",
+      "name": "时长超上限_400",
+      "patch": {
+        "duration_s": 99
+      },
+      "shot_after": null,
+      "status": 400
+    },
+    {
+      "body": {
+        "detail": "改动不合法：1 validation error for Shot\n  Value error, 硬切的转场时长必须为 0 [type=value_error, input_value={'shot_id': 'ep01_s03_sh0...已调高曝光重跑']}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error"
+      },
+      "compare": "shape",
+      "dir": "c10",
+      "name": "硬切给了转场时长_400",
+      "patch": {
+        "transition_dur_s": 0.5,
+        "transition_in": "cut"
+      },
+      "shot_after": null,
+      "status": 400
+    },
+    {
+      "body": {
+        "reset_to_planned": true,
+        "saved": true,
+        "status": "planned"
+      },
+      "compare": "full",
+      "dir": "c11",
+      "name": "改运镜_退回未开工",
+      "patch": {
+        "camera_move": "orbit"
+      },
+      "shot_after": {
+        "attempts": 0,
+        "beat": "反转",
+        "bgm_cue": "bgm_tension_low",
+        "camera_angle": "low",
+        "camera_id": "cam_rooftop_a",
+        "camera_move": "orbit",
+        "lens": "auto",
+        "lighting": "",
+        "continuous_with_prev": false,
+        "characters": [
+          {
+            "action": "握紧栏杆，指节发白",
+            "char_id": "lin_yuan",
+            "expression": "隐忍",
+            "face_pose": "three_quarter",
+            "screen_pos": "center",
+            "wardrobe_state": "suit_soaked"
+          },
+          {
+            "action": "停在门口，没有再往前",
+            "char_id": "chen_mo",
+            "expression": "愕然",
+            "face_pose": "profile",
+            "screen_pos": "left",
+            "wardrobe_state": "default"
+          }
+        ],
+        "continuity_notes": "上一镜他还没湿透，这里服装状态要接上 suit_soaked",
+        "dialogue": [
+          {
+            "actual_duration_s": 3.2,
+            "audio_path": "audio/ep01_s03_sh007_01.wav",
+            "char_id": "lin_yuan",
+            "emotion": "压抑",
+            "emotion_intensity": 0.8,
+            "text": "你要是早半个小时来，什么都还来得及。",
+            "voice_id": "voice_lin"
+          },
+          {
+            "actual_duration_s": null,
+            "audio_path": null,
+            "char_id": null,
+            "emotion": "neutral",
+            "emotion_intensity": 0.3,
+            "text": "雨声盖过了他后半句。",
+            "voice_id": null
+          }
+        ],
+        "duration_locked": true,
+        "duration_s": 6.5,
+        "first_frame_prompt": "cinematic, rooftop at night, heavy rain, neon bokeh, back view",
+        "frame_path": "frames/ep01_s03_sh007.png",
+        "end_frame_path": null,
+        "gate_notes": [],
+        "last_frame_prompt": "cinematic, rooftop at night, man turns around, rain on face",
+        "location_id": "loc_rooftop",
+        "missing_info": [
+          "未确定陈墨是否带伞"
+        ],
+        "motion_prompt": "缓慢推进，雨丝斜掠，人物微微转头",
+        "needs_lipsync": false,
+        "negative_prompt": "模糊, 低质量, 多余的手指",
+        "order": 6,
+        "prop_ids": [
+          "prop_umbrella",
+          "prop_phone"
+        ],
+        "scene_id": "ep01_s03",
+        "sfx": [
+          "雨声",
+          "远处车流"
+        ],
+        "shot_id": "ep01_s03_sh007",
+        "shot_size": "MCU",
+        "status": "planned",
+        "subtitle_text": "你要是早半个小时来，什么都还来得及。",
+        "transition_dur_s": 0.8,
+        "transition_in": "dissolve",
+        "video_path": null,
+        "visual_desc": "雨夜天台，男主背对镜头站在栏杆前，远处霓虹在雨幕里散成一片光晕"
+      },
+      "status": 200
+    },
+    {
+      "body": {
+        "detail": "没有章节 ep99"
+      },
+      "compare": "full",
+      "dir": null,
+      "episode_id": "ep99",
+      "name": "章节不存在_404",
+      "patch": {
+        "beat": "x"
+      },
+      "shot_after": null,
+      "shot_id": "ep01_s03_sh007",
+      "status": 404
+    },
+    {
+      "body": {
+        "detail": "没有镜头 sh_no_such"
+      },
+      "compare": "full",
+      "dir": null,
+      "episode_id": "ep01",
+      "name": "镜头不存在_404",
+      "patch": {
+        "beat": "x"
+      },
+      "shot_after": null,
+      "shot_id": "sh_no_such",
+      "status": 404
+    }
+  ]
+}

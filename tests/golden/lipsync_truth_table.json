@@ -1,0 +1,602 @@
+[
+  {
+    "expected_needs_lipsync": false,
+    "name": "无台词",
+    "shot": {
+      "attempts": 0,
+      "beat": "",
+      "bgm_cue": null,
+      "camera_angle": "eye_level",
+      "camera_id": null,
+      "camera_move": "static",
+      "lens": "auto",
+      "lighting": "",
+      "continuous_with_prev": false,
+      "characters": [
+        {
+          "action": "",
+          "char_id": "a",
+          "expression": "",
+          "face_pose": "front",
+          "screen_pos": "center",
+          "wardrobe_state": "default"
+        }
+      ],
+      "continuity_notes": "",
+      "dialogue": [],
+      "duration_locked": false,
+      "duration_s": 5.0,
+      "first_frame_prompt": "",
+      "frame_path": null,
+      "end_frame_path": null,
+      "gate_notes": [],
+      "last_frame_prompt": null,
+      "location_id": null,
+      "missing_info": [],
+      "motion_prompt": "",
+      "needs_lipsync": false,
+      "negative_prompt": "",
+      "order": 0,
+      "prop_ids": [],
+      "scene_id": "t",
+      "sfx": [],
+      "shot_id": "t",
+      "shot_size": "MS",
+      "status": "planned",
+      "subtitle_text": "",
+      "transition_dur_s": 0.0,
+      "transition_in": "cut",
+      "video_path": null,
+      "visual_desc": ""
+    }
+  },
+  {
+    "expected_needs_lipsync": false,
+    "name": "只有旁白",
+    "shot": {
+      "attempts": 0,
+      "beat": "",
+      "bgm_cue": null,
+      "camera_angle": "eye_level",
+      "camera_id": null,
+      "camera_move": "static",
+      "lens": "auto",
+      "lighting": "",
+      "continuous_with_prev": false,
+      "characters": [
+        {
+          "action": "",
+          "char_id": "a",
+          "expression": "",
+          "face_pose": "front",
+          "screen_pos": "center",
+          "wardrobe_state": "default"
+        }
+      ],
+      "continuity_notes": "",
+      "dialogue": [
+        {
+          "actual_duration_s": null,
+          "audio_path": null,
+          "char_id": null,
+          "emotion": "neutral",
+          "emotion_intensity": 0.5,
+          "text": "旁白",
+          "voice_id": null
+        }
+      ],
+      "duration_locked": false,
+      "duration_s": 5.0,
+      "first_frame_prompt": "",
+      "frame_path": null,
+      "end_frame_path": null,
+      "gate_notes": [],
+      "last_frame_prompt": null,
+      "location_id": null,
+      "missing_info": [],
+      "motion_prompt": "",
+      "needs_lipsync": false,
+      "negative_prompt": "",
+      "order": 0,
+      "prop_ids": [],
+      "scene_id": "t",
+      "sfx": [],
+      "shot_id": "t",
+      "shot_size": "MS",
+      "status": "planned",
+      "subtitle_text": "",
+      "transition_dur_s": 0.0,
+      "transition_in": "cut",
+      "video_path": null,
+      "visual_desc": ""
+    }
+  },
+  {
+    "expected_needs_lipsync": true,
+    "name": "特写正脸",
+    "shot": {
+      "attempts": 0,
+      "beat": "",
+      "bgm_cue": null,
+      "camera_angle": "eye_level",
+      "camera_id": null,
+      "camera_move": "static",
+      "lens": "auto",
+      "lighting": "",
+      "continuous_with_prev": false,
+      "characters": [
+        {
+          "action": "",
+          "char_id": "a",
+          "expression": "",
+          "face_pose": "front",
+          "screen_pos": "center",
+          "wardrobe_state": "default"
+        }
+      ],
+      "continuity_notes": "",
+      "dialogue": [
+        {
+          "actual_duration_s": null,
+          "audio_path": null,
+          "char_id": "a",
+          "emotion": "neutral",
+          "emotion_intensity": 0.5,
+          "text": "一句话",
+          "voice_id": null
+        }
+      ],
+      "duration_locked": false,
+      "duration_s": 5.0,
+      "first_frame_prompt": "",
+      "frame_path": null,
+      "end_frame_path": null,
+      "gate_notes": [],
+      "last_frame_prompt": null,
+      "location_id": null,
+      "missing_info": [],
+      "motion_prompt": "",
+      "needs_lipsync": false,
+      "negative_prompt": "",
+      "order": 0,
+      "prop_ids": [],
+      "scene_id": "t",
+      "sfx": [],
+      "shot_id": "t",
+      "shot_size": "CU",
+      "status": "planned",
+      "subtitle_text": "",
+      "transition_dur_s": 0.0,
+      "transition_in": "cut",
+      "video_path": null,
+      "visual_desc": ""
+    }
+  },
+  {
+    "expected_needs_lipsync": true,
+    "name": "中景正脸",
+    "shot": {
+      "attempts": 0,
+      "beat": "",
+      "bgm_cue": null,
+      "camera_angle": "eye_level",
+      "camera_id": null,
+      "camera_move": "static",
+      "lens": "auto",
+      "lighting": "",
+      "continuous_with_prev": false,
+      "characters": [
+        {
+          "action": "",
+          "char_id": "a",
+          "expression": "",
+          "face_pose": "front",
+          "screen_pos": "center",
+          "wardrobe_state": "default"
+        }
+      ],
+      "continuity_notes": "",
+      "dialogue": [
+        {
+          "actual_duration_s": null,
+          "audio_path": null,
+          "char_id": "a",
+          "emotion": "neutral",
+          "emotion_intensity": 0.5,
+          "text": "一句话",
+          "voice_id": null
+        }
+      ],
+      "duration_locked": false,
+      "duration_s": 5.0,
+      "first_frame_prompt": "",
+      "frame_path": null,
+      "end_frame_path": null,
+      "gate_notes": [],
+      "last_frame_prompt": null,
+      "location_id": null,
+      "missing_info": [],
+      "motion_prompt": "",
+      "needs_lipsync": false,
+      "negative_prompt": "",
+      "order": 0,
+      "prop_ids": [],
+      "scene_id": "t",
+      "sfx": [],
+      "shot_id": "t",
+      "shot_size": "MS",
+      "status": "planned",
+      "subtitle_text": "",
+      "transition_dur_s": 0.0,
+      "transition_in": "cut",
+      "video_path": null,
+      "visual_desc": ""
+    }
+  },
+  {
+    "expected_needs_lipsync": false,
+    "name": "中远景正脸_太远",
+    "shot": {
+      "attempts": 0,
+      "beat": "",
+      "bgm_cue": null,
+      "camera_angle": "eye_level",
+      "camera_id": null,
+      "camera_move": "static",
+      "lens": "auto",
+      "lighting": "",
+      "continuous_with_prev": false,
+      "characters": [
+        {
+          "action": "",
+          "char_id": "a",
+          "expression": "",
+          "face_pose": "front",
+          "screen_pos": "center",
+          "wardrobe_state": "default"
+        }
+      ],
+      "continuity_notes": "",
+      "dialogue": [
+        {
+          "actual_duration_s": null,
+          "audio_path": null,
+          "char_id": "a",
+          "emotion": "neutral",
+          "emotion_intensity": 0.5,
+          "text": "一句话",
+          "voice_id": null
+        }
+      ],
+      "duration_locked": false,
+      "duration_s": 5.0,
+      "first_frame_prompt": "",
+      "frame_path": null,
+      "end_frame_path": null,
+      "gate_notes": [],
+      "last_frame_prompt": null,
+      "location_id": null,
+      "missing_info": [],
+      "motion_prompt": "",
+      "needs_lipsync": false,
+      "negative_prompt": "",
+      "order": 0,
+      "prop_ids": [],
+      "scene_id": "t",
+      "sfx": [],
+      "shot_id": "t",
+      "shot_size": "MLS",
+      "status": "planned",
+      "subtitle_text": "",
+      "transition_dur_s": 0.0,
+      "transition_in": "cut",
+      "video_path": null,
+      "visual_desc": ""
+    }
+  },
+  {
+    "expected_needs_lipsync": false,
+    "name": "特写背对镜头",
+    "shot": {
+      "attempts": 0,
+      "beat": "",
+      "bgm_cue": null,
+      "camera_angle": "eye_level",
+      "camera_id": null,
+      "camera_move": "static",
+      "lens": "auto",
+      "lighting": "",
+      "continuous_with_prev": false,
+      "characters": [
+        {
+          "action": "",
+          "char_id": "a",
+          "expression": "",
+          "face_pose": "back",
+          "screen_pos": "center",
+          "wardrobe_state": "default"
+        }
+      ],
+      "continuity_notes": "",
+      "dialogue": [
+        {
+          "actual_duration_s": null,
+          "audio_path": null,
+          "char_id": "a",
+          "emotion": "neutral",
+          "emotion_intensity": 0.5,
+          "text": "一句话",
+          "voice_id": null
+        }
+      ],
+      "duration_locked": false,
+      "duration_s": 5.0,
+      "first_frame_prompt": "",
+      "frame_path": null,
+      "end_frame_path": null,
+      "gate_notes": [],
+      "last_frame_prompt": null,
+      "location_id": null,
+      "missing_info": [],
+      "motion_prompt": "",
+      "needs_lipsync": false,
+      "negative_prompt": "",
+      "order": 0,
+      "prop_ids": [],
+      "scene_id": "t",
+      "sfx": [],
+      "shot_id": "t",
+      "shot_size": "CU",
+      "status": "planned",
+      "subtitle_text": "",
+      "transition_dur_s": 0.0,
+      "transition_in": "cut",
+      "video_path": null,
+      "visual_desc": ""
+    }
+  },
+  {
+    "expected_needs_lipsync": true,
+    "name": "特写侧脸",
+    "shot": {
+      "attempts": 0,
+      "beat": "",
+      "bgm_cue": null,
+      "camera_angle": "eye_level",
+      "camera_id": null,
+      "camera_move": "static",
+      "lens": "auto",
+      "lighting": "",
+      "continuous_with_prev": false,
+      "characters": [
+        {
+          "action": "",
+          "char_id": "a",
+          "expression": "",
+          "face_pose": "profile",
+          "screen_pos": "center",
+          "wardrobe_state": "default"
+        }
+      ],
+      "continuity_notes": "",
+      "dialogue": [
+        {
+          "actual_duration_s": null,
+          "audio_path": null,
+          "char_id": "a",
+          "emotion": "neutral",
+          "emotion_intensity": 0.5,
+          "text": "一句话",
+          "voice_id": null
+        }
+      ],
+      "duration_locked": false,
+      "duration_s": 5.0,
+      "first_frame_prompt": "",
+      "frame_path": null,
+      "end_frame_path": null,
+      "gate_notes": [],
+      "last_frame_prompt": null,
+      "location_id": null,
+      "missing_info": [],
+      "motion_prompt": "",
+      "needs_lipsync": false,
+      "negative_prompt": "",
+      "order": 0,
+      "prop_ids": [],
+      "scene_id": "t",
+      "sfx": [],
+      "shot_id": "t",
+      "shot_size": "CU",
+      "status": "planned",
+      "subtitle_text": "",
+      "transition_dur_s": 0.0,
+      "transition_in": "cut",
+      "video_path": null,
+      "visual_desc": ""
+    }
+  },
+  {
+    "expected_needs_lipsync": false,
+    "name": "顶拍特写正脸",
+    "shot": {
+      "attempts": 0,
+      "beat": "",
+      "bgm_cue": null,
+      "camera_angle": "overhead",
+      "camera_id": null,
+      "camera_move": "static",
+      "lens": "auto",
+      "lighting": "",
+      "continuous_with_prev": false,
+      "characters": [
+        {
+          "action": "",
+          "char_id": "a",
+          "expression": "",
+          "face_pose": "front",
+          "screen_pos": "center",
+          "wardrobe_state": "default"
+        }
+      ],
+      "continuity_notes": "",
+      "dialogue": [
+        {
+          "actual_duration_s": null,
+          "audio_path": null,
+          "char_id": "a",
+          "emotion": "neutral",
+          "emotion_intensity": 0.5,
+          "text": "一句话",
+          "voice_id": null
+        }
+      ],
+      "duration_locked": false,
+      "duration_s": 5.0,
+      "first_frame_prompt": "",
+      "frame_path": null,
+      "end_frame_path": null,
+      "gate_notes": [],
+      "last_frame_prompt": null,
+      "location_id": null,
+      "missing_info": [],
+      "motion_prompt": "",
+      "needs_lipsync": false,
+      "negative_prompt": "",
+      "order": 0,
+      "prop_ids": [],
+      "scene_id": "t",
+      "sfx": [],
+      "shot_id": "t",
+      "shot_size": "CU",
+      "status": "planned",
+      "subtitle_text": "",
+      "transition_dur_s": 0.0,
+      "transition_in": "cut",
+      "video_path": null,
+      "visual_desc": ""
+    }
+  },
+  {
+    "expected_needs_lipsync": true,
+    "name": "俯拍特写正脸",
+    "shot": {
+      "attempts": 0,
+      "beat": "",
+      "bgm_cue": null,
+      "camera_angle": "high",
+      "camera_id": null,
+      "camera_move": "static",
+      "lens": "auto",
+      "lighting": "",
+      "continuous_with_prev": false,
+      "characters": [
+        {
+          "action": "",
+          "char_id": "a",
+          "expression": "",
+          "face_pose": "front",
+          "screen_pos": "center",
+          "wardrobe_state": "default"
+        }
+      ],
+      "continuity_notes": "",
+      "dialogue": [
+        {
+          "actual_duration_s": null,
+          "audio_path": null,
+          "char_id": "a",
+          "emotion": "neutral",
+          "emotion_intensity": 0.5,
+          "text": "一句话",
+          "voice_id": null
+        }
+      ],
+      "duration_locked": false,
+      "duration_s": 5.0,
+      "first_frame_prompt": "",
+      "frame_path": null,
+      "end_frame_path": null,
+      "gate_notes": [],
+      "last_frame_prompt": null,
+      "location_id": null,
+      "missing_info": [],
+      "motion_prompt": "",
+      "needs_lipsync": false,
+      "negative_prompt": "",
+      "order": 0,
+      "prop_ids": [],
+      "scene_id": "t",
+      "sfx": [],
+      "shot_id": "t",
+      "shot_size": "CU",
+      "status": "planned",
+      "subtitle_text": "",
+      "transition_dur_s": 0.0,
+      "transition_in": "cut",
+      "video_path": null,
+      "visual_desc": ""
+    }
+  },
+  {
+    "expected_needs_lipsync": false,
+    "name": "画外音角色",
+    "shot": {
+      "attempts": 0,
+      "beat": "",
+      "bgm_cue": null,
+      "camera_angle": "eye_level",
+      "camera_id": null,
+      "camera_move": "static",
+      "lens": "auto",
+      "lighting": "",
+      "continuous_with_prev": false,
+      "characters": [
+        {
+          "action": "",
+          "char_id": "a",
+          "expression": "",
+          "face_pose": "off_screen",
+          "screen_pos": "center",
+          "wardrobe_state": "default"
+        }
+      ],
+      "continuity_notes": "",
+      "dialogue": [
+        {
+          "actual_duration_s": null,
+          "audio_path": null,
+          "char_id": "a",
+          "emotion": "neutral",
+          "emotion_intensity": 0.5,
+          "text": "一句话",
+          "voice_id": null
+        }
+      ],
+      "duration_locked": false,
+      "duration_s": 5.0,
+      "first_frame_prompt": "",
+      "frame_path": null,
+      "end_frame_path": null,
+      "gate_notes": [],
+      "last_frame_prompt": null,
+      "location_id": null,
+      "missing_info": [],
+      "motion_prompt": "",
+      "needs_lipsync": false,
+      "negative_prompt": "",
+      "order": 0,
+      "prop_ids": [],
+      "scene_id": "t",
+      "sfx": [],
+      "shot_id": "t",
+      "shot_size": "CU",
+      "status": "planned",
+      "subtitle_text": "",
+      "transition_dur_s": 0.0,
+      "transition_in": "cut",
+      "video_path": null,
+      "visual_desc": ""
+    }
+  }
+]

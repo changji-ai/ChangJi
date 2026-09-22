@@ -1,0 +1,340 @@
+{
+  "cases": [
+    {
+      "body": {
+        "detected": false,
+        "gpu": "NVIDIA GeForce RTX 2060",
+        "shot": {
+          "duration_slots": [
+            2.0,
+            3.0,
+            4.0,
+            5.0
+          ],
+          "fps": 24,
+          "frame_grid": "4k+1",
+          "max_frames": 121,
+          "max_frames_on_grid": 121,
+          "max_shot_s": 5.0
+        },
+        "tiers": {
+          "draft": {
+            "height": 352,
+            "seconds": 27.0,
+            "steps": 10,
+            "width": 640
+          },
+          "final": {
+            "height": 704,
+            "seconds": 392.0,
+            "steps": 20,
+            "width": 1280
+          }
+        },
+        "vram_gb": 15.9
+      },
+      "name": "hardware",
+      "params": {},
+      "status": 200,
+      "url": "/api/hardware"
+    },
+    {
+      "body": {
+        "assembly": {
+          "crf": 18,
+          "fps": 24,
+          "scene_transition_s": 0.4,
+          "subtitle_font": "Source Han Sans SC",
+          "subtitle_max_chars_per_line": 15,
+          "subtitle_max_lines": 2
+        },
+        "gates": {
+          "enabled": true,
+          "fallback_on_exhausted": true,
+          "max_attempts_per_shot": 3,
+          "max_audio_drift_s": 0.15,
+          "min_frame_similarity": 0.55,
+          "min_pixel_std": 12.0,
+          "target_lufs": -16.0
+        },
+        "tiers": {
+          "draft": {
+            "height": 352,
+            "steps": 10,
+            "width": 640
+          },
+          "final": {
+            "height": 704,
+            "steps": 20,
+            "width": 1280
+          }
+        }
+      },
+      "name": "settings",
+      "params": {},
+      "status": 200,
+      "url": "/api/settings"
+    },
+    {
+      "body": {
+        "characters": [
+          {
+            "char_id": "c_lin_yuan",
+            "name": "林渊"
+          }
+        ],
+        "episodes": [
+          {
+            "duration_s": 10.1,
+            "episode_id": "ep01",
+            "shots": 2,
+            "status": {
+              "audio_done": 1,
+              "planned": 1
+            },
+            "synopsis": "林渊在天台等一个不会来的人。",
+            "title": "第一章 · 雨",
+            "chapter_refs": [],
+            "script_chars": 19
+          },
+          {
+            "duration_s": 0,
+            "episode_id": "ep02",
+            "shots": 0,
+            "status": {},
+            "synopsis": "三年后，同一个天台。",
+            "title": "第二章 · 晴",
+            "chapter_refs": [],
+            "script_chars": 0
+          }
+        ],
+        "locations": [
+          {
+            "location_id": "loc_rooftop",
+            "name": "天台"
+          },
+          {
+            "location_id": "loc_alley",
+            "name": "小巷"
+          }
+        ],
+        "premise": "一个关于错过与和解的都市电影。全片九十分钟，横屏。",
+        "project_id": "yuye-tiantai",
+        "root": "C:\\Users\\ultra\\Desktop\\changji\\changji\\cpp\\tests\\golden\\项目_雨夜天台",
+        "style_line": "realistic",
+        "title": "雨夜天台"
+      },
+      "name": "project",
+      "params": {
+        "path": "C:\\Users\\ultra\\Desktop\\changji\\changji\\cpp\\tests\\golden\\项目_雨夜天台"
+      },
+      "status": 200,
+      "url": "/api/project"
+    },
+    {
+      "body": {
+        "duration_s": 10.1,
+        "shots": [
+          {
+            "attempts": 0,
+            "audio_paths": [],
+            "beat": "",
+            "camera_angle": "eye_level",
+            "camera_move": "static",
+            "char_ids": [],
+            "continuity_notes": "",
+            "dialogue": [],
+            "duration_locked": false,
+            "duration_s": 5.0,
+            "first_frame_prompt": "",
+            "frame_path": null,
+            "gate_notes": [],
+            "has_video": false,
+            "location_id": null,
+            "motion_prompt": "",
+            "needs_lipsync": false,
+            "negative_prompt": "",
+            "order": 0,
+            "real_duration_s": 5.0,
+            "scene_id": "ep01_s01",
+            "shot_id": "ep01_s01_sh001",
+            "shot_size": "MS",
+            "status": "planned",
+            "subtitle_text": "",
+            "transition_dur_s": 0.0,
+            "transition_in": "cut",
+            "video_path": null,
+            "visual_desc": ""
+          },
+          {
+            "attempts": 2,
+            "audio_paths": [
+              "audio/ep01_s03_sh007_01.wav"
+            ],
+            "beat": "反转",
+            "camera_angle": "low",
+            "camera_move": "push_in",
+            "char_ids": [
+              "lin_yuan",
+              "chen_mo"
+            ],
+            "continuity_notes": "上一镜他还没湿透，这里服装状态要接上 suit_soaked",
+            "dialogue": [
+              {
+                "char_id": "lin_yuan",
+                "duration_s": 3.2,
+                "text": "你要是早半个小时来，什么都还来得及。"
+              },
+              {
+                "char_id": null,
+                "duration_s": null,
+                "text": "雨声盖过了他后半句。"
+              }
+            ],
+            "duration_locked": true,
+            "duration_s": 6.5,
+            "first_frame_prompt": "cinematic, rooftop at night, heavy rain, neon bokeh, back view",
+            "frame_path": "frames/ep01_s03_sh007.png",
+            "gate_notes": [
+              "草稿档画面偏暗，已调高曝光重跑"
+            ],
+            "has_video": false,
+            "location_id": "loc_rooftop",
+            "motion_prompt": "缓慢推进，雨丝斜掠，人物微微转头",
+            "needs_lipsync": false,
+            "negative_prompt": "模糊, 低质量, 多余的手指",
+            "order": 6,
+            "real_duration_s": 5.0,
+            "scene_id": "ep01_s03",
+            "shot_id": "ep01_s03_sh007",
+            "shot_size": "MCU",
+            "status": "audio_done",
+            "subtitle_text": "你要是早半个小时来，什么都还来得及。",
+            "transition_dur_s": 0.8,
+            "transition_in": "dissolve",
+            "video_path": null,
+            "visual_desc": "雨夜天台，男主背对镜头站在栏杆前，远处霓虹在雨幕里散成一片光晕"
+          }
+        ],
+        "shots_stale": false
+      },
+      "name": "shots_ep01",
+      "params": {
+        "episode_id": "ep01",
+        "path": "C:\\Users\\ultra\\Desktop\\changji\\changji\\cpp\\tests\\golden\\项目_雨夜天台"
+      },
+      "status": 200,
+      "url": "/api/shots"
+    },
+    {
+      "body": {
+        "duration_s": 0,
+        "shots": [],
+        "shots_stale": false
+      },
+      "name": "shots_ep02_empty",
+      "params": {
+        "episode_id": "ep02",
+        "path": "C:\\Users\\ultra\\Desktop\\changji\\changji\\cpp\\tests\\golden\\项目_雨夜天台"
+      },
+      "status": 200,
+      "url": "/api/shots"
+    },
+    {
+      "body": {
+        "characters": [
+          {
+            "attire": "深灰西装，衬衫领口松着",
+            "body": "偏瘦，肩背挺直",
+            "char_id": "c_lin_yuan",
+            "face": "单眼皮，短碎发，眼下有一道旧疤",
+            "identity": "三十岁上下的男性，沉默寡言。",
+            "lora_strength": 0.85,
+            "lora_trigger": "linyuan_v3",
+            "name": "林渊",
+            "ref_back": null,
+            "ref_front": "refs/c_lin_yuan_front.png",
+            "ref_three_quarter": "refs/c_lin_yuan_tq.png",
+            "rendered": "linyuan_v3，三十岁上下的男性，沉默寡言，偏瘦，肩背挺直，单眼皮，短碎发，眼下有一道旧疤，深灰西装，衬衫领口松着，低饱和，胶片颗粒",
+            "style": "低饱和，胶片颗粒",
+            "voice_gender": "male",
+            "voice_id": null,
+            "has_ref": false
+          }
+        ],
+        "locations": [
+          {
+            "lighting": "冷调顶光，远处霓虹反光",
+            "location_id": "loc_rooftop",
+            "name": "天台",
+            "palette": "青灰为主，点缀品红",
+            "ref_empty": "refs/loc_rooftop_empty.png",
+            "rendered": "老式写字楼顶层，水泥地面，一圈锈蚀铁栏杆，冷调顶光，远处霓虹反光，青灰为主，点缀品红",
+            "space": "老式写字楼顶层，水泥地面，一圈锈蚀铁栏杆",
+            "has_ref": false
+          },
+          {
+            "lighting": "暖调侧逆光",
+            "location_id": "loc_alley",
+            "name": "小巷",
+            "palette": "",
+            "ref_empty": null,
+            "rendered": "两侧是斑驳砖墙的窄巷，暖调侧逆光",
+            "space": "两侧是斑驳砖墙的窄巷",
+            "has_ref": false
+          }
+        ],
+        "reference_hint": "参考图会传给出图模型，但当前这个是纯文生图的，它不会照着画——画面靠的是下面那段拼出来的提示词。要让参考图真生效，去项目页「模型」那一行点开首帧那一个，挑一档 Qwen-Image-Edit 2509 下下来（视觉塔会跟着一起下）。⚠️ 引擎是按**文件名**认的，名字里带 edit 才算——官方那几份自带，改过名就认不出来。",
+        "reference_images_used": false,
+        "style": {
+          "aspect_ratio": "9:16",
+          "global_style": "写实电影感，浅景深",
+          "negative_prompt": "模糊，低质量",
+          "style_line": "realistic"
+        }
+      },
+      "name": "assets",
+      "params": {
+        "path": "C:\\Users\\ultra\\Desktop\\changji\\changji\\cpp\\tests\\golden\\项目_雨夜天台"
+      },
+      "status": 200,
+      "url": "/api/assets"
+    },
+    {
+      "body": {
+        "detail": "没有章节 ep99"
+      },
+      "name": "shots_missing_episode",
+      "params": {
+        "episode_id": "ep99",
+        "path": "C:\\Users\\ultra\\Desktop\\changji\\changji\\cpp\\tests\\golden\\项目_雨夜天台"
+      },
+      "status": 404,
+      "url": "/api/shots"
+    },
+    {
+      "body": {
+        "detail": "没有指定项目目录"
+      },
+      "name": "project_no_path",
+      "params": {
+        "path": ""
+      },
+      "status": 400,
+      "url": "/api/project"
+    },
+    {
+      "body": {
+        "detail": "这里不是一个项目目录：C:\\Users\\ultra\\Desktop\\changji\\changji\\cpp\\tests\\golden\n先建一部，或者换一个目录"
+      },
+      "name": "project_not_a_project",
+      "params": {
+        "path": "C:\\Users\\ultra\\Desktop\\changji\\changji\\cpp\\tests\\golden"
+      },
+      "status": 400,
+      "url": "/api/project"
+    }
+  ],
+  "pinned_vram_gb": 15.9,
+  "project_path": "C:\\Users\\ultra\\Desktop\\changji\\changji\\cpp\\tests\\golden\\项目_雨夜天台"
+}

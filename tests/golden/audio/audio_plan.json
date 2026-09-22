@@ -1,0 +1,655 @@
+{
+  "constants": {
+    "chars_per_second": 4.6,
+    "lead_in_s": 0.15,
+    "tail_s": 0.25,
+    "max_line_seconds_24fps": 4.791666666666667,
+    "max_line_seconds_30fps": 3.783333333333333
+  },
+  "duration": [
+    {
+      "text": "",
+      "expected": 0.0
+    },
+    {
+      "text": "   ",
+      "expected": 0.0
+    },
+    {
+      "text": "你好",
+      "expected": 0.8347826086956522
+    },
+    {
+      "text": "我等了你三年。",
+      "expected": 2.0243478260869567
+    },
+    {
+      "text": "什么？！你说什么？！",
+      "expected": 3.1043478260869564
+    },
+    {
+      "text": "一，二，三，四，五。",
+      "expected": 2.5269565217391308
+    },
+    {
+      "text": "他张了张嘴……终究什么也没说——",
+      "expected": 4.308695652173913
+    },
+    {
+      "text": "他说 OK 然后转身走了。",
+      "expected": 2.893913043478261
+    },
+    {
+      "text": "  我 等 了 你 三 年 。  ",
+      "expected": 2.0243478260869567
+    },
+    {
+      "text": "那一夜的雨下得特别大，她站在天台边上，看着楼下川流不息的车灯，忽然觉得这座城市里没有一个人在等她回家。",
+      "expected": 11.477391304347826
+    },
+    {
+      "text": "。。。",
+      "expected": 1.3599999999999999
+    },
+    {
+      "text": "第一句。\n第二句。",
+      "expected": 2.3443478260869566
+    }
+  ],
+  "split": [
+    {
+      "text": "我等了你三年。",
+      "max_seconds": 5.0,
+      "expected": [
+        "我等了你三年。"
+      ]
+    },
+    {
+      "text": "我等了你三年。你却什么都没说。那一夜之后我再没见过你。",
+      "max_seconds": 3.0,
+      "expected": [
+        "我等了你三年。",
+        "你却什么都没说。",
+        "那一夜之后我再没见过你。"
+      ]
+    },
+    {
+      "text": "那一夜的雨下得特别大，她站在天台边上，看着楼下川流不息的车灯，忽然觉得这座城市里没有一个人在等她回家",
+      "max_seconds": 3.0,
+      "expected": [
+        "那一夜的雨下得特别大，",
+        "她站在天台边上，",
+        "看着楼下川流不息的车灯，",
+        "忽然觉得这座城市里没有",
+        "一个人在等她回家"
+      ]
+    },
+    {
+      "text": "这是一句完全没有任何标点符号的很长很长很长的台词需要按照字数硬切开来才行",
+      "max_seconds": 3.0,
+      "expected": [
+        "这是一句完全没有任何标",
+        "点符号的很长很长很长的",
+        "台词需要按照字数硬切开",
+        "来才行"
+      ]
+    },
+    {
+      "text": "这是一句完全没有任何标点符号的很长很长很长的台词",
+      "max_seconds": 1.0,
+      "expected": [
+        "这是",
+        "一句",
+        "完全",
+        "没有",
+        "任何",
+        "标点",
+        "符号",
+        "的很",
+        "长很",
+        "长很",
+        "长的",
+        "台词"
+      ]
+    },
+    {
+      "text": "一二三四五六七八九十",
+      "max_seconds": 0.3,
+      "expected": [
+        "一二",
+        "三四",
+        "五六",
+        "七八",
+        "九十"
+      ]
+    },
+    {
+      "text": "",
+      "max_seconds": 5.0,
+      "expected": [
+        ""
+      ]
+    },
+    {
+      "text": "十个字的一句话啊",
+      "max_seconds": 2.5,
+      "expected": [
+        "十个字的一句话啊"
+      ]
+    }
+  ],
+  "free_id": [
+    {
+      "base": "ep01_sh001",
+      "used": [],
+      "expected": "ep01_sh001_b"
+    },
+    {
+      "base": "ep01_sh001",
+      "used": [
+        "ep01_sh001"
+      ],
+      "expected": "ep01_sh001_b"
+    },
+    {
+      "base": "ep01_sh001",
+      "used": [
+        "ep01_sh001",
+        "ep01_sh001_b"
+      ],
+      "expected": "ep01_sh001_c"
+    },
+    {
+      "base": "ep01_sh001",
+      "used": [
+        "ep01_sh001",
+        "ep01_sh001_b",
+        "ep01_sh001_c"
+      ],
+      "expected": "ep01_sh001_d"
+    },
+    {
+      "base": "x",
+      "used": [
+        "x_b",
+        "x_c",
+        "x_d",
+        "x_e",
+        "x_f",
+        "x_g",
+        "x_h",
+        "x_i",
+        "x_j",
+        "x_k",
+        "x_l",
+        "x_m",
+        "x_n",
+        "x_o",
+        "x_p",
+        "x_q",
+        "x_r",
+        "x_s",
+        "x_t",
+        "x_u",
+        "x_v",
+        "x_w",
+        "x_x",
+        "x_y",
+        "x_z"
+      ],
+      "expected": "x_2"
+    }
+  ],
+  "group": [
+    {
+      "name": "single_line",
+      "shot": {
+        "shot_id": "sh001",
+        "order": 0,
+        "status": "planned",
+        "attempts": 0,
+        "duration_locked": false,
+        "frame_path": null,
+        "video_path": null,
+        "dialogue": [
+          {
+            "text": "就一句话。",
+            "actual_duration_s": null
+          }
+        ]
+      },
+      "expected": [
+        [
+          "就一句话。"
+        ]
+      ]
+    },
+    {
+      "name": "two_short",
+      "shot": {
+        "shot_id": "sh002",
+        "order": 1,
+        "status": "planned",
+        "attempts": 0,
+        "duration_locked": false,
+        "frame_path": null,
+        "video_path": null,
+        "dialogue": [
+          {
+            "text": "第一句。",
+            "actual_duration_s": null
+          },
+          {
+            "text": "第二句。",
+            "actual_duration_s": null
+          }
+        ]
+      },
+      "expected": [
+        [
+          "第一句。",
+          "第二句。"
+        ]
+      ]
+    },
+    {
+      "name": "three_long",
+      "shot": {
+        "shot_id": "sh003",
+        "order": 2,
+        "status": "planned",
+        "attempts": 0,
+        "duration_locked": false,
+        "frame_path": null,
+        "video_path": null,
+        "dialogue": [
+          {
+            "text": "那一夜的雨下得特别大，她站在天台边上。",
+            "actual_duration_s": null
+          },
+          {
+            "text": "看着楼下川流不息的车灯，忽然觉得这座城市里没有一个人在等她。",
+            "actual_duration_s": null
+          },
+          {
+            "text": "她转身走了。",
+            "actual_duration_s": null
+          }
+        ]
+      },
+      "expected": [
+        [
+          "那一夜的雨下得特别大，她站在天台边上。"
+        ],
+        [
+          "看着楼下川流不息的车灯，忽然觉得这座城市里没有一个人在等她。"
+        ],
+        [
+          "她转身走了。"
+        ]
+      ]
+    },
+    {
+      "name": "with_real_durations",
+      "shot": {
+        "shot_id": "sh004",
+        "order": 3,
+        "status": "planned",
+        "attempts": 0,
+        "duration_locked": false,
+        "frame_path": null,
+        "video_path": null,
+        "dialogue": [
+          {
+            "text": "第一句。",
+            "actual_duration_s": 3.0
+          },
+          {
+            "text": "第二句。",
+            "actual_duration_s": 3.0
+          },
+          {
+            "text": "第三句。",
+            "actual_duration_s": 3.0
+          }
+        ]
+      },
+      "expected": [
+        [
+          "第一句。"
+        ],
+        [
+          "第二句。"
+        ],
+        [
+          "第三句。"
+        ]
+      ]
+    },
+    {
+      "name": "one_line_over_budget",
+      "shot": {
+        "shot_id": "sh005",
+        "order": 4,
+        "status": "planned",
+        "attempts": 0,
+        "duration_locked": false,
+        "frame_path": null,
+        "video_path": null,
+        "dialogue": [
+          {
+            "text": "这一句非常非常长长到一个镜头根本装不下它需要单独占一个镜头才行呢",
+            "actual_duration_s": 9.0
+          },
+          {
+            "text": "短的。",
+            "actual_duration_s": 1.0
+          }
+        ]
+      },
+      "expected": [
+        [
+          "这一句非常非常长长到一个镜头根本装不下它需要单独占一个镜头才行呢"
+        ],
+        [
+          "短的。"
+        ]
+      ]
+    },
+    {
+      "name": "no_dialogue",
+      "shot": {
+        "shot_id": "sh006",
+        "order": 5,
+        "status": "planned",
+        "attempts": 0,
+        "duration_locked": false,
+        "frame_path": null,
+        "video_path": null,
+        "dialogue": []
+      },
+      "expected": [
+        []
+      ]
+    }
+  ],
+  "split_shots": [
+    {
+      "name": "nothing_to_split",
+      "shots": [
+        {
+          "shot_id": "sh001",
+          "order": 0,
+          "status": "planned",
+          "attempts": 0,
+          "duration_locked": false,
+          "frame_path": null,
+          "video_path": null,
+          "dialogue": [
+            {
+              "text": "短的一句。",
+              "actual_duration_s": 2.0
+            }
+          ]
+        },
+        {
+          "shot_id": "sh002",
+          "order": 1,
+          "status": "planned",
+          "attempts": 0,
+          "duration_locked": false,
+          "frame_path": null,
+          "video_path": null,
+          "dialogue": [
+            {
+              "text": "也很短。",
+              "actual_duration_s": 1.5
+            }
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "shot_id": "sh001",
+          "order": 0,
+          "status": "planned",
+          "attempts": 0,
+          "duration_locked": false,
+          "frame_path": null,
+          "video_path": null,
+          "dialogue": [
+            {
+              "text": "短的一句。",
+              "actual_duration_s": 2.0
+            }
+          ]
+        },
+        {
+          "shot_id": "sh002",
+          "order": 1,
+          "status": "planned",
+          "attempts": 0,
+          "duration_locked": false,
+          "frame_path": null,
+          "video_path": null,
+          "dialogue": [
+            {
+              "text": "也很短。",
+              "actual_duration_s": 1.5
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "one_splits",
+      "shots": [
+        {
+          "shot_id": "sh001",
+          "order": 0,
+          "status": "planned",
+          "attempts": 0,
+          "duration_locked": false,
+          "frame_path": null,
+          "video_path": null,
+          "dialogue": [
+            {
+              "text": "A。",
+              "actual_duration_s": 3.0
+            },
+            {
+              "text": "B。",
+              "actual_duration_s": 3.0
+            },
+            {
+              "text": "C。",
+              "actual_duration_s": 3.0
+            }
+          ]
+        },
+        {
+          "shot_id": "sh002",
+          "order": 1,
+          "status": "planned",
+          "attempts": 0,
+          "duration_locked": false,
+          "frame_path": null,
+          "video_path": null,
+          "dialogue": [
+            {
+              "text": "短的。",
+              "actual_duration_s": 1.0
+            }
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "shot_id": "sh001",
+          "order": 0,
+          "status": "planned",
+          "attempts": 0,
+          "duration_locked": false,
+          "frame_path": null,
+          "video_path": null,
+          "dialogue": [
+            {
+              "text": "A。",
+              "actual_duration_s": 3.0
+            }
+          ]
+        },
+        {
+          "shot_id": "sh001_b",
+          "order": 1,
+          "status": "planned",
+          "attempts": 0,
+          "duration_locked": false,
+          "frame_path": null,
+          "video_path": null,
+          "dialogue": [
+            {
+              "text": "B。",
+              "actual_duration_s": 3.0
+            }
+          ]
+        },
+        {
+          "shot_id": "sh001_c",
+          "order": 2,
+          "status": "planned",
+          "attempts": 0,
+          "duration_locked": false,
+          "frame_path": null,
+          "video_path": null,
+          "dialogue": [
+            {
+              "text": "C。",
+              "actual_duration_s": 3.0
+            }
+          ]
+        },
+        {
+          "shot_id": "sh002",
+          "order": 3,
+          "status": "planned",
+          "attempts": 0,
+          "duration_locked": false,
+          "frame_path": null,
+          "video_path": null,
+          "dialogue": [
+            {
+              "text": "短的。",
+              "actual_duration_s": 1.0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "already_split_once",
+      "shots": [
+        {
+          "shot_id": "sh001",
+          "order": 0,
+          "status": "planned",
+          "attempts": 0,
+          "duration_locked": false,
+          "frame_path": null,
+          "video_path": null,
+          "dialogue": [
+            {
+              "text": "A。",
+              "actual_duration_s": 3.0
+            },
+            {
+              "text": "B。",
+              "actual_duration_s": 3.0
+            },
+            {
+              "text": "C。",
+              "actual_duration_s": 3.0
+            }
+          ]
+        },
+        {
+          "shot_id": "sh001_b",
+          "order": 1,
+          "status": "planned",
+          "attempts": 0,
+          "duration_locked": false,
+          "frame_path": null,
+          "video_path": null,
+          "dialogue": [
+            {
+              "text": "旧的拆分。",
+              "actual_duration_s": 1.0
+            }
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "shot_id": "sh001",
+          "order": 0,
+          "status": "planned",
+          "attempts": 0,
+          "duration_locked": false,
+          "frame_path": null,
+          "video_path": null,
+          "dialogue": [
+            {
+              "text": "A。",
+              "actual_duration_s": 3.0
+            }
+          ]
+        },
+        {
+          "shot_id": "sh001_c",
+          "order": 1,
+          "status": "planned",
+          "attempts": 0,
+          "duration_locked": false,
+          "frame_path": null,
+          "video_path": null,
+          "dialogue": [
+            {
+              "text": "B。",
+              "actual_duration_s": 3.0
+            }
+          ]
+        },
+        {
+          "shot_id": "sh001_d",
+          "order": 2,
+          "status": "planned",
+          "attempts": 0,
+          "duration_locked": false,
+          "frame_path": null,
+          "video_path": null,
+          "dialogue": [
+            {
+              "text": "C。",
+              "actual_duration_s": 3.0
+            }
+          ]
+        },
+        {
+          "shot_id": "sh001_b",
+          "order": 3,
+          "status": "planned",
+          "attempts": 0,
+          "duration_locked": false,
+          "frame_path": null,
+          "video_path": null,
+          "dialogue": [
+            {
+              "text": "旧的拆分。",
+              "actual_duration_s": 1.0
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

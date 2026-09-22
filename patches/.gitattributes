@@ -1,0 +1,4 @@
+# 补丁文件必须保持 LF。转成 CRLF 之后 git apply 会因为上下文行不匹配而失败，
+# 而且报错信息指向"上游改了代码"这个错误方向。
+*.patch -text
+*.py    text eol=lf

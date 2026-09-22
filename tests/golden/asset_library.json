@@ -1,0 +1,80 @@
+{
+  "character_ids": [
+    "c_lin_yuan"
+  ],
+  "library": {
+    "characters": {
+      "c_lin_yuan": {
+        "appearance": {
+          "attire": "深灰西装，衬衫领口松着",
+          "body": "偏瘦，肩背挺直",
+          "face": "单眼皮，短碎发，眼下有一道旧疤",
+          "identity": "三十岁上下的男性，沉默寡言。",
+          "style": "低饱和，胶片颗粒"
+        },
+        "char_id": "c_lin_yuan",
+        "lora_path": null,
+        "lora_strength": 0.85,
+        "lora_trigger": "linyuan_v3",
+        "name": "林渊",
+        "ref_back": null,
+        "ref_front": "refs/c_lin_yuan_front.png",
+        "ref_three_quarter": "refs/c_lin_yuan_tq.png",
+        "voice_gender": "male",
+        "voice_id": null,
+        "voice_order": 1,
+        "voice_ref_audio": null,
+        "wardrobe": [
+          {
+            "description": "西装被雨淋透，紧贴身体",
+            "wardrobe_id": "suit_soaked"
+          },
+          {
+            "description": "灰色卫衣，牛仔裤",
+            "wardrobe_id": "casual"
+          }
+        ]
+      }
+    },
+    "locations": {
+      "loc_alley": {
+        "lighting": "暖调侧逆光",
+        "location_id": "loc_alley",
+        "name": "小巷",
+        "palette": "",
+        "ref_empty": null,
+        "space": "两侧是斑驳砖墙的窄巷"
+      },
+      "loc_rooftop": {
+        "lighting": "冷调顶光，远处霓虹反光",
+        "location_id": "loc_rooftop",
+        "name": "天台",
+        "palette": "青灰为主，点缀品红",
+        "ref_empty": "refs/loc_rooftop_empty.png",
+        "space": "老式写字楼顶层，水泥地面，一圈锈蚀铁栏杆"
+      }
+    },
+    "style": {
+      "aspect_ratio": "9:16",
+      "global_style": "写实电影感，浅景深",
+      "negative_prompt": "模糊，低质量",
+      "style_line": "realistic"
+    }
+  },
+  "location_ids": [
+    "loc_alley",
+    "loc_rooftop"
+  ],
+  "location_render": {
+    "alley_realistic": "两侧是斑驳砖墙的窄巷，暖调侧逆光",
+    "rooftop_anime": "老式写字楼顶层，水泥地面，一圈锈蚀铁栏杆, 冷调顶光，远处霓虹反光, 青灰为主，点缀品红",
+    "rooftop_realistic": "老式写字楼顶层，水泥地面，一圈锈蚀铁栏杆，冷调顶光，远处霓虹反光，青灰为主，点缀品红"
+  },
+  "validate_references": {
+    "all_known": [],
+    "missing_both": [
+      "角色 c_chen_mo 未在资产库注册",
+      "场景 loc_office 未在资产库注册"
+    ]
+  }
+}

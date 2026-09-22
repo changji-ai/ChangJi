@@ -1,0 +1,267 @@
+{
+  "normalize": {
+    "target_w": 1080,
+    "target_h": 1920,
+    "srcs": [
+      "<ROOT>/shots/draft/a.mp4",
+      "<ROOT>/shots/draft/b.mp4"
+    ],
+    "dests": [
+      "<ROOT>/output/.work/norm_0000.mp4",
+      "<ROOT>/output/.work/norm_0001.mp4"
+    ],
+    "calls": [
+      [
+        "-i",
+        "<ROOT>/shots/draft/a.mp4",
+        "-vf",
+        "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=24",
+        "-an",
+        "-c:v",
+        "libx264",
+        "-crf",
+        "18",
+        "-pix_fmt",
+        "yuv420p",
+        "-preset",
+        "medium",
+        "-video_track_timescale",
+        "90000",
+        "<ROOT>/output/.work/norm_0000.mp4"
+      ],
+      [
+        "-i",
+        "<ROOT>/shots/draft/b.mp4",
+        "-vf",
+        "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=24",
+        "-an",
+        "-c:v",
+        "libx264",
+        "-crf",
+        "18",
+        "-pix_fmt",
+        "yuv420p",
+        "-preset",
+        "medium",
+        "-video_track_timescale",
+        "90000",
+        "<ROOT>/output/.work/norm_0001.mp4"
+      ]
+    ]
+  },
+  "concat": {
+    "clips": [
+      "<ROOT>/output/.work/norm_0000.mp4",
+      "<ROOT>/output/.work/norm_0001.mp4"
+    ],
+    "listing_path": "<ROOT>/output/.work/concat.txt",
+    "listing": "file '<ROOT>/output/.work/norm_0000.mp4'\nfile '<ROOT>/output/.work/norm_0001.mp4'\n",
+    "dest": "<ROOT>/output/.work/joined.mp4",
+    "calls": [
+      [
+        "-f",
+        "concat",
+        "-safe",
+        "0",
+        "-i",
+        "<ROOT>/output/.work/concat.txt",
+        "-c",
+        "copy",
+        "<ROOT>/output/.work/joined.mp4"
+      ]
+    ]
+  },
+  "mix": {
+    "video": "<ROOT>/output/.work/joined.mp4",
+    "segments": [
+      {
+        "path": "<ROOT>/audio/a_1.wav",
+        "at_s": 0.0
+      },
+      {
+        "path": "<ROOT>/audio/a_2.wav",
+        "at_s": 2.5
+      }
+    ],
+    "target_lufs": -16.0,
+    "max_true_peak_db": -1.5,
+    "video_duration_s": 12.5,
+    "dest": "<ROOT>/output/.work/with_audio.mp4",
+    "calls": [
+      [
+        "-i",
+        "<ROOT>/output/.work/joined.mp4",
+        "-i",
+        "<ROOT>/audio/a_1.wav",
+        "-i",
+        "<ROOT>/audio/a_2.wav",
+        "-filter_complex",
+        "[1:a]aresample=48000,adelay=0|0[a1];[2:a]aresample=48000,adelay=2500|2500[a2];[a1][a2]amix=inputs=2:dropout_transition=0:normalize=0,loudnorm=I=-16.0:TP=-1.5:LRA=11,aresample=48000[amixed];[amixed]apad[aout]",
+        "-map",
+        "0:v",
+        "-map",
+        "[aout]",
+        "-c:v",
+        "copy",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "192k",
+        "-ar",
+        "48000",
+        "-ac",
+        "2",
+        "-t",
+        "12.500",
+        "<ROOT>/output/.work/with_audio.mp4"
+      ]
+    ]
+  },
+  "mix_precise": {
+    "video": "<ROOT>/output/.work/joined.mp4",
+    "segments": [
+      {
+        "path": "<ROOT>/audio/a_1.wav",
+        "at_s": 0.0
+      },
+      {
+        "path": "<ROOT>/audio/a_2.wav",
+        "at_s": 2.5
+      }
+    ],
+    "target_lufs": -16.123456,
+    "max_true_peak_db": -1.234567,
+    "video_duration_s": 12.5,
+    "dest": "<ROOT>/output/.work/with_audio.mp4",
+    "calls": [
+      [
+        "-i",
+        "<ROOT>/output/.work/joined.mp4",
+        "-i",
+        "<ROOT>/audio/a_1.wav",
+        "-i",
+        "<ROOT>/audio/a_2.wav",
+        "-filter_complex",
+        "[1:a]aresample=48000,adelay=0|0[a1];[2:a]aresample=48000,adelay=2500|2500[a2];[a1][a2]amix=inputs=2:dropout_transition=0:normalize=0,loudnorm=I=-16.123456:TP=-1.234567:LRA=11,aresample=48000[amixed];[amixed]apad[aout]",
+        "-map",
+        "0:v",
+        "-map",
+        "[aout]",
+        "-c:v",
+        "copy",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "192k",
+        "-ar",
+        "48000",
+        "-ac",
+        "2",
+        "-t",
+        "12.500",
+        "<ROOT>/output/.work/with_audio.mp4"
+      ]
+    ]
+  },
+  "silent_audio": {
+    "video": "<ROOT>/output/.work/joined.mp4",
+    "dest": "<ROOT>/output/.work/with_audio.mp4",
+    "calls": [
+      [
+        "-i",
+        "<ROOT>/output/.work/joined.mp4",
+        "-f",
+        "lavfi",
+        "-i",
+        "anullsrc=r=48000:cl=stereo",
+        "-c:v",
+        "copy",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "192k",
+        "-ar",
+        "48000",
+        "-ac",
+        "2",
+        "-shortest",
+        "<ROOT>/output/.work/with_audio.mp4"
+      ]
+    ]
+  },
+  "burn": {
+    "video": "<ROOT>/output/.work/with_audio.mp4",
+    "ass_path": "<ROOT>/subtitles/episode.ass",
+    "dest": "<ROOT>/output/episode.mp4",
+    "calls": [
+      [
+        "-i",
+        "<ROOT>/output/.work/with_audio.mp4",
+        "-vf",
+        "subtitles='<ROOT>/subtitles/episode.ass'",
+        "-c:v",
+        "libx264",
+        "-crf",
+        "18",
+        "-pix_fmt",
+        "yuv420p",
+        "-preset",
+        "medium",
+        "-c:a",
+        "copy",
+        "<ROOT>/output/episode.mp4"
+      ]
+    ]
+  },
+  "escape_filter_path": [
+    {
+      "input": "C:\\项目 库\\雨夜天台\\subtitles\\ep01.ass",
+      "expected": "C\\:/项目 库/雨夜天台/subtitles/ep01.ass"
+    },
+    {
+      "input": "/home/u/项目/subtitles/ep01.ass",
+      "expected": "/home/u/项目/subtitles/ep01.ass"
+    },
+    {
+      "input": "D:\\a\\b.ass",
+      "expected": "D\\:/a/b.ass"
+    },
+    {
+      "input": "relative/x.ass",
+      "expected": "relative/x.ass"
+    }
+  ],
+  "timeline": [
+    {
+      "shot_id": "ep01_sh001",
+      "start_s": 0.0,
+      "duration_s": 6.0,
+      "audio_paths": [
+        "<ROOT>/audio/a_1.wav",
+        "<ROOT>/audio/a_2.wav"
+      ],
+      "cues": [
+        {
+          "start_s": 0.0,
+          "end_s": 2.5,
+          "text": "你终于来了。",
+          "style": "dialogue"
+        },
+        {
+          "start_s": 2.5,
+          "end_s": 4.5,
+          "text": "雨下了一整夜。",
+          "style": "narration"
+        }
+      ]
+    },
+    {
+      "shot_id": "ep01_sh002",
+      "start_s": 6.0,
+      "duration_s": 5.0,
+      "audio_paths": [],
+      "cues": []
+    }
+  ],
+  "note": "由 cpp/tests/export_assemble_golden.py 生成，不要手改。argv 里项目根替换成 <ROOT>，反斜杠替换成正斜杠——C++ 那边做同样的替换。除此之外逐字节比。"
+}

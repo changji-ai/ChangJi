@@ -1,0 +1,41 @@
+[
+  {
+    "describe": "显存 15.9 GB\n  draft    640x352  10 步  单镜 约 27 秒\n  final    1280x704  20 步  单镜 约 392 秒",
+    "detected": true,
+    "estimate_episode_20_final": 7840.0,
+    "gpu": null,
+    "vram_gb": 15.9
+  },
+  {
+    "describe": "未探测到显卡，按 12.0 GB 估算\n  draft    512x288  8 步  单镜 约 19 秒\n  final    960x544  20 步  单镜 约 300 秒",
+    "detected": false,
+    "estimate_episode_20_final": 5998.0,
+    "gpu": null,
+    "vram_gb": 12.0
+  },
+  {
+    "describe": "显存 6.0 GB\n  draft    448x256  8 步  单镜 约 18 秒\n  final    768x448  20 步  单镜 约 246 秒",
+    "detected": true,
+    "estimate_episode_20_final": 4910.0,
+    "gpu": null,
+    "vram_gb": 6.0
+  },
+  {
+    "describe": "未探测到显卡，按 24.0 GB 估算\n  draft    768x448  10 步  单镜 约 41 秒\n  final    1920x1088  20 步  单镜 约 909 秒",
+    "detected": false,
+    "estimate_episode_20_final": 18174.0,
+    "gpu": null,
+    "vram_gb": 24.0
+  },
+  {
+    "describe": "NVIDIA GeForce RTX 2060，显存 6.0 GB\n  draft    448x256  8 步  单镜 约 18 秒\n  final    768x448  20 步  单镜 约 246 秒",
+    "detected": true,
+    "estimate_episode_20_final": 4910.0,
+    "gpu": {
+      "driver": "610.88",
+      "name": "NVIDIA GeForce RTX 2060",
+      "vram_mb": 6144
+    },
+    "vram_gb": 6.0
+  }
+]

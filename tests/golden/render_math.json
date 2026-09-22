@@ -1,0 +1,376 @@
+{
+  "max_frames": 121,
+  "cases": [
+    {
+      "duration_s": 0.5,
+      "fps": 24,
+      "frames": 13
+    },
+    {
+      "duration_s": 0.5,
+      "fps": 30,
+      "frames": 17
+    },
+    {
+      "duration_s": 1.0,
+      "fps": 24,
+      "frames": 25
+    },
+    {
+      "duration_s": 1.0,
+      "fps": 30,
+      "frames": 33
+    },
+    {
+      "duration_s": 1.5,
+      "fps": 24,
+      "frames": 37
+    },
+    {
+      "duration_s": 1.5,
+      "fps": 30,
+      "frames": 45
+    },
+    {
+      "duration_s": 2.0,
+      "fps": 24,
+      "frames": 49
+    },
+    {
+      "duration_s": 2.0,
+      "fps": 30,
+      "frames": 61
+    },
+    {
+      "duration_s": 2.5,
+      "fps": 24,
+      "frames": 61
+    },
+    {
+      "duration_s": 2.5,
+      "fps": 30,
+      "frames": 77
+    },
+    {
+      "duration_s": 3.0,
+      "fps": 24,
+      "frames": 73
+    },
+    {
+      "duration_s": 3.0,
+      "fps": 30,
+      "frames": 93
+    },
+    {
+      "duration_s": 4.0,
+      "fps": 24,
+      "frames": 97
+    },
+    {
+      "duration_s": 4.0,
+      "fps": 30,
+      "frames": 121
+    },
+    {
+      "duration_s": 5.0,
+      "fps": 24,
+      "frames": 121
+    },
+    {
+      "duration_s": 5.0,
+      "fps": 30,
+      "frames": 121
+    },
+    {
+      "duration_s": 6.0,
+      "fps": 24,
+      "frames": 121
+    },
+    {
+      "duration_s": 6.0,
+      "fps": 30,
+      "frames": 121
+    },
+    {
+      "duration_s": 8.0,
+      "fps": 24,
+      "frames": 121
+    },
+    {
+      "duration_s": 8.0,
+      "fps": 30,
+      "frames": 121
+    },
+    {
+      "duration_s": 10.0,
+      "fps": 24,
+      "frames": 121
+    },
+    {
+      "duration_s": 10.0,
+      "fps": 30,
+      "frames": 121
+    },
+    {
+      "duration_s": 0.125,
+      "fps": 24,
+      "frames": 5
+    },
+    {
+      "duration_s": 0.125,
+      "fps": 30,
+      "frames": 5
+    },
+    {
+      "duration_s": 0.291667,
+      "fps": 24,
+      "frames": 9
+    },
+    {
+      "duration_s": 0.291667,
+      "fps": 30,
+      "frames": 9
+    },
+    {
+      "duration_s": 0.458333,
+      "fps": 24,
+      "frames": 13
+    },
+    {
+      "duration_s": 0.458333,
+      "fps": 30,
+      "frames": 17
+    },
+    {
+      "duration_s": 0.625,
+      "fps": 24,
+      "frames": 17
+    },
+    {
+      "duration_s": 0.625,
+      "fps": 30,
+      "frames": 21
+    },
+    {
+      "duration_s": 0.791667,
+      "fps": 24,
+      "frames": 21
+    },
+    {
+      "duration_s": 0.791667,
+      "fps": 30,
+      "frames": 25
+    },
+    {
+      "duration_s": 0.958333,
+      "fps": 24,
+      "frames": 25
+    },
+    {
+      "duration_s": 0.958333,
+      "fps": 30,
+      "frames": 29
+    },
+    {
+      "duration_s": 1.125,
+      "fps": 24,
+      "frames": 29
+    },
+    {
+      "duration_s": 1.125,
+      "fps": 30,
+      "frames": 37
+    },
+    {
+      "duration_s": 1.291667,
+      "fps": 24,
+      "frames": 33
+    },
+    {
+      "duration_s": 1.291667,
+      "fps": 30,
+      "frames": 41
+    },
+    {
+      "duration_s": 1.458333,
+      "fps": 24,
+      "frames": 37
+    },
+    {
+      "duration_s": 1.458333,
+      "fps": 30,
+      "frames": 45
+    },
+    {
+      "duration_s": 1.625,
+      "fps": 24,
+      "frames": 41
+    },
+    {
+      "duration_s": 1.625,
+      "fps": 30,
+      "frames": 49
+    },
+    {
+      "duration_s": 1.791667,
+      "fps": 24,
+      "frames": 45
+    },
+    {
+      "duration_s": 1.791667,
+      "fps": 30,
+      "frames": 57
+    },
+    {
+      "duration_s": 0.041667,
+      "fps": 24,
+      "frames": 5
+    },
+    {
+      "duration_s": 0.041667,
+      "fps": 30,
+      "frames": 5
+    },
+    {
+      "duration_s": 0.083333,
+      "fps": 24,
+      "frames": 5
+    },
+    {
+      "duration_s": 0.083333,
+      "fps": 30,
+      "frames": 5
+    },
+    {
+      "duration_s": 0.166667,
+      "fps": 24,
+      "frames": 5
+    },
+    {
+      "duration_s": 0.166667,
+      "fps": 30,
+      "frames": 5
+    },
+    {
+      "duration_s": 0.020833333333333332,
+      "fps": 24,
+      "frames": 5
+    },
+    {
+      "duration_s": 0.020833333333333332,
+      "fps": 30,
+      "frames": 5
+    },
+    {
+      "duration_s": 0.0625,
+      "fps": 24,
+      "frames": 5
+    },
+    {
+      "duration_s": 0.0625,
+      "fps": 30,
+      "frames": 5
+    },
+    {
+      "duration_s": 0.10416666666666667,
+      "fps": 24,
+      "frames": 5
+    },
+    {
+      "duration_s": 0.10416666666666667,
+      "fps": 30,
+      "frames": 5
+    },
+    {
+      "duration_s": 0.14583333333333334,
+      "fps": 24,
+      "frames": 5
+    },
+    {
+      "duration_s": 0.14583333333333334,
+      "fps": 30,
+      "frames": 5
+    },
+    {
+      "duration_s": 0.1875,
+      "fps": 24,
+      "frames": 5
+    },
+    {
+      "duration_s": 0.1875,
+      "fps": 30,
+      "frames": 9
+    },
+    {
+      "duration_s": 0.22916666666666666,
+      "fps": 24,
+      "frames": 9
+    },
+    {
+      "duration_s": 0.22916666666666666,
+      "fps": 30,
+      "frames": 9
+    },
+    {
+      "duration_s": 5.2,
+      "fps": 24,
+      "frames": 121
+    },
+    {
+      "duration_s": 5.2,
+      "fps": 30,
+      "frames": 121
+    },
+    {
+      "duration_s": 20.0,
+      "fps": 24,
+      "frames": 121
+    },
+    {
+      "duration_s": 20.0,
+      "fps": 30,
+      "frames": 121
+    },
+    {
+      "duration_s": 100.0,
+      "fps": 24,
+      "frames": 121
+    },
+    {
+      "duration_s": 100.0,
+      "fps": 30,
+      "frames": 121
+    },
+    {
+      "duration_s": 0.0,
+      "fps": 24,
+      "frames": 5
+    },
+    {
+      "duration_s": 0.0,
+      "fps": 30,
+      "frames": 5
+    },
+    {
+      "duration_s": 0.01,
+      "fps": 24,
+      "frames": 5
+    },
+    {
+      "duration_s": 0.01,
+      "fps": 30,
+      "frames": 5
+    },
+    {
+      "duration_s": -1.0,
+      "fps": 24,
+      "frames": 5
+    },
+    {
+      "duration_s": -1.0,
+      "fps": 30,
+      "frames": 5
+    }
+  ],
+  "note": "由 cpp/tests/export_render_math_golden.py 生成，不要手改。专门覆盖 banker's rounding 的 .5 边界和上限截断。"
+}

@@ -1,0 +1,684 @@
+{
+ "note": "由 cpp/tests/export_scripting_golden.py 生成，不要手改 2026-09-11：Episode 加了 chapter_refs（这一章是从故事的哪几章切出来的），/api/script/write 的回包加了 source（照着故事写的还是照着一句梗概续的）。生成器随 Python 引擎一起删了，这份语料现在是回归夹具——接口有意改形状时照着改。",
+ "cases": [
+  {
+   "name": "选题：默认",
+   "url": "/api/script/premise",
+   "body": {
+    "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_scripting_hdqt6fmi\\case01"
+   },
+   "llm_reply": "{\"ideas\": [{\"title\": \"《雨夜天台》\", \"premise\": \"（林晚在天台等一个七年没出现的人。）\", \"hook\": \"“他会来吗？”\"}, {\"title\": \"旧照片\", \"premise\": \"一张照片牵出十年前的火灾真相。\", \"hook\": \"照片背面写着她的名字。\"}, {\"title\": \"错单\", \"premise\": \"外卖员送错一单，撞破一场骗局。\", \"hook\": \"那扇门后面不该有人。\"}]}",
+   "compare": "full",
+   "cpp_status": 200,
+   "cpp_note": null,
+   "prompts": [
+    "你在给一部真人写实电影，题材要落在现实生活里想选题。给出 3 个不同方向的方案。\n\n硬性要求：\n1. premise 必须具体到人物和处境，一两句话。「都市复仇爽剧」这种是题材标签不是选题，不要给。\n2. 一句话里就要有冲突。没有冲突的设定拍不成电影。\n3. 主要人物不超过三个，人一多就立不住。\n4. 几个方案要拉开差距，不要三个都是同一个故事换名字。\n5. 是一个能撑起一部完整的电影、有开头有结尾的处境，不是一章就讲完的段子。\n6. title 是片名，八个字以内，不要副标题。\n\n下面这些方向已经有了，换别的：\n一个关于错过与和解的都市电影。全片九十分钟，横屏。、林渊在天台等一个不会来的人。、三年后，同一个天台。\n\n只输出 JSON，不要任何解释文字。"
+   ],
+   "status": 200,
+   "response": {
+    "ideas": [
+     {
+      "title": "《雨夜天台》",
+      "premise": "林晚在天台等一个七年没出现的人。",
+      "hook": "他会来吗？"
+     },
+     {
+      "title": "旧照片",
+      "premise": "一张照片牵出十年前的火灾真相。",
+      "hook": "照片背面写着她的名字。"
+     },
+     {
+      "title": "错单",
+      "premise": "外卖员送错一单，撞破一场骗局。",
+      "hook": "那扇门后面不该有人。"
+     }
+    ],
+    "style_line": "realistic"
+   }
+  },
+  {
+   "name": "选题：带关键词",
+   "url": "/api/script/premise",
+   "body": {
+    "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_scripting_hdqt6fmi\\case02",
+    "keywords": "都市 悬疑"
+   },
+   "llm_reply": "{\"ideas\": [{\"title\": \"《雨夜天台》\", \"premise\": \"（林晚在天台等一个七年没出现的人。）\", \"hook\": \"“他会来吗？”\"}, {\"title\": \"旧照片\", \"premise\": \"一张照片牵出十年前的火灾真相。\", \"hook\": \"照片背面写着她的名字。\"}, {\"title\": \"错单\", \"premise\": \"外卖员送错一单，撞破一场骗局。\", \"hook\": \"那扇门后面不该有人。\"}]}",
+   "compare": "full",
+   "cpp_status": 200,
+   "cpp_note": null,
+   "prompts": [
+    "你在给一部真人写实电影，题材要落在现实生活里想选题。给出 3 个不同方向的方案。\n\n硬性要求：\n1. premise 必须具体到人物和处境，一两句话。「都市复仇爽剧」这种是题材标签不是选题，不要给。\n2. 一句话里就要有冲突。没有冲突的设定拍不成电影。\n3. 主要人物不超过三个，人一多就立不住。\n4. 几个方案要拉开差距，不要三个都是同一个故事换名字。\n5. 是一个能撑起一部完整的电影、有开头有结尾的处境，不是一章就讲完的段子。\n6. title 是片名，八个字以内，不要副标题。\n\n往这个方向想：都市 悬疑\n\n下面这些方向已经有了，换别的：\n一个关于错过与和解的都市电影。全片九十分钟，横屏。、林渊在天台等一个不会来的人。、三年后，同一个天台。\n\n只输出 JSON，不要任何解释文字。"
+   ],
+   "status": 200,
+   "response": {
+    "ideas": [
+     {
+      "title": "《雨夜天台》",
+      "premise": "林晚在天台等一个七年没出现的人。",
+      "hook": "他会来吗？"
+     },
+     {
+      "title": "旧照片",
+      "premise": "一张照片牵出十年前的火灾真相。",
+      "hook": "照片背面写着她的名字。"
+     },
+     {
+      "title": "错单",
+      "premise": "外卖员送错一单，撞破一场骗局。",
+      "hook": "那扇门后面不该有人。"
+     }
+    ],
+    "style_line": "realistic"
+   }
+  },
+  {
+   "name": "选题：要五个",
+   "url": "/api/script/premise",
+   "body": {
+    "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_scripting_hdqt6fmi\\case03",
+    "count": 5
+   },
+   "llm_reply": "{\"ideas\": [{\"title\": \"《雨夜天台》\", \"premise\": \"（林晚在天台等一个七年没出现的人。）\", \"hook\": \"“他会来吗？”\"}, {\"title\": \"旧照片\", \"premise\": \"一张照片牵出十年前的火灾真相。\", \"hook\": \"照片背面写着她的名字。\"}, {\"title\": \"错单\", \"premise\": \"外卖员送错一单，撞破一场骗局。\", \"hook\": \"那扇门后面不该有人。\"}]}",
+   "compare": "full",
+   "cpp_status": 200,
+   "cpp_note": null,
+   "prompts": [
+    "你在给一部真人写实电影，题材要落在现实生活里想选题。给出 5 个不同方向的方案。\n\n硬性要求：\n1. premise 必须具体到人物和处境，一两句话。「都市复仇爽剧」这种是题材标签不是选题，不要给。\n2. 一句话里就要有冲突。没有冲突的设定拍不成电影。\n3. 主要人物不超过三个，人一多就立不住。\n4. 几个方案要拉开差距，不要三个都是同一个故事换名字。\n5. 是一个能撑起一部完整的电影、有开头有结尾的处境，不是一章就讲完的段子。\n6. title 是片名，八个字以内，不要副标题。\n\n下面这些方向已经有了，换别的：\n一个关于错过与和解的都市电影。全片九十分钟，横屏。、林渊在天台等一个不会来的人。、三年后，同一个天台。\n\n只输出 JSON，不要任何解释文字。"
+   ],
+   "status": 200,
+   "response": {
+    "ideas": [
+     {
+      "title": "《雨夜天台》",
+      "premise": "林晚在天台等一个七年没出现的人。",
+      "hook": "他会来吗？"
+     },
+     {
+      "title": "旧照片",
+      "premise": "一张照片牵出十年前的火灾真相。",
+      "hook": "照片背面写着她的名字。"
+     },
+     {
+      "title": "错单",
+      "premise": "外卖员送错一单，撞破一场骗局。",
+      "hook": "那扇门后面不该有人。"
+     }
+    ],
+    "style_line": "realistic"
+   }
+  },
+  {
+   "name": "选题：count 越界",
+   "url": "/api/script/premise",
+   "body": {
+    "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_scripting_hdqt6fmi\\case04",
+    "count": 9
+   },
+   "llm_reply": "{\"ideas\": [{\"title\": \"《雨夜天台》\", \"premise\": \"（林晚在天台等一个七年没出现的人。）\", \"hook\": \"“他会来吗？”\"}, {\"title\": \"旧照片\", \"premise\": \"一张照片牵出十年前的火灾真相。\", \"hook\": \"照片背面写着她的名字。\"}, {\"title\": \"错单\", \"premise\": \"外卖员送错一单，撞破一场骗局。\", \"hook\": \"那扇门后面不该有人。\"}]}",
+   "compare": "detail_arr",
+   "cpp_status": 422,
+   "cpp_note": null,
+   "prompts": [],
+   "status": 422,
+   "response": {
+    "detail": [
+     {
+      "type": "less_than_equal",
+      "loc": [
+       "body",
+       "count"
+      ],
+      "msg": "Input should be less than or equal to 5",
+      "input": 9,
+      "ctx": {
+       "le": 5
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "选题：多余字段",
+   "url": "/api/script/premise",
+   "body": {
+    "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_scripting_hdqt6fmi\\case05",
+    "typo": 1
+   },
+   "llm_reply": "{\"ideas\": [{\"title\": \"《雨夜天台》\", \"premise\": \"（林晚在天台等一个七年没出现的人。）\", \"hook\": \"“他会来吗？”\"}, {\"title\": \"旧照片\", \"premise\": \"一张照片牵出十年前的火灾真相。\", \"hook\": \"照片背面写着她的名字。\"}, {\"title\": \"错单\", \"premise\": \"外卖员送错一单，撞破一场骗局。\", \"hook\": \"那扇门后面不该有人。\"}]}",
+   "compare": "detail_arr",
+   "cpp_status": 422,
+   "cpp_note": null,
+   "prompts": [],
+   "status": 422,
+   "response": {
+    "detail": [
+     {
+      "type": "extra_forbidden",
+      "loc": [
+       "body",
+       "typo"
+      ],
+      "msg": "Extra inputs are not permitted",
+      "input": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "选题：项目不存在",
+   "url": "/api/script/premise",
+   "body": {
+    "project": "Z:/根本没有这个目录"
+   },
+   "llm_reply": "{\"ideas\": [{\"title\": \"《雨夜天台》\", \"premise\": \"（林晚在天台等一个七年没出现的人。）\", \"hook\": \"“他会来吗？”\"}, {\"title\": \"旧照片\", \"premise\": \"一张照片牵出十年前的火灾真相。\", \"hook\": \"照片背面写着她的名字。\"}, {\"title\": \"错单\", \"premise\": \"外卖员送错一单，撞破一场骗局。\", \"hook\": \"那扇门后面不该有人。\"}]}",
+   "compare": "detail_str",
+   "cpp_status": 400,
+   "cpp_note": null,
+   "prompts": [],
+   "status": 400,
+   "response": {
+    "detail": "这里不是一个项目目录：Z:\\根本没有这个目录\n先建一部，或者换一个目录"
+   }
+  },
+  {
+   "name": "写一章：默认",
+   "url": "/api/script/write",
+   "body": {
+    "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_scripting_hdqt6fmi\\case07",
+    "premise": "林晚在天台等一个七年没出现的人。",
+    "variation": 0
+   },
+   "llm_reply": "{\"title\": \"雨夜天台\", \"logline\": \"等了七年的人今晚来了。\", \"beats\": [{\"kind\": \"action\", \"speaker\": \"\", \"text\": \"[0-3秒] 夜。天台。雨。\"}, {\"kind\": \"dialogue\", \"speaker\": \"林晚\", \"text\": \"“你说过会来的。”\"}, {\"kind\": \"action\", \"speaker\": \"\", \"text\": \"（陈默从阴影里走出来。）\"}, {\"kind\": \"dialogue\", \"speaker\": \"陈默\", \"text\": \"我来了。晚了七年。\"}, {\"kind\": \"dialogue\", \"speaker\": \"none\", \"text\": \"远处传来汽笛声。\"}]}",
+   "compare": "full",
+   "cpp_status": 200,
+   "cpp_note": null,
+   "prompts": [
+    "你在写一部电影里的一章，总时长约 60 秒。真人写实电影，台词生活化，不要文绉绉的书面语。\n\n硬性要求：\n1. 所有对白加起来控制在 171 个字左右，超出很多就是拍不完。\n2. 动作和对白交替推进，不要连着好几句对白，画面会没有呼吸。\n3. 出场角色不超过三个。人一多，画面里根本立不住。\n4. 对白只写说出口的话，不要带引号，不要在 text 里重复人名。\n5. 同一个角色的名字前后必须一模一样，不要一会儿全名一会儿简称。\n6. 开头三秒就要有事发生，这点时长里没有铺垫的余地。\n7. 结尾留一个钩子或者一个明确的情绪落点。\n\n动作那几拍要**拍得出来**。下一步要照着它画分镜，所以：\n8. 换地方或换时间就起新的一场：单独写一拍 kind=scene，text 只写\n   「日/夜 · 内/外 · 地点」三样；紧接着那一拍再把这一场的光交代清楚。\n   第一拍就得是第一场的 scene。同一个地方连着几拍就不用重复。\n9. 写角色**身体在做什么**，别写他心里怎么想。\n   「她很生气」这种情绪的名字不算数——写她的手在干什么、声音什么样、\n   脸朝着哪儿，让观众自己读出她在生气。\n   情绪从动作和台词里透出来，写心理活动画不出来。\n10. 提到的东西要具体到看得见：「一件信物」这种类目名不算数，\n    写出它的材质、尺寸和磨损，写成只可能是这一件的样子。\n    后面每一镜都要拿它当道具，含糊的东西每镜长得都不一样。\n11. 每一拍只写一件事。一拍里塞三个动作，分镜只能挑一个画，剩下的就丢了。\n\n这一章分四段，按秒排。JSON 里 opening、escalation、payoff、cliff 四项就是它们，顺序不能换：\n  开场钩子（0–5 秒）：一句冲突台词或一个反常画面，三秒内有事发生，不铺垫。至少 2 拍。\n  冲突推进（5–33 秒）：对立方步步紧逼，一步比一步紧，中途给一次小回报再压回去。至少 7 拍。\n  情绪回报（33–54 秒）：反击、打脸或真相——观众等的那一下。至少 5 拍。\n  章尾留扣（54–60 秒）：在情绪最高或最意外处切断，最后一拍就是钩子。至少 2 拍。\n一拍是一个动作或一句台词。四段加起来要撑满整章，每段的拍数照上面的下限往上写——写少了这一章就只有十几秒。\n\n必须沿用这些已有角色，名字一字不改：林渊。\n\n前面几章的剧本如下，这一章要接着往下写，人物关系和已经发生的事不能推翻：\n\n【ep01】\n（雨声起）\n林渊站在栏杆前，没有回头。\n\n这一章要写的：\n\n林晚在天台等一个七年没出现的人。\n\n只输出 JSON，不要任何解释文字。"
+   ],
+   "status": 200,
+   "response": {
+    "title": "雨夜天台",
+    "logline": "等了七年的人今晚来了。",
+    "script": "夜。天台。雨。\n林晚：你说过会来的。\n陈默从阴影里走出来。\n陈默：我来了。晚了七年。\n远处传来汽笛声。",
+    "speakers": [
+     "林晚",
+     "陈默"
+    ],
+    "dialogue_chars": 16,
+    "budget_chars": 171,
+    "beats": 5,
+    "fit": "偏短",
+    "continued_from": true,
+    "reused_characters": [
+     "林渊"
+    ],
+    "source": "premise"
+   }
+  },
+  {
+   "name": "写一章：不接前文",
+   "url": "/api/script/write",
+   "body": {
+    "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_scripting_hdqt6fmi\\case08",
+    "premise": "林晚在天台等一个七年没出现的人。",
+    "continue_from_previous": false,
+    "variation": 0
+   },
+   "llm_reply": "{\"title\": \"雨夜天台\", \"logline\": \"等了七年的人今晚来了。\", \"beats\": [{\"kind\": \"action\", \"speaker\": \"\", \"text\": \"[0-3秒] 夜。天台。雨。\"}, {\"kind\": \"dialogue\", \"speaker\": \"林晚\", \"text\": \"“你说过会来的。”\"}, {\"kind\": \"action\", \"speaker\": \"\", \"text\": \"（陈默从阴影里走出来。）\"}, {\"kind\": \"dialogue\", \"speaker\": \"陈默\", \"text\": \"我来了。晚了七年。\"}, {\"kind\": \"dialogue\", \"speaker\": \"none\", \"text\": \"远处传来汽笛声。\"}]}",
+   "compare": "full",
+   "cpp_status": 200,
+   "cpp_note": null,
+   "prompts": [
+    "你在写一部电影里的一章，总时长约 60 秒。真人写实电影，台词生活化，不要文绉绉的书面语。\n\n硬性要求：\n1. 所有对白加起来控制在 171 个字左右，超出很多就是拍不完。\n2. 动作和对白交替推进，不要连着好几句对白，画面会没有呼吸。\n3. 出场角色不超过三个。人一多，画面里根本立不住。\n4. 对白只写说出口的话，不要带引号，不要在 text 里重复人名。\n5. 同一个角色的名字前后必须一模一样，不要一会儿全名一会儿简称。\n6. 开头三秒就要有事发生，这点时长里没有铺垫的余地。\n7. 结尾留一个钩子或者一个明确的情绪落点。\n\n动作那几拍要**拍得出来**。下一步要照着它画分镜，所以：\n8. 换地方或换时间就起新的一场：单独写一拍 kind=scene，text 只写\n   「日/夜 · 内/外 · 地点」三样；紧接着那一拍再把这一场的光交代清楚。\n   第一拍就得是第一场的 scene。同一个地方连着几拍就不用重复。\n9. 写角色**身体在做什么**，别写他心里怎么想。\n   「她很生气」这种情绪的名字不算数——写她的手在干什么、声音什么样、\n   脸朝着哪儿，让观众自己读出她在生气。\n   情绪从动作和台词里透出来，写心理活动画不出来。\n10. 提到的东西要具体到看得见：「一件信物」这种类目名不算数，\n    写出它的材质、尺寸和磨损，写成只可能是这一件的样子。\n    后面每一镜都要拿它当道具，含糊的东西每镜长得都不一样。\n11. 每一拍只写一件事。一拍里塞三个动作，分镜只能挑一个画，剩下的就丢了。\n\n这一章分四段，按秒排。JSON 里 opening、escalation、payoff、cliff 四项就是它们，顺序不能换：\n  开场钩子（0–5 秒）：一句冲突台词或一个反常画面，三秒内有事发生，不铺垫。至少 2 拍。\n  冲突推进（5–33 秒）：对立方步步紧逼，一步比一步紧，中途给一次小回报再压回去。至少 7 拍。\n  情绪回报（33–54 秒）：反击、打脸或真相——观众等的那一下。至少 5 拍。\n  章尾留扣（54–60 秒）：在情绪最高或最意外处切断，最后一拍就是钩子。至少 2 拍。\n一拍是一个动作或一句台词。四段加起来要撑满整章，每段的拍数照上面的下限往上写——写少了这一章就只有十几秒。\n\n必须沿用这些已有角色，名字一字不改：林渊。\n\n这一章要写的：\n\n林晚在天台等一个七年没出现的人。\n\n只输出 JSON，不要任何解释文字。"
+   ],
+   "status": 200,
+   "response": {
+    "title": "雨夜天台",
+    "logline": "等了七年的人今晚来了。",
+    "script": "夜。天台。雨。\n林晚：你说过会来的。\n陈默从阴影里走出来。\n陈默：我来了。晚了七年。\n远处传来汽笛声。",
+    "speakers": [
+     "林晚",
+     "陈默"
+    ],
+    "dialogue_chars": 16,
+    "budget_chars": 171,
+    "beats": 5,
+    "fit": "偏短",
+    "continued_from": false,
+    "reused_characters": [
+     "林渊"
+    ],
+    "source": "premise"
+   }
+  },
+  {
+   "name": "写一章：不沿用角色",
+   "url": "/api/script/write",
+   "body": {
+    "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_scripting_hdqt6fmi\\case09",
+    "premise": "林晚在天台等一个七年没出现的人。",
+    "reuse_characters": false,
+    "variation": 0
+   },
+   "llm_reply": "{\"title\": \"雨夜天台\", \"logline\": \"等了七年的人今晚来了。\", \"beats\": [{\"kind\": \"action\", \"speaker\": \"\", \"text\": \"[0-3秒] 夜。天台。雨。\"}, {\"kind\": \"dialogue\", \"speaker\": \"林晚\", \"text\": \"“你说过会来的。”\"}, {\"kind\": \"action\", \"speaker\": \"\", \"text\": \"（陈默从阴影里走出来。）\"}, {\"kind\": \"dialogue\", \"speaker\": \"陈默\", \"text\": \"我来了。晚了七年。\"}, {\"kind\": \"dialogue\", \"speaker\": \"none\", \"text\": \"远处传来汽笛声。\"}]}",
+   "compare": "full",
+   "cpp_status": 200,
+   "cpp_note": null,
+   "prompts": [
+    "你在写一部电影里的一章，总时长约 60 秒。真人写实电影，台词生活化，不要文绉绉的书面语。\n\n硬性要求：\n1. 所有对白加起来控制在 171 个字左右，超出很多就是拍不完。\n2. 动作和对白交替推进，不要连着好几句对白，画面会没有呼吸。\n3. 出场角色不超过三个。人一多，画面里根本立不住。\n4. 对白只写说出口的话，不要带引号，不要在 text 里重复人名。\n5. 同一个角色的名字前后必须一模一样，不要一会儿全名一会儿简称。\n6. 开头三秒就要有事发生，这点时长里没有铺垫的余地。\n7. 结尾留一个钩子或者一个明确的情绪落点。\n\n动作那几拍要**拍得出来**。下一步要照着它画分镜，所以：\n8. 换地方或换时间就起新的一场：单独写一拍 kind=scene，text 只写\n   「日/夜 · 内/外 · 地点」三样；紧接着那一拍再把这一场的光交代清楚。\n   第一拍就得是第一场的 scene。同一个地方连着几拍就不用重复。\n9. 写角色**身体在做什么**，别写他心里怎么想。\n   「她很生气」这种情绪的名字不算数——写她的手在干什么、声音什么样、\n   脸朝着哪儿，让观众自己读出她在生气。\n   情绪从动作和台词里透出来，写心理活动画不出来。\n10. 提到的东西要具体到看得见：「一件信物」这种类目名不算数，\n    写出它的材质、尺寸和磨损，写成只可能是这一件的样子。\n    后面每一镜都要拿它当道具，含糊的东西每镜长得都不一样。\n11. 每一拍只写一件事。一拍里塞三个动作，分镜只能挑一个画，剩下的就丢了。\n\n这一章分四段，按秒排。JSON 里 opening、escalation、payoff、cliff 四项就是它们，顺序不能换：\n  开场钩子（0–5 秒）：一句冲突台词或一个反常画面，三秒内有事发生，不铺垫。至少 2 拍。\n  冲突推进（5–33 秒）：对立方步步紧逼，一步比一步紧，中途给一次小回报再压回去。至少 7 拍。\n  情绪回报（33–54 秒）：反击、打脸或真相——观众等的那一下。至少 5 拍。\n  章尾留扣（54–60 秒）：在情绪最高或最意外处切断，最后一拍就是钩子。至少 2 拍。\n一拍是一个动作或一句台词。四段加起来要撑满整章，每段的拍数照上面的下限往上写——写少了这一章就只有十几秒。\n\n前面几章的剧本如下，这一章要接着往下写，人物关系和已经发生的事不能推翻：\n\n【ep01】\n（雨声起）\n林渊站在栏杆前，没有回头。\n\n这一章要写的：\n\n林晚在天台等一个七年没出现的人。\n\n只输出 JSON，不要任何解释文字。"
+   ],
+   "status": 200,
+   "response": {
+    "title": "雨夜天台",
+    "logline": "等了七年的人今晚来了。",
+    "script": "夜。天台。雨。\n林晚：你说过会来的。\n陈默从阴影里走出来。\n陈默：我来了。晚了七年。\n远处传来汽笛声。",
+    "speakers": [
+     "林晚",
+     "陈默"
+    ],
+    "dialogue_chars": 16,
+    "budget_chars": 171,
+    "beats": 5,
+    "fit": "偏短",
+    "continued_from": true,
+    "reused_characters": [],
+    "source": "premise"
+   }
+  },
+  {
+   "name": "写一章：指定章号",
+   "url": "/api/script/write",
+   "body": {
+    "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_scripting_hdqt6fmi\\case10",
+    "premise": "林晚在天台等一个七年没出现的人。",
+    "episode_id": "ep_01",
+    "variation": 0
+   },
+   "llm_reply": "{\"title\": \"雨夜天台\", \"logline\": \"等了七年的人今晚来了。\", \"beats\": [{\"kind\": \"action\", \"speaker\": \"\", \"text\": \"[0-3秒] 夜。天台。雨。\"}, {\"kind\": \"dialogue\", \"speaker\": \"林晚\", \"text\": \"“你说过会来的。”\"}, {\"kind\": \"action\", \"speaker\": \"\", \"text\": \"（陈默从阴影里走出来。）\"}, {\"kind\": \"dialogue\", \"speaker\": \"陈默\", \"text\": \"我来了。晚了七年。\"}, {\"kind\": \"dialogue\", \"speaker\": \"none\", \"text\": \"远处传来汽笛声。\"}]}",
+   "compare": "full",
+   "cpp_status": 200,
+   "cpp_note": null,
+   "prompts": [
+    "你在写一部电影里的一章，总时长约 60 秒。真人写实电影，台词生活化，不要文绉绉的书面语。\n\n硬性要求：\n1. 所有对白加起来控制在 171 个字左右，超出很多就是拍不完。\n2. 动作和对白交替推进，不要连着好几句对白，画面会没有呼吸。\n3. 出场角色不超过三个。人一多，画面里根本立不住。\n4. 对白只写说出口的话，不要带引号，不要在 text 里重复人名。\n5. 同一个角色的名字前后必须一模一样，不要一会儿全名一会儿简称。\n6. 开头三秒就要有事发生，这点时长里没有铺垫的余地。\n7. 结尾留一个钩子或者一个明确的情绪落点。\n\n动作那几拍要**拍得出来**。下一步要照着它画分镜，所以：\n8. 换地方或换时间就起新的一场：单独写一拍 kind=scene，text 只写\n   「日/夜 · 内/外 · 地点」三样；紧接着那一拍再把这一场的光交代清楚。\n   第一拍就得是第一场的 scene。同一个地方连着几拍就不用重复。\n9. 写角色**身体在做什么**，别写他心里怎么想。\n   「她很生气」这种情绪的名字不算数——写她的手在干什么、声音什么样、\n   脸朝着哪儿，让观众自己读出她在生气。\n   情绪从动作和台词里透出来，写心理活动画不出来。\n10. 提到的东西要具体到看得见：「一件信物」这种类目名不算数，\n    写出它的材质、尺寸和磨损，写成只可能是这一件的样子。\n    后面每一镜都要拿它当道具，含糊的东西每镜长得都不一样。\n11. 每一拍只写一件事。一拍里塞三个动作，分镜只能挑一个画，剩下的就丢了。\n\n这一章分四段，按秒排。JSON 里 opening、escalation、payoff、cliff 四项就是它们，顺序不能换：\n  开场钩子（0–5 秒）：一句冲突台词或一个反常画面，三秒内有事发生，不铺垫。至少 2 拍。\n  冲突推进（5–33 秒）：对立方步步紧逼，一步比一步紧，中途给一次小回报再压回去。至少 7 拍。\n  情绪回报（33–54 秒）：反击、打脸或真相——观众等的那一下。至少 5 拍。\n  章尾留扣（54–60 秒）：在情绪最高或最意外处切断，最后一拍就是钩子。至少 2 拍。\n一拍是一个动作或一句台词。四段加起来要撑满整章，每段的拍数照上面的下限往上写——写少了这一章就只有十几秒。\n\n必须沿用这些已有角色，名字一字不改：林渊。\n\n前面几章的剧本如下，这一章要接着往下写，人物关系和已经发生的事不能推翻：\n\n【ep01】\n（雨声起）\n林渊站在栏杆前，没有回头。\n\n这一章要写的：\n\n林晚在天台等一个七年没出现的人。\n\n只输出 JSON，不要任何解释文字。"
+   ],
+   "status": 200,
+   "response": {
+    "title": "雨夜天台",
+    "logline": "等了七年的人今晚来了。",
+    "script": "夜。天台。雨。\n林晚：你说过会来的。\n陈默从阴影里走出来。\n陈默：我来了。晚了七年。\n远处传来汽笛声。",
+    "speakers": [
+     "林晚",
+     "陈默"
+    ],
+    "dialogue_chars": 16,
+    "budget_chars": 171,
+    "beats": 5,
+    "fit": "偏短",
+    "continued_from": true,
+    "reused_characters": [
+     "林渊"
+    ],
+    "source": "premise"
+   }
+  },
+  {
+   "name": "写一章：短时长",
+   "url": "/api/script/write",
+   "body": {
+    "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_scripting_hdqt6fmi\\case11",
+    "premise": "林晚在天台等一个七年没出现的人。",
+    "duration_s": 15.0,
+    "variation": 0
+   },
+   "llm_reply": "{\"title\": \"雨夜天台\", \"logline\": \"等了七年的人今晚来了。\", \"beats\": [{\"kind\": \"action\", \"speaker\": \"\", \"text\": \"[0-3秒] 夜。天台。雨。\"}, {\"kind\": \"dialogue\", \"speaker\": \"林晚\", \"text\": \"“你说过会来的。”\"}, {\"kind\": \"action\", \"speaker\": \"\", \"text\": \"（陈默从阴影里走出来。）\"}, {\"kind\": \"dialogue\", \"speaker\": \"陈默\", \"text\": \"我来了。晚了七年。\"}, {\"kind\": \"dialogue\", \"speaker\": \"none\", \"text\": \"远处传来汽笛声。\"}]}",
+   "compare": "full",
+   "cpp_status": 200,
+   "cpp_note": null,
+   "prompts": [
+    "你在写一部电影里的一章，总时长约 15 秒。真人写实电影，台词生活化，不要文绉绉的书面语。\n\n硬性要求：\n1. 所有对白加起来控制在 42 个字左右，超出很多就是拍不完。\n2. 动作和对白交替推进，不要连着好几句对白，画面会没有呼吸。\n3. 出场角色不超过三个。人一多，画面里根本立不住。\n4. 对白只写说出口的话，不要带引号，不要在 text 里重复人名。\n5. 同一个角色的名字前后必须一模一样，不要一会儿全名一会儿简称。\n6. 开头三秒就要有事发生，这点时长里没有铺垫的余地。\n7. 结尾留一个钩子或者一个明确的情绪落点。\n\n动作那几拍要**拍得出来**。下一步要照着它画分镜，所以：\n8. 换地方或换时间就起新的一场：单独写一拍 kind=scene，text 只写\n   「日/夜 · 内/外 · 地点」三样；紧接着那一拍再把这一场的光交代清楚。\n   第一拍就得是第一场的 scene。同一个地方连着几拍就不用重复。\n9. 写角色**身体在做什么**，别写他心里怎么想。\n   「她很生气」这种情绪的名字不算数——写她的手在干什么、声音什么样、\n   脸朝着哪儿，让观众自己读出她在生气。\n   情绪从动作和台词里透出来，写心理活动画不出来。\n10. 提到的东西要具体到看得见：「一件信物」这种类目名不算数，\n    写出它的材质、尺寸和磨损，写成只可能是这一件的样子。\n    后面每一镜都要拿它当道具，含糊的东西每镜长得都不一样。\n11. 每一拍只写一件事。一拍里塞三个动作，分镜只能挑一个画，剩下的就丢了。\n\n这一章分四段，按秒排。JSON 里 opening、escalation、payoff、cliff 四项就是它们，顺序不能换：\n  开场钩子（0–1 秒）：一句冲突台词或一个反常画面，三秒内有事发生，不铺垫。至少 2 拍。\n  冲突推进（1–8 秒）：对立方步步紧逼，一步比一步紧，中途给一次小回报再压回去。至少 2 拍。\n  情绪回报（8–13 秒）：反击、打脸或真相——观众等的那一下。至少 2 拍。\n  章尾留扣（13–15 秒）：在情绪最高或最意外处切断，最后一拍就是钩子。至少 2 拍。\n一拍是一个动作或一句台词。四段加起来要撑满整章，每段的拍数照上面的下限往上写——写少了这一章就只有十几秒。\n\n必须沿用这些已有角色，名字一字不改：林渊。\n\n前面几章的剧本如下，这一章要接着往下写，人物关系和已经发生的事不能推翻：\n\n【ep01】\n（雨声起）\n林渊站在栏杆前，没有回头。\n\n这一章要写的：\n\n林晚在天台等一个七年没出现的人。\n\n只输出 JSON，不要任何解释文字。"
+   ],
+   "status": 200,
+   "response": {
+    "title": "雨夜天台",
+    "logline": "等了七年的人今晚来了。",
+    "script": "夜。天台。雨。\n林晚：你说过会来的。\n陈默从阴影里走出来。\n陈默：我来了。晚了七年。\n远处传来汽笛声。",
+    "speakers": [
+     "林晚",
+     "陈默"
+    ],
+    "dialogue_chars": 16,
+    "budget_chars": 42,
+    "beats": 5,
+    "fit": "偏短",
+    "continued_from": true,
+    "reused_characters": [
+     "林渊"
+    ],
+    "source": "premise"
+   }
+  },
+  {
+   "name": "写一章：时长越界",
+   "url": "/api/script/write",
+   "body": {
+    "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_scripting_hdqt6fmi\\case12",
+    "premise": "林晚在天台等一个七年没出现的人。",
+    "duration_s": 9999.0,
+    "variation": 0
+   },
+   "llm_reply": "{\"title\": \"雨夜天台\", \"logline\": \"等了七年的人今晚来了。\", \"beats\": [{\"kind\": \"action\", \"speaker\": \"\", \"text\": \"[0-3秒] 夜。天台。雨。\"}, {\"kind\": \"dialogue\", \"speaker\": \"林晚\", \"text\": \"“你说过会来的。”\"}, {\"kind\": \"action\", \"speaker\": \"\", \"text\": \"（陈默从阴影里走出来。）\"}, {\"kind\": \"dialogue\", \"speaker\": \"陈默\", \"text\": \"我来了。晚了七年。\"}, {\"kind\": \"dialogue\", \"speaker\": \"none\", \"text\": \"远处传来汽笛声。\"}]}",
+   "compare": "detail_arr",
+   "cpp_status": 422,
+   "cpp_note": null,
+   "prompts": [],
+   "status": 422,
+   "response": {
+    "detail": [
+     {
+      "type": "less_than_equal",
+      "loc": [
+       "body",
+       "duration_s"
+      ],
+      "msg": "Input should be less than or equal to 1800",
+      "input": 9999.0,
+      "ctx": {
+       "le": 1800.0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "写一章：时长为零",
+   "url": "/api/script/write",
+   "body": {
+    "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_scripting_hdqt6fmi\\case13",
+    "premise": "林晚在天台等一个七年没出现的人。",
+    "duration_s": 0.0,
+    "variation": 0
+   },
+   "llm_reply": "{\"title\": \"雨夜天台\", \"logline\": \"等了七年的人今晚来了。\", \"beats\": [{\"kind\": \"action\", \"speaker\": \"\", \"text\": \"[0-3秒] 夜。天台。雨。\"}, {\"kind\": \"dialogue\", \"speaker\": \"林晚\", \"text\": \"“你说过会来的。”\"}, {\"kind\": \"action\", \"speaker\": \"\", \"text\": \"（陈默从阴影里走出来。）\"}, {\"kind\": \"dialogue\", \"speaker\": \"陈默\", \"text\": \"我来了。晚了七年。\"}, {\"kind\": \"dialogue\", \"speaker\": \"none\", \"text\": \"远处传来汽笛声。\"}]}",
+   "compare": "detail_arr",
+   "cpp_status": 422,
+   "cpp_note": null,
+   "prompts": [],
+   "status": 422,
+   "response": {
+    "detail": [
+     {
+      "type": "greater_than",
+      "loc": [
+       "body",
+       "duration_s"
+      ],
+      "msg": "Input should be greater than 0",
+      "input": 0.0,
+      "ctx": {
+       "gt": 0.0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "写一章：缺 premise",
+   "url": "/api/script/write",
+   "body": {
+    "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_scripting_hdqt6fmi\\case14",
+    "variation": 0
+   },
+   "llm_reply": "{\"title\": \"雨夜天台\", \"logline\": \"等了七年的人今晚来了。\", \"beats\": [{\"kind\": \"action\", \"speaker\": \"\", \"text\": \"[0-3秒] 夜。天台。雨。\"}, {\"kind\": \"dialogue\", \"speaker\": \"林晚\", \"text\": \"“你说过会来的。”\"}, {\"kind\": \"action\", \"speaker\": \"\", \"text\": \"（陈默从阴影里走出来。）\"}, {\"kind\": \"dialogue\", \"speaker\": \"陈默\", \"text\": \"我来了。晚了七年。\"}, {\"kind\": \"dialogue\", \"speaker\": \"none\", \"text\": \"远处传来汽笛声。\"}]}",
+   "compare": "detail_arr",
+   "cpp_status": 422,
+   "cpp_note": null,
+   "prompts": [],
+   "status": 422,
+   "response": {
+    "detail": [
+     {
+      "type": "missing",
+      "loc": [
+       "body",
+       "premise"
+      ],
+      "msg": "Field required",
+      "input": {
+       "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_scripting_hdqt6fmi\\case14"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "写一章：多余字段",
+   "url": "/api/script/write",
+   "body": {
+    "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_scripting_hdqt6fmi\\case15",
+    "premise": "林晚在天台等一个七年没出现的人。",
+    "typo": "x",
+    "variation": 0
+   },
+   "llm_reply": "{\"title\": \"雨夜天台\", \"logline\": \"等了七年的人今晚来了。\", \"beats\": [{\"kind\": \"action\", \"speaker\": \"\", \"text\": \"[0-3秒] 夜。天台。雨。\"}, {\"kind\": \"dialogue\", \"speaker\": \"林晚\", \"text\": \"“你说过会来的。”\"}, {\"kind\": \"action\", \"speaker\": \"\", \"text\": \"（陈默从阴影里走出来。）\"}, {\"kind\": \"dialogue\", \"speaker\": \"陈默\", \"text\": \"我来了。晚了七年。\"}, {\"kind\": \"dialogue\", \"speaker\": \"none\", \"text\": \"远处传来汽笛声。\"}]}",
+   "compare": "detail_arr",
+   "cpp_status": 422,
+   "cpp_note": null,
+   "prompts": [],
+   "status": 422,
+   "response": {
+    "detail": [
+     {
+      "type": "extra_forbidden",
+      "loc": [
+       "body",
+       "typo"
+      ],
+      "msg": "Extra inputs are not permitted",
+      "input": "x"
+     }
+    ]
+   }
+  },
+  {
+   "name": "写一章：模型吐了垃圾",
+   "url": "/api/script/write",
+   "body": {
+    "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_scripting_hdqt6fmi\\case16",
+    "premise": "林晚在天台等一个七年没出现的人。",
+    "variation": 0
+   },
+   "llm_reply": "抱歉，我无法完成这个请求。",
+   "compare": "detail_str",
+   "cpp_status": 400,
+   "cpp_note": "Python 的 StoryboardError 穿透 bug，C++ 有意回 400",
+   "prompts": [
+    "你在写一部电影里的一章，总时长约 60 秒。真人写实电影，台词生活化，不要文绉绉的书面语。\n\n硬性要求：\n1. 所有对白加起来控制在 171 个字左右，超出很多就是拍不完。\n2. 动作和对白交替推进，不要连着好几句对白，画面会没有呼吸。\n3. 出场角色不超过三个。人一多，画面里根本立不住。\n4. 对白只写说出口的话，不要带引号，不要在 text 里重复人名。\n5. 同一个角色的名字前后必须一模一样，不要一会儿全名一会儿简称。\n6. 开头三秒就要有事发生，这点时长里没有铺垫的余地。\n7. 结尾留一个钩子或者一个明确的情绪落点。\n\n动作那几拍要**拍得出来**。下一步要照着它画分镜，所以：\n8. 换地方或换时间就起新的一场：单独写一拍 kind=scene，text 只写\n   「日/夜 · 内/外 · 地点」三样；紧接着那一拍再把这一场的光交代清楚。\n   第一拍就得是第一场的 scene。同一个地方连着几拍就不用重复。\n9. 写角色**身体在做什么**，别写他心里怎么想。\n   「她很生气」这种情绪的名字不算数——写她的手在干什么、声音什么样、\n   脸朝着哪儿，让观众自己读出她在生气。\n   情绪从动作和台词里透出来，写心理活动画不出来。\n10. 提到的东西要具体到看得见：「一件信物」这种类目名不算数，\n    写出它的材质、尺寸和磨损，写成只可能是这一件的样子。\n    后面每一镜都要拿它当道具，含糊的东西每镜长得都不一样。\n11. 每一拍只写一件事。一拍里塞三个动作，分镜只能挑一个画，剩下的就丢了。\n\n这一章分四段，按秒排。JSON 里 opening、escalation、payoff、cliff 四项就是它们，顺序不能换：\n  开场钩子（0–5 秒）：一句冲突台词或一个反常画面，三秒内有事发生，不铺垫。至少 2 拍。\n  冲突推进（5–33 秒）：对立方步步紧逼，一步比一步紧，中途给一次小回报再压回去。至少 7 拍。\n  情绪回报（33–54 秒）：反击、打脸或真相——观众等的那一下。至少 5 拍。\n  章尾留扣（54–60 秒）：在情绪最高或最意外处切断，最后一拍就是钩子。至少 2 拍。\n一拍是一个动作或一句台词。四段加起来要撑满整章，每段的拍数照上面的下限往上写——写少了这一章就只有十几秒。\n\n必须沿用这些已有角色，名字一字不改：林渊。\n\n前面几章的剧本如下，这一章要接着往下写，人物关系和已经发生的事不能推翻：\n\n【ep01】\n（雨声起）\n林渊站在栏杆前，没有回头。\n\n这一章要写的：\n\n林晚在天台等一个七年没出现的人。\n\n只输出 JSON，不要任何解释文字。"
+   ],
+   "status": 500,
+   "response": {
+    "__raw__": "Internal Server Error"
+   }
+  },
+  {
+   "name": "写一章：模型没写台词",
+   "url": "/api/script/write",
+   "body": {
+    "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_scripting_hdqt6fmi\\case17",
+    "premise": "林晚在天台等一个七年没出现的人。",
+    "variation": 0
+   },
+   "llm_reply": "{\"title\": \"t\", \"logline\": \"l\", \"beats\": [{\"kind\": \"action\", \"speaker\": \"\", \"text\": \"雨。\"}]}",
+   "compare": "detail_str",
+   "cpp_status": 400,
+   "cpp_note": null,
+   "prompts": [
+    "你在写一部电影里的一章，总时长约 60 秒。真人写实电影，台词生活化，不要文绉绉的书面语。\n\n硬性要求：\n1. 所有对白加起来控制在 171 个字左右，超出很多就是拍不完。\n2. 动作和对白交替推进，不要连着好几句对白，画面会没有呼吸。\n3. 出场角色不超过三个。人一多，画面里根本立不住。\n4. 对白只写说出口的话，不要带引号，不要在 text 里重复人名。\n5. 同一个角色的名字前后必须一模一样，不要一会儿全名一会儿简称。\n6. 开头三秒就要有事发生，这点时长里没有铺垫的余地。\n7. 结尾留一个钩子或者一个明确的情绪落点。\n\n动作那几拍要**拍得出来**。下一步要照着它画分镜，所以：\n8. 换地方或换时间就起新的一场：单独写一拍 kind=scene，text 只写\n   「日/夜 · 内/外 · 地点」三样；紧接着那一拍再把这一场的光交代清楚。\n   第一拍就得是第一场的 scene。同一个地方连着几拍就不用重复。\n9. 写角色**身体在做什么**，别写他心里怎么想。\n   「她很生气」这种情绪的名字不算数——写她的手在干什么、声音什么样、\n   脸朝着哪儿，让观众自己读出她在生气。\n   情绪从动作和台词里透出来，写心理活动画不出来。\n10. 提到的东西要具体到看得见：「一件信物」这种类目名不算数，\n    写出它的材质、尺寸和磨损，写成只可能是这一件的样子。\n    后面每一镜都要拿它当道具，含糊的东西每镜长得都不一样。\n11. 每一拍只写一件事。一拍里塞三个动作，分镜只能挑一个画，剩下的就丢了。\n\n这一章分四段，按秒排。JSON 里 opening、escalation、payoff、cliff 四项就是它们，顺序不能换：\n  开场钩子（0–5 秒）：一句冲突台词或一个反常画面，三秒内有事发生，不铺垫。至少 2 拍。\n  冲突推进（5–33 秒）：对立方步步紧逼，一步比一步紧，中途给一次小回报再压回去。至少 7 拍。\n  情绪回报（33–54 秒）：反击、打脸或真相——观众等的那一下。至少 5 拍。\n  章尾留扣（54–60 秒）：在情绪最高或最意外处切断，最后一拍就是钩子。至少 2 拍。\n一拍是一个动作或一句台词。四段加起来要撑满整章，每段的拍数照上面的下限往上写——写少了这一章就只有十几秒。\n\n必须沿用这些已有角色，名字一字不改：林渊。\n\n前面几章的剧本如下，这一章要接着往下写，人物关系和已经发生的事不能推翻：\n\n【ep01】\n（雨声起）\n林渊站在栏杆前，没有回头。\n\n这一章要写的：\n\n林晚在天台等一个七年没出现的人。\n\n只输出 JSON，不要任何解释文字。"
+   ],
+   "status": 400,
+   "response": {
+    "detail": "整章一句台词都没有，这样出来的是默片"
+   }
+  },
+  {
+   "name": "预告：默认",
+   "url": "/api/script/trailer",
+   "body": {
+    "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_scripting_hdqt6fmi\\case18"
+   },
+   "llm_reply": "{\"title\": \"雨夜天台\", \"logline\": \"等了七年的人今晚来了。\", \"beats\": [{\"kind\": \"action\", \"speaker\": \"\", \"text\": \"[0-3秒] 夜。天台。雨。\"}, {\"kind\": \"dialogue\", \"speaker\": \"林晚\", \"text\": \"“你说过会来的。”\"}, {\"kind\": \"action\", \"speaker\": \"\", \"text\": \"（陈默从阴影里走出来。）\"}, {\"kind\": \"dialogue\", \"speaker\": \"陈默\", \"text\": \"我来了。晚了七年。\"}, {\"kind\": \"dialogue\", \"speaker\": \"none\", \"text\": \"远处传来汽笛声。\"}]}",
+   "compare": "full",
+   "cpp_status": 200,
+   "cpp_note": null,
+   "prompts": [
+    "你在写一部真人写实电影的预告片，总时长约 20 秒。\n\n预告片不是把正片缩短，是另一种东西。硬性要求：\n1. 所有对白加起来控制在 57 个字以内。预告片以画面为主，话越少越有劲。\n2. 用蒙太奇：几个不相干的瞬间快速切换，不要讲一条完整的时间线。\n3. 前两秒必须是全片最抓人的那个画面或那句话，一上来就得把人摁住。\n4. 只给钩子，不给答案。关键情节点到为止，结局绝对不能剧透。\n5. 结尾停在悬念上，可以是一句反问、一个未完成的动作或一个眼神。\n6. 对白只写说出口的话，不要带引号，不要在 text 里重复人名。\n7. 出场角色不超过三个，名字前后一模一样。\n8. title 写这部电影的名字，logline 写一句能当封面文案的钩子。\n\n必须沿用这些已有角色，名字一字不改：林渊。\n\n已经写好的章节如下。从里面挑最有冲击力的瞬间来剪，不要编造片里没有的情节，也不要把结局说出来：\n\n【ep01 第一章 · 雨】\n（雨声起）\n林渊站在栏杆前，没有回头。\n\n这部电影讲的是：\n\n一个关于错过与和解的都市电影。全片九十分钟，横屏。\n\n只输出 JSON，不要任何解释文字。"
+   ],
+   "status": 200,
+   "response": {
+    "title": "雨夜天台",
+    "logline": "等了七年的人今晚来了。",
+    "script": "夜。天台。雨。\n林晚：你说过会来的。\n陈默从阴影里走出来。\n陈默：我来了。晚了七年。\n远处传来汽笛声。",
+    "speakers": [
+     "林晚",
+     "陈默"
+    ],
+    "dialogue_chars": 16,
+    "budget_chars": 57,
+    "beats": 5,
+    "fit": "偏短",
+    "from_episodes": [
+     "ep01"
+    ],
+    "episode_id": "trailer"
+   }
+  },
+  {
+   "name": "预告：指定章节",
+   "url": "/api/script/trailer",
+   "body": {
+    "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_scripting_hdqt6fmi\\case19",
+    "episode_ids": [
+     "ep_01"
+    ]
+   },
+   "llm_reply": "{\"title\": \"雨夜天台\", \"logline\": \"等了七年的人今晚来了。\", \"beats\": [{\"kind\": \"action\", \"speaker\": \"\", \"text\": \"[0-3秒] 夜。天台。雨。\"}, {\"kind\": \"dialogue\", \"speaker\": \"林晚\", \"text\": \"“你说过会来的。”\"}, {\"kind\": \"action\", \"speaker\": \"\", \"text\": \"（陈默从阴影里走出来。）\"}, {\"kind\": \"dialogue\", \"speaker\": \"陈默\", \"text\": \"我来了。晚了七年。\"}, {\"kind\": \"dialogue\", \"speaker\": \"none\", \"text\": \"远处传来汽笛声。\"}]}",
+   "compare": "detail_str",
+   "cpp_status": 400,
+   "cpp_note": null,
+   "prompts": [],
+   "status": 400,
+   "response": {
+    "detail": "没有可用来剪预告的章节。先写几章正片，再回来剪预告"
+   }
+  },
+  {
+   "name": "预告：指定不存在的章节",
+   "url": "/api/script/trailer",
+   "body": {
+    "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_scripting_hdqt6fmi\\case20",
+    "episode_ids": [
+     "ep_99"
+    ]
+   },
+   "llm_reply": "{\"title\": \"雨夜天台\", \"logline\": \"等了七年的人今晚来了。\", \"beats\": [{\"kind\": \"action\", \"speaker\": \"\", \"text\": \"[0-3秒] 夜。天台。雨。\"}, {\"kind\": \"dialogue\", \"speaker\": \"林晚\", \"text\": \"“你说过会来的。”\"}, {\"kind\": \"action\", \"speaker\": \"\", \"text\": \"（陈默从阴影里走出来。）\"}, {\"kind\": \"dialogue\", \"speaker\": \"陈默\", \"text\": \"我来了。晚了七年。\"}, {\"kind\": \"dialogue\", \"speaker\": \"none\", \"text\": \"远处传来汽笛声。\"}]}",
+   "compare": "detail_str",
+   "cpp_status": 400,
+   "cpp_note": null,
+   "prompts": [],
+   "status": 400,
+   "response": {
+    "detail": "没有可用来剪预告的章节。先写几章正片，再回来剪预告"
+   }
+  },
+  {
+   "name": "预告：不沿用角色",
+   "url": "/api/script/trailer",
+   "body": {
+    "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_scripting_hdqt6fmi\\case21",
+    "reuse_characters": false
+   },
+   "llm_reply": "{\"title\": \"雨夜天台\", \"logline\": \"等了七年的人今晚来了。\", \"beats\": [{\"kind\": \"action\", \"speaker\": \"\", \"text\": \"[0-3秒] 夜。天台。雨。\"}, {\"kind\": \"dialogue\", \"speaker\": \"林晚\", \"text\": \"“你说过会来的。”\"}, {\"kind\": \"action\", \"speaker\": \"\", \"text\": \"（陈默从阴影里走出来。）\"}, {\"kind\": \"dialogue\", \"speaker\": \"陈默\", \"text\": \"我来了。晚了七年。\"}, {\"kind\": \"dialogue\", \"speaker\": \"none\", \"text\": \"远处传来汽笛声。\"}]}",
+   "compare": "full",
+   "cpp_status": 200,
+   "cpp_note": null,
+   "prompts": [
+    "你在写一部真人写实电影的预告片，总时长约 20 秒。\n\n预告片不是把正片缩短，是另一种东西。硬性要求：\n1. 所有对白加起来控制在 57 个字以内。预告片以画面为主，话越少越有劲。\n2. 用蒙太奇：几个不相干的瞬间快速切换，不要讲一条完整的时间线。\n3. 前两秒必须是全片最抓人的那个画面或那句话，一上来就得把人摁住。\n4. 只给钩子，不给答案。关键情节点到为止，结局绝对不能剧透。\n5. 结尾停在悬念上，可以是一句反问、一个未完成的动作或一个眼神。\n6. 对白只写说出口的话，不要带引号，不要在 text 里重复人名。\n7. 出场角色不超过三个，名字前后一模一样。\n8. title 写这部电影的名字，logline 写一句能当封面文案的钩子。\n\n已经写好的章节如下。从里面挑最有冲击力的瞬间来剪，不要编造片里没有的情节，也不要把结局说出来：\n\n【ep01 第一章 · 雨】\n（雨声起）\n林渊站在栏杆前，没有回头。\n\n这部电影讲的是：\n\n一个关于错过与和解的都市电影。全片九十分钟，横屏。\n\n只输出 JSON，不要任何解释文字。"
+   ],
+   "status": 200,
+   "response": {
+    "title": "雨夜天台",
+    "logline": "等了七年的人今晚来了。",
+    "script": "夜。天台。雨。\n林晚：你说过会来的。\n陈默从阴影里走出来。\n陈默：我来了。晚了七年。\n远处传来汽笛声。",
+    "speakers": [
+     "林晚",
+     "陈默"
+    ],
+    "dialogue_chars": 16,
+    "budget_chars": 57,
+    "beats": 5,
+    "fit": "偏短",
+    "from_episodes": [
+     "ep01"
+    ],
+    "episode_id": "trailer"
+   }
+  },
+  {
+   "name": "预告：时长越界",
+   "url": "/api/script/trailer",
+   "body": {
+    "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_scripting_hdqt6fmi\\case22",
+    "duration_s": 999.0
+   },
+   "llm_reply": "{\"title\": \"雨夜天台\", \"logline\": \"等了七年的人今晚来了。\", \"beats\": [{\"kind\": \"action\", \"speaker\": \"\", \"text\": \"[0-3秒] 夜。天台。雨。\"}, {\"kind\": \"dialogue\", \"speaker\": \"林晚\", \"text\": \"“你说过会来的。”\"}, {\"kind\": \"action\", \"speaker\": \"\", \"text\": \"（陈默从阴影里走出来。）\"}, {\"kind\": \"dialogue\", \"speaker\": \"陈默\", \"text\": \"我来了。晚了七年。\"}, {\"kind\": \"dialogue\", \"speaker\": \"none\", \"text\": \"远处传来汽笛声。\"}]}",
+   "compare": "detail_arr",
+   "cpp_status": 422,
+   "cpp_note": null,
+   "prompts": [],
+   "status": 422,
+   "response": {
+    "detail": [
+     {
+      "type": "less_than_equal",
+      "loc": [
+       "body",
+       "duration_s"
+      ],
+      "msg": "Input should be less than or equal to 120",
+      "input": 999.0,
+      "ctx": {
+       "le": 120.0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "预告：多余字段",
+   "url": "/api/script/trailer",
+   "body": {
+    "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_scripting_hdqt6fmi\\case23",
+    "typo": 1
+   },
+   "llm_reply": "{\"title\": \"雨夜天台\", \"logline\": \"等了七年的人今晚来了。\", \"beats\": [{\"kind\": \"action\", \"speaker\": \"\", \"text\": \"[0-3秒] 夜。天台。雨。\"}, {\"kind\": \"dialogue\", \"speaker\": \"林晚\", \"text\": \"“你说过会来的。”\"}, {\"kind\": \"action\", \"speaker\": \"\", \"text\": \"（陈默从阴影里走出来。）\"}, {\"kind\": \"dialogue\", \"speaker\": \"陈默\", \"text\": \"我来了。晚了七年。\"}, {\"kind\": \"dialogue\", \"speaker\": \"none\", \"text\": \"远处传来汽笛声。\"}]}",
+   "compare": "detail_arr",
+   "cpp_status": 422,
+   "cpp_note": null,
+   "prompts": [],
+   "status": 422,
+   "response": {
+    "detail": [
+     {
+      "type": "extra_forbidden",
+      "loc": [
+       "body",
+       "typo"
+      ],
+      "msg": "Extra inputs are not permitted",
+      "input": 1
+     }
+    ]
+   }
+  }
+ ]
+}

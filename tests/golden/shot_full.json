@@ -1,0 +1,84 @@
+{
+  "attempts": 2,
+  "beat": "反转",
+  "bgm_cue": "bgm_tension_low",
+  "camera_angle": "low",
+  "camera_id": "cam_rooftop_a",
+  "camera_move": "push_in",
+  "lens": "auto",
+  "lighting": "",
+  "continuous_with_prev": false,
+  "characters": [
+    {
+      "action": "握紧栏杆，指节发白",
+      "char_id": "lin_yuan",
+      "expression": "隐忍",
+      "face_pose": "three_quarter",
+      "screen_pos": "center",
+      "wardrobe_state": "suit_soaked"
+    },
+    {
+      "action": "停在门口，没有再往前",
+      "char_id": "chen_mo",
+      "expression": "愕然",
+      "face_pose": "profile",
+      "screen_pos": "left",
+      "wardrobe_state": "default"
+    }
+  ],
+  "continuity_notes": "上一镜他还没湿透，这里服装状态要接上 suit_soaked",
+  "dialogue": [
+    {
+      "actual_duration_s": 3.2,
+      "audio_path": "audio/ep01_s03_sh007_01.wav",
+      "char_id": "lin_yuan",
+      "emotion": "压抑",
+      "emotion_intensity": 0.8,
+      "text": "你要是早半个小时来，什么都还来得及。",
+      "voice_id": "voice_lin"
+    },
+    {
+      "actual_duration_s": null,
+      "audio_path": null,
+      "char_id": null,
+      "emotion": "neutral",
+      "emotion_intensity": 0.3,
+      "text": "雨声盖过了他后半句。",
+      "voice_id": null
+    }
+  ],
+  "duration_locked": true,
+  "duration_s": 6.5,
+  "first_frame_prompt": "cinematic, rooftop at night, heavy rain, neon bokeh, back view",
+  "frame_path": "frames/ep01_s03_sh007.png",
+  "end_frame_path": null,
+  "gate_notes": [
+    "草稿档画面偏暗，已调高曝光重跑"
+  ],
+  "last_frame_prompt": "cinematic, rooftop at night, man turns around, rain on face",
+  "location_id": "loc_rooftop",
+  "missing_info": [
+    "未确定陈墨是否带伞"
+  ],
+  "motion_prompt": "缓慢推进，雨丝斜掠，人物微微转头",
+  "needs_lipsync": false,
+  "negative_prompt": "模糊, 低质量, 多余的手指",
+  "order": 6,
+  "prop_ids": [
+    "prop_umbrella",
+    "prop_phone"
+  ],
+  "scene_id": "ep01_s03",
+  "sfx": [
+    "雨声",
+    "远处车流"
+  ],
+  "shot_id": "ep01_s03_sh007",
+  "shot_size": "MCU",
+  "status": "audio_done",
+  "subtitle_text": "你要是早半个小时来，什么都还来得及。",
+  "transition_dur_s": 0.8,
+  "transition_in": "dissolve",
+  "video_path": null,
+  "visual_desc": "雨夜天台，男主背对镜头站在栏杆前，远处霓虹在雨幕里散成一片光晕"
+}

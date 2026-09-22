@@ -1,0 +1,54 @@
+{
+  "character": {
+    "appearance": {
+      "attire": "深灰西装，衬衫领口松着",
+      "body": "偏瘦，肩背挺直",
+      "face": "单眼皮，短碎发，眼下有一道旧疤",
+      "identity": "三十岁上下的男性，沉默寡言。",
+      "style": "低饱和，胶片颗粒"
+    },
+    "char_id": "c_lin_yuan",
+    "lora_path": null,
+    "lora_strength": 0.85,
+    "lora_trigger": "linyuan_v3",
+    "name": "林渊",
+    "ref_back": null,
+    "ref_front": "refs/c_lin_yuan_front.png",
+    "ref_three_quarter": "refs/c_lin_yuan_tq.png",
+    "voice_gender": "male",
+    "voice_id": null,
+    "voice_order": 1,
+    "voice_ref_audio": null,
+    "wardrobe": [
+      {
+        "description": "西装被雨淋透，紧贴身体",
+        "wardrobe_id": "suit_soaked"
+      },
+      {
+        "description": "灰色卫衣，牛仔裤",
+        "wardrobe_id": "casual"
+      }
+    ]
+  },
+  "ref_for_pose": {
+    "back": "refs/c_lin_yuan_tq.png",
+    "front": "refs/c_lin_yuan_front.png",
+    "off_screen": "refs/c_lin_yuan_front.png",
+    "profile": "refs/c_lin_yuan_tq.png",
+    "three_quarter": "refs/c_lin_yuan_tq.png",
+    "乱填": "refs/c_lin_yuan_front.png"
+  },
+  "render": {
+    "anime_casual": "linyuan_v3, 三十岁上下的男性，沉默寡言, 偏瘦，肩背挺直, 单眼皮，短碎发，眼下有一道旧疤, 灰色卫衣，牛仔裤, 低饱和，胶片颗粒",
+    "anime_default": "linyuan_v3, 三十岁上下的男性，沉默寡言, 偏瘦，肩背挺直, 单眼皮，短碎发，眼下有一道旧疤, 深灰西装，衬衫领口松着, 低饱和，胶片颗粒",
+    "realistic_default": "linyuan_v3，三十岁上下的男性，沉默寡言，偏瘦，肩背挺直，单眼皮，短碎发，眼下有一道旧疤，深灰西装，衬衫领口松着，低饱和，胶片颗粒",
+    "realistic_soaked": "linyuan_v3，三十岁上下的男性，沉默寡言，偏瘦，肩背挺直，单眼皮，短碎发，眼下有一道旧疤，西装被雨淋透，紧贴身体，低饱和，胶片颗粒",
+    "unknown_wardrobe": "linyuan_v3，三十岁上下的男性，沉默寡言，偏瘦，肩背挺直，单眼皮，短碎发，眼下有一道旧疤，深灰西装，衬衫领口松着，低饱和，胶片颗粒"
+  },
+  "wardrobe_desc": {
+    "default": "深灰西装，衬衫领口松着",
+    "empty": "深灰西装，衬衫领口松着",
+    "not_exist": "深灰西装，衬衫领口松着",
+    "suit_soaked": "西装被雨淋透，紧贴身体"
+  }
+}

@@ -1,0 +1,107 @@
+{
+  "statuses": [
+    "planned",
+    "audio_done",
+    "frame_done",
+    "draft_done",
+    "draft_rejected",
+    "final_done",
+    "final_rejected",
+    "fallback",
+    "locked"
+  ],
+  "stages": [
+    {
+      "stage": "audio",
+      "force": false,
+      "picked": [
+        "sh_planned"
+      ]
+    },
+    {
+      "stage": "frames",
+      "force": false,
+      "picked": [
+        "sh_audio_done"
+      ]
+    },
+    {
+      "stage": "render_draft",
+      "force": false,
+      "picked": [
+        "sh_draft_rejected",
+        "sh_frame_done",
+        "sh_audio_done"
+      ]
+    },
+    {
+      "stage": "render_final",
+      "force": false,
+      "picked": [
+        "sh_final_rejected",
+        "sh_draft_done"
+      ]
+    },
+    {
+      "stage": "audio",
+      "force": true,
+      "picked": [
+        "sh_locked",
+        "sh_fallback",
+        "sh_final_rejected",
+        "sh_final_done",
+        "sh_draft_rejected",
+        "sh_draft_done",
+        "sh_frame_done",
+        "sh_audio_done",
+        "sh_planned"
+      ]
+    },
+    {
+      "stage": "frames",
+      "force": true,
+      "picked": [
+        "sh_locked",
+        "sh_fallback",
+        "sh_final_rejected",
+        "sh_final_done",
+        "sh_draft_rejected",
+        "sh_draft_done",
+        "sh_frame_done",
+        "sh_audio_done",
+        "sh_planned"
+      ]
+    },
+    {
+      "stage": "render_draft",
+      "force": true,
+      "picked": [
+        "sh_locked",
+        "sh_fallback",
+        "sh_final_rejected",
+        "sh_final_done",
+        "sh_draft_rejected",
+        "sh_draft_done",
+        "sh_frame_done",
+        "sh_audio_done",
+        "sh_planned"
+      ]
+    },
+    {
+      "stage": "render_final",
+      "force": true,
+      "picked": [
+        "sh_locked",
+        "sh_fallback",
+        "sh_final_rejected",
+        "sh_final_done",
+        "sh_draft_rejected",
+        "sh_draft_done",
+        "sh_frame_done",
+        "sh_audio_done",
+        "sh_planned"
+      ]
+    }
+  ],
+  "note": "由 cpp/tests/export_episode_pick_golden.py 生成，不要手改。期望值来自把阶段类换成假货、跑真的 Pipeline 方法接出来的 todo，不是照着源码抄的 predicate。"
+}

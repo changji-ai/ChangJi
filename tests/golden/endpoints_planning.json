@@ -1,0 +1,3884 @@
+{
+  "note": "原本由 cpp/tests/export_planning_golden.py 生成。那个生成器随 Python 引擎一起删了（2026-09-10），这份语料从此是回归夹具而不是对拍语料——接口**有意**改了形状时，照着改这里，并在提交信息里说清改了哪一项、为什么。2026-09-11：/api/bible 的回包加了 source（名单是从故事出的还是从某一章剧本出的），这几条 200 的响应因此都补上了 source=script。 2026-09-11：Episode 加了 chapter_refs。**只给真的会重写 project.json 的用例补**（/api/plan，以及 overwrite 触发了 reset_shots 的 /api/bible）；别的用例里那份 project.json 是原样的输入文件，没经过 C++ 的序列化。 2026-09-18：stage 是 storyboard 的那几条 prompt 照今天的 cpp/prompts.toml [storyboard] 重新拼过了。这一族 prompt 的文字谁都不比——test_planning.cpp 只读 prompts[].stage，用来决定这一次该回放哪条返回。选重拼而不是留一张快照，是因为同一份文件里 stage=bible 那几条已经是今天的样子（「你是一位电影美术指导」和 [bible] 逐字对得上）；留一半旧的，下一个人读到哪条算哪条，而没有任何地方会报错。换掉的是 2026-09-17 之前的老规则，原话「只有定格的物件特写或静止的空镜才填 static。」「全集不少于五分之一」，今天是「**画面里没有任何东西在动**时才填 static」。重拼的凭据是 stages/storyboard.cpp 的 build_storyboard_prompt：seg0 + 角色名单 + seg1 + 场景名单 + seg2 + 配额 + seg3 + 镜头数 + seg4 + 总时长 + seg5 + episode_id + seg6 + 剧本 + seg7；名单、配额、镜头数、总时长、剧本这些变的部分照原文搬，只换模板。prompts.toml 再改、想让这里跟上，照这个顺序重拼一遍——别挑一个词改，那样就是半新半旧。",
+  "cases": [
+    {
+      "name": "圣经：只补新的",
+      "url": "/api/bible",
+      "body": {
+        "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_planning_3brmf2ea\\case01",
+        "script": "林晚站在天台边缘，雨水打湿了她的白衬衫。\n林晚：你说过会来的。\n陈默从阴影里走出来。\n陈默：我来了。晚了七年。"
+      },
+      "clear_assets": false,
+      "llm_bible": "{\"characters\": [{\"key\": \"lin_wan\", \"name\": \"林晚\", \"identity\": \"二十七岁女性，外表冷静，内里执拗。\", \"body\": \"偏瘦，中等身高\", \"face\": \"黑色长直发，鹅蛋脸，杏眼，眼尾微垂，薄唇。\", \"attire\": \"白色衬衫，深色西装裤\"}, {\"key\": \"chen_mo\", \"name\": \"陈默\", \"identity\": \"三十出头男性，沉默寡言\", \"body\": \"高瘦\", \"face\": \"短寸黑发，方脸，浓眉，单眼皮\", \"attire\": \"黑色风衣\"}], \"locations\": [{\"key\": \"rooftop_night\", \"name\": \"夜间天台\", \"space\": \"水泥地面，锈蚀的护栏\", \"lighting\": \"夜间冷调顶光。\", \"palette\": \"冷蓝为主\"}], \"global_style\": \"电影感，浅景深，冷色调。\"}",
+      "llm_storyboard": "{\"shots\": [{\"shot_id\": \"ep01_sh001\", \"scene_id\": \"loc_rooftop_night\", \"order\": 0, \"first_frame_prompt\": \"夜间天台，雨中，女子背对镜头\", \"shot_size\": \"MS\", \"camera_angle\": \"eye_level\", \"duration_s\": 5.0, \"characters\": [{\"char_id\": \"c_lin_wan\", \"expression\": \"落寞\", \"action\": \"扶着护栏\", \"face_pose\": \"back\"}], \"dialogue\": [], \"transition_in\": \"cut\"}, {\"shot_id\": \"ep01_sh002\", \"scene_id\": \"loc_rooftop_night\", \"order\": 1, \"first_frame_prompt\": \"近景，女子转身\", \"shot_size\": \"CU\", \"camera_angle\": \"eye_level\", \"duration_s\": 3.0, \"characters\": [{\"char_id\": \"c_lin_wan\", \"expression\": \"克制\", \"action\": \"转身\", \"face_pose\": \"front\"}], \"dialogue\": [{\"char_id\": \"c_lin_wan\", \"text\": \"你说过会来的\"}], \"transition_in\": \"cut\"}, {\"shot_id\": \"ep01_sh003\", \"scene_id\": \"loc_rooftop_night\", \"order\": 2, \"first_frame_prompt\": \"男子从阴影里走出\", \"shot_size\": \"MCU\", \"camera_angle\": \"eye_level\", \"duration_s\": 4.0, \"characters\": [{\"char_id\": \"c_chen_mo\", \"expression\": \"克制\", \"action\": \"握伞\", \"face_pose\": \"front\"}], \"dialogue\": [{\"char_id\": \"c_chen_mo\", \"text\": \"我来了。晚了七年。\"}], \"transition_in\": \"cut\"}]}",
+      "prompts": [
+        {
+          "stage": "bible",
+          "prompt": "你是一位电影美术指导。读下面的剧本，产出角色设定和场景设定。\n\n画风是真人写实，描述用自然的中文短句。\n\n要求：\n\n1. 只写剧本里真实出现的角色和场景，不要自己加人加景。\n2. face 这一段会在几十个镜头里被逐字复用，是角色能不能保持一致的关键。\n   写具体的、可画出来的特征：发型、发色、脸型、眼型。\n   不要写\"好看\"\"气质佳\"这类无法转成画面的词。\n3. identity 用一句话说清性别、年龄段、气质。\n4. attire 写这个角色的默认服装。剧情中的换装不在这里写。\n5. key 用英文小写和下划线：角色按中文名音译，场景按这个地方的英文说法，\n   都加上区分用的后缀（哪个时段、哪一间）。\n6. lighting 要说清时间和光质：什么时段、光从哪儿来、冷还是暖、硬还是软。\n7. global_style 是全片统一的调子，所有镜头都会带上它。写成配方，四样都要有：\n   胶片或画质的质感、焦段倾向和景深、色板（饱和度、冷暖）、光的性格\n   （硬软、暗部占多少）。不要写「电影感」这三个字，它没有信息量。\n\n剧本：\n\n林晚站在天台边缘，雨水打湿了她的白衬衫。\n林晚：你说过会来的。\n陈默从阴影里走出来。\n陈默：我来了。晚了七年。\n\n只输出 JSON，不要任何解释文字。"
+        }
+      ],
+      "status": 200,
+      "response": {
+        "added_characters": [
+          "c_lin_wan",
+          "c_chen_mo"
+        ],
+        "added_locations": [
+          "loc_rooftop_night"
+        ],
+        "kept": 0,
+        "merged": 0,
+        "remapped_shots": 0,
+        "characters": [
+          {
+            "char_id": "c_lin_yuan",
+            "name": "林渊",
+            "identity": "三十岁上下的男性，沉默寡言。",
+            "face": "单眼皮，短碎发，眼下有一道旧疤",
+            "attire": "深灰西装，衬衫领口松着",
+            "is_new": false
+          },
+          {
+            "char_id": "c_lin_wan",
+            "name": "林晚",
+            "identity": "二十七岁女性，外表冷静，内里执拗",
+            "face": "黑色长直发，鹅蛋脸，杏眼，眼尾微垂，薄唇",
+            "attire": "白色衬衫，深色西装裤",
+            "is_new": true
+          },
+          {
+            "char_id": "c_chen_mo",
+            "name": "陈默",
+            "identity": "三十出头男性，沉默寡言",
+            "face": "短寸黑发，方脸，浓眉，单眼皮",
+            "attire": "黑色风衣",
+            "is_new": true
+          }
+        ],
+        "locations": [
+          {
+            "location_id": "loc_rooftop",
+            "name": "天台",
+            "space": "老式写字楼顶层，水泥地面，一圈锈蚀铁栏杆",
+            "lighting": "冷调顶光，远处霓虹反光",
+            "is_new": false
+          },
+          {
+            "location_id": "loc_alley",
+            "name": "小巷",
+            "space": "两侧是斑驳砖墙的窄巷",
+            "lighting": "暖调侧逆光",
+            "is_new": false
+          },
+          {
+            "location_id": "loc_rooftop_night",
+            "name": "夜间天台",
+            "space": "水泥地面，锈蚀的护栏",
+            "lighting": "夜间冷调顶光",
+            "is_new": true
+          }
+        ],
+        "reset_shots": 0,
+        "source": "script"
+      },
+      "compare": "full",
+      "cpp_status": 200,
+      "cpp_note": null,
+      "assets_after": {
+        "characters": {
+          "c_lin_yuan": {
+            "char_id": "c_lin_yuan",
+            "name": "林渊",
+            "appearance": {
+              "identity": "三十岁上下的男性，沉默寡言。",
+              "body": "偏瘦，肩背挺直",
+              "face": "单眼皮，短碎发，眼下有一道旧疤",
+              "attire": "深灰西装，衬衫领口松着",
+              "style": "低饱和，胶片颗粒"
+            },
+            "wardrobe": [
+              {
+                "wardrobe_id": "suit_soaked",
+                "description": "西装被雨淋透，紧贴身体"
+              },
+              {
+                "wardrobe_id": "casual",
+                "description": "灰色卫衣，牛仔裤"
+              }
+            ],
+            "ref_front": "refs/c_lin_yuan_front.png",
+            "ref_three_quarter": "refs/c_lin_yuan_tq.png",
+            "ref_back": null,
+            "lora_path": null,
+            "lora_trigger": "linyuan_v3",
+            "lora_strength": 0.85,
+            "voice_id": null,
+            "voice_ref_audio": null,
+            "voice_gender": "male",
+            "voice_order": 1
+          },
+          "c_lin_wan": {
+            "char_id": "c_lin_wan",
+            "name": "林晚",
+            "appearance": {
+              "identity": "二十七岁女性，外表冷静，内里执拗",
+              "body": "偏瘦，中等身高",
+              "face": "黑色长直发，鹅蛋脸，杏眼，眼尾微垂，薄唇",
+              "attire": "白色衬衫，深色西装裤",
+              "style": ""
+            },
+            "wardrobe": [],
+            "ref_front": null,
+            "ref_three_quarter": null,
+            "ref_back": null,
+            "lora_path": null,
+            "lora_trigger": null,
+            "lora_strength": 1.0,
+            "voice_id": null,
+            "voice_ref_audio": null,
+            "voice_gender": "female",
+            "voice_order": 0
+          },
+          "c_chen_mo": {
+            "char_id": "c_chen_mo",
+            "name": "陈默",
+            "appearance": {
+              "identity": "三十出头男性，沉默寡言",
+              "body": "高瘦",
+              "face": "短寸黑发，方脸，浓眉，单眼皮",
+              "attire": "黑色风衣",
+              "style": ""
+            },
+            "wardrobe": [],
+            "ref_front": null,
+            "ref_three_quarter": null,
+            "ref_back": null,
+            "lora_path": null,
+            "lora_trigger": null,
+            "lora_strength": 1.0,
+            "voice_id": null,
+            "voice_ref_audio": null,
+            "voice_gender": "male",
+            "voice_order": 1
+          }
+        },
+        "locations": {
+          "loc_rooftop": {
+            "location_id": "loc_rooftop",
+            "name": "天台",
+            "space": "老式写字楼顶层，水泥地面，一圈锈蚀铁栏杆",
+            "lighting": "冷调顶光，远处霓虹反光",
+            "palette": "青灰为主，点缀品红",
+            "ref_empty": "refs/loc_rooftop_empty.png"
+          },
+          "loc_alley": {
+            "location_id": "loc_alley",
+            "name": "小巷",
+            "space": "两侧是斑驳砖墙的窄巷",
+            "lighting": "暖调侧逆光",
+            "palette": "",
+            "ref_empty": null
+          },
+          "loc_rooftop_night": {
+            "location_id": "loc_rooftop_night",
+            "name": "夜间天台",
+            "space": "水泥地面，锈蚀的护栏",
+            "lighting": "夜间冷调顶光",
+            "palette": "冷蓝为主",
+            "ref_empty": null
+          }
+        },
+        "style": {
+          "style_line": "realistic",
+          "global_style": "写实电影感，浅景深",
+          "negative_prompt": "模糊，低质量",
+          "aspect_ratio": "9:16"
+        }
+      },
+      "project_after": {
+        "schema_version": 1,
+        "project_id": "yuye-tiantai",
+        "title": "雨夜天台",
+        "style_line": "realistic",
+        "premise": "一个关于错过与和解的都市电影。全片九十分钟，横屏。",
+        "created_at": "2026-09-07T14:56:29.511392+00:00",
+        "updated_at": "2026-09-07T14:56:29.524529+00:00",
+        "episodes": [
+          {
+            "episode_id": "ep01",
+            "title": "第一章 · 雨",
+            "synopsis": "林渊在天台等一个不会来的人。",
+            "target_duration_s": 180.0,
+            "script": "（雨声起）\n林渊站在栏杆前，没有回头。",
+            "shots": [
+              {
+                "shot_id": "ep01_s03_sh007",
+                "scene_id": "ep01_s03",
+                "order": 6,
+                "visual_desc": "雨夜天台，男主背对镜头站在栏杆前，远处霓虹在雨幕里散成一片光晕",
+                "first_frame_prompt": "cinematic, rooftop at night, heavy rain, neon bokeh, back view",
+                "last_frame_prompt": "cinematic, rooftop at night, man turns around, rain on face",
+                "motion_prompt": "缓慢推进，雨丝斜掠，人物微微转头",
+                "negative_prompt": "模糊, 低质量, 多余的手指",
+                "shot_size": "MCU",
+                "camera_angle": "low",
+                "camera_move": "push_in",
+                "camera_id": "cam_rooftop_a",
+                "characters": [
+                  {
+                    "char_id": "lin_yuan",
+                    "expression": "隐忍",
+                    "action": "握紧栏杆，指节发白",
+                    "wardrobe_state": "suit_soaked",
+                    "face_pose": "three_quarter",
+                    "screen_pos": "center"
+                  },
+                  {
+                    "char_id": "chen_mo",
+                    "expression": "愕然",
+                    "action": "停在门口，没有再往前",
+                    "wardrobe_state": "default",
+                    "face_pose": "profile",
+                    "screen_pos": "left"
+                  }
+                ],
+                "location_id": "loc_rooftop",
+                "prop_ids": [
+                  "prop_umbrella",
+                  "prop_phone"
+                ],
+                "duration_s": 6.5,
+                "duration_locked": true,
+                "dialogue": [
+                  {
+                    "char_id": "lin_yuan",
+                    "text": "你要是早半个小时来，什么都还来得及。",
+                    "emotion": "压抑",
+                    "emotion_intensity": 0.8,
+                    "voice_id": "voice_lin",
+                    "audio_path": "audio/ep01_s03_sh007_01.wav",
+                    "actual_duration_s": 3.2
+                  },
+                  {
+                    "char_id": null,
+                    "text": "雨声盖过了他后半句。",
+                    "emotion": "neutral",
+                    "emotion_intensity": 0.3,
+                    "voice_id": null,
+                    "audio_path": null,
+                    "actual_duration_s": null
+                  }
+                ],
+                "sfx": [
+                  "雨声",
+                  "远处车流"
+                ],
+                "bgm_cue": "bgm_tension_low",
+                "needs_lipsync": false,
+                "transition_in": "dissolve",
+                "transition_dur_s": 0.8,
+                "subtitle_text": "你要是早半个小时来，什么都还来得及。",
+                "beat": "反转",
+                "continuity_notes": "上一镜他还没湿透，这里服装状态要接上 suit_soaked",
+                "missing_info": [
+                  "未确定陈墨是否带伞"
+                ],
+                "status": "audio_done",
+                "attempts": 2,
+                "frame_path": "frames/ep01_s03_sh007.png",
+                "video_path": null,
+                "gate_notes": [
+                  "草稿档画面偏暗，已调高曝光重跑"
+                ]
+              },
+              {
+                "shot_id": "ep01_s01_sh001",
+                "scene_id": "ep01_s01",
+                "order": 0,
+                "visual_desc": "",
+                "first_frame_prompt": "",
+                "last_frame_prompt": null,
+                "motion_prompt": "",
+                "negative_prompt": "",
+                "shot_size": "MS",
+                "camera_angle": "eye_level",
+                "camera_move": "static",
+                "camera_id": null,
+                "characters": [],
+                "location_id": null,
+                "prop_ids": [],
+                "duration_s": 5.0,
+                "duration_locked": false,
+                "dialogue": [],
+                "sfx": [],
+                "bgm_cue": null,
+                "needs_lipsync": false,
+                "transition_in": "cut",
+                "transition_dur_s": 0.0,
+                "subtitle_text": "",
+                "beat": "",
+                "continuity_notes": "",
+                "missing_info": [],
+                "status": "planned",
+                "attempts": 0,
+                "frame_path": null,
+                "video_path": null,
+                "gate_notes": []
+              }
+            ]
+          },
+          {
+            "episode_id": "ep02",
+            "title": "第二章 · 晴",
+            "synopsis": "三年后，同一个天台。",
+            "target_duration_s": 200.0,
+            "script": "",
+            "shots": []
+          }
+        ]
+      }
+    },
+    {
+      "name": "圣经：覆盖",
+      "url": "/api/bible",
+      "body": {
+        "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_planning_3brmf2ea\\case02",
+        "script": "林晚站在天台边缘，雨水打湿了她的白衬衫。\n林晚：你说过会来的。\n陈默从阴影里走出来。\n陈默：我来了。晚了七年。",
+        "overwrite": true
+      },
+      "clear_assets": false,
+      "llm_bible": "{\"characters\": [{\"key\": \"lin_wan\", \"name\": \"林晚\", \"identity\": \"二十七岁女性，外表冷静，内里执拗。\", \"body\": \"偏瘦，中等身高\", \"face\": \"黑色长直发，鹅蛋脸，杏眼，眼尾微垂，薄唇。\", \"attire\": \"白色衬衫，深色西装裤\"}, {\"key\": \"chen_mo\", \"name\": \"陈默\", \"identity\": \"三十出头男性，沉默寡言\", \"body\": \"高瘦\", \"face\": \"短寸黑发，方脸，浓眉，单眼皮\", \"attire\": \"黑色风衣\"}], \"locations\": [{\"key\": \"rooftop_night\", \"name\": \"夜间天台\", \"space\": \"水泥地面，锈蚀的护栏\", \"lighting\": \"夜间冷调顶光。\", \"palette\": \"冷蓝为主\"}], \"global_style\": \"电影感，浅景深，冷色调。\"}",
+      "llm_storyboard": "{\"shots\": [{\"shot_id\": \"ep01_sh001\", \"scene_id\": \"loc_rooftop_night\", \"order\": 0, \"first_frame_prompt\": \"夜间天台，雨中，女子背对镜头\", \"shot_size\": \"MS\", \"camera_angle\": \"eye_level\", \"duration_s\": 5.0, \"characters\": [{\"char_id\": \"c_lin_wan\", \"expression\": \"落寞\", \"action\": \"扶着护栏\", \"face_pose\": \"back\"}], \"dialogue\": [], \"transition_in\": \"cut\"}, {\"shot_id\": \"ep01_sh002\", \"scene_id\": \"loc_rooftop_night\", \"order\": 1, \"first_frame_prompt\": \"近景，女子转身\", \"shot_size\": \"CU\", \"camera_angle\": \"eye_level\", \"duration_s\": 3.0, \"characters\": [{\"char_id\": \"c_lin_wan\", \"expression\": \"克制\", \"action\": \"转身\", \"face_pose\": \"front\"}], \"dialogue\": [{\"char_id\": \"c_lin_wan\", \"text\": \"你说过会来的\"}], \"transition_in\": \"cut\"}, {\"shot_id\": \"ep01_sh003\", \"scene_id\": \"loc_rooftop_night\", \"order\": 2, \"first_frame_prompt\": \"男子从阴影里走出\", \"shot_size\": \"MCU\", \"camera_angle\": \"eye_level\", \"duration_s\": 4.0, \"characters\": [{\"char_id\": \"c_chen_mo\", \"expression\": \"克制\", \"action\": \"握伞\", \"face_pose\": \"front\"}], \"dialogue\": [{\"char_id\": \"c_chen_mo\", \"text\": \"我来了。晚了七年。\"}], \"transition_in\": \"cut\"}]}",
+      "prompts": [
+        {
+          "stage": "bible",
+          "prompt": "你是一位电影美术指导。读下面的剧本，产出角色设定和场景设定。\n\n画风是真人写实，描述用自然的中文短句。\n\n要求：\n\n1. 只写剧本里真实出现的角色和场景，不要自己加人加景。\n2. face 这一段会在几十个镜头里被逐字复用，是角色能不能保持一致的关键。\n   写具体的、可画出来的特征：发型、发色、脸型、眼型。\n   不要写\"好看\"\"气质佳\"这类无法转成画面的词。\n3. identity 用一句话说清性别、年龄段、气质。\n4. attire 写这个角色的默认服装。剧情中的换装不在这里写。\n5. key 用英文小写和下划线：角色按中文名音译，场景按这个地方的英文说法，\n   都加上区分用的后缀（哪个时段、哪一间）。\n6. lighting 要说清时间和光质：什么时段、光从哪儿来、冷还是暖、硬还是软。\n7. global_style 是全片统一的调子，所有镜头都会带上它。写成配方，四样都要有：\n   胶片或画质的质感、焦段倾向和景深、色板（饱和度、冷暖）、光的性格\n   （硬软、暗部占多少）。不要写「电影感」这三个字，它没有信息量。\n\n剧本：\n\n林晚站在天台边缘，雨水打湿了她的白衬衫。\n林晚：你说过会来的。\n陈默从阴影里走出来。\n陈默：我来了。晚了七年。\n\n只输出 JSON，不要任何解释文字。"
+        }
+      ],
+      "status": 200,
+      "response": {
+        "added_characters": [
+          "c_lin_wan",
+          "c_chen_mo"
+        ],
+        "added_locations": [
+          "loc_rooftop_night"
+        ],
+        "kept": 0,
+        "merged": 0,
+        "remapped_shots": 0,
+        "characters": [
+          {
+            "char_id": "c_lin_yuan",
+            "name": "林渊",
+            "identity": "三十岁上下的男性，沉默寡言。",
+            "face": "单眼皮，短碎发，眼下有一道旧疤",
+            "attire": "深灰西装，衬衫领口松着",
+            "is_new": false
+          },
+          {
+            "char_id": "c_lin_wan",
+            "name": "林晚",
+            "identity": "二十七岁女性，外表冷静，内里执拗",
+            "face": "黑色长直发，鹅蛋脸，杏眼，眼尾微垂，薄唇",
+            "attire": "白色衬衫，深色西装裤",
+            "is_new": true
+          },
+          {
+            "char_id": "c_chen_mo",
+            "name": "陈默",
+            "identity": "三十出头男性，沉默寡言",
+            "face": "短寸黑发，方脸，浓眉，单眼皮",
+            "attire": "黑色风衣",
+            "is_new": true
+          }
+        ],
+        "locations": [
+          {
+            "location_id": "loc_rooftop",
+            "name": "天台",
+            "space": "老式写字楼顶层，水泥地面，一圈锈蚀铁栏杆",
+            "lighting": "冷调顶光，远处霓虹反光",
+            "is_new": false
+          },
+          {
+            "location_id": "loc_alley",
+            "name": "小巷",
+            "space": "两侧是斑驳砖墙的窄巷",
+            "lighting": "暖调侧逆光",
+            "is_new": false
+          },
+          {
+            "location_id": "loc_rooftop_night",
+            "name": "夜间天台",
+            "space": "水泥地面，锈蚀的护栏",
+            "lighting": "夜间冷调顶光",
+            "is_new": true
+          }
+        ],
+        "reset_shots": 1,
+        "source": "script"
+      },
+      "compare": "full",
+      "cpp_status": 200,
+      "cpp_note": null,
+      "assets_after": {
+        "characters": {
+          "c_lin_yuan": {
+            "char_id": "c_lin_yuan",
+            "name": "林渊",
+            "appearance": {
+              "identity": "三十岁上下的男性，沉默寡言。",
+              "body": "偏瘦，肩背挺直",
+              "face": "单眼皮，短碎发，眼下有一道旧疤",
+              "attire": "深灰西装，衬衫领口松着",
+              "style": "低饱和，胶片颗粒"
+            },
+            "wardrobe": [
+              {
+                "wardrobe_id": "suit_soaked",
+                "description": "西装被雨淋透，紧贴身体"
+              },
+              {
+                "wardrobe_id": "casual",
+                "description": "灰色卫衣，牛仔裤"
+              }
+            ],
+            "ref_front": "refs/c_lin_yuan_front.png",
+            "ref_three_quarter": "refs/c_lin_yuan_tq.png",
+            "ref_back": null,
+            "lora_path": null,
+            "lora_trigger": "linyuan_v3",
+            "lora_strength": 0.85,
+            "voice_id": null,
+            "voice_ref_audio": null,
+            "voice_gender": "male",
+            "voice_order": 1
+          },
+          "c_lin_wan": {
+            "char_id": "c_lin_wan",
+            "name": "林晚",
+            "appearance": {
+              "identity": "二十七岁女性，外表冷静，内里执拗",
+              "body": "偏瘦，中等身高",
+              "face": "黑色长直发，鹅蛋脸，杏眼，眼尾微垂，薄唇",
+              "attire": "白色衬衫，深色西装裤",
+              "style": ""
+            },
+            "wardrobe": [],
+            "ref_front": null,
+            "ref_three_quarter": null,
+            "ref_back": null,
+            "lora_path": null,
+            "lora_trigger": null,
+            "lora_strength": 1.0,
+            "voice_id": null,
+            "voice_ref_audio": null,
+            "voice_gender": "female",
+            "voice_order": 0
+          },
+          "c_chen_mo": {
+            "char_id": "c_chen_mo",
+            "name": "陈默",
+            "appearance": {
+              "identity": "三十出头男性，沉默寡言",
+              "body": "高瘦",
+              "face": "短寸黑发，方脸，浓眉，单眼皮",
+              "attire": "黑色风衣",
+              "style": ""
+            },
+            "wardrobe": [],
+            "ref_front": null,
+            "ref_three_quarter": null,
+            "ref_back": null,
+            "lora_path": null,
+            "lora_trigger": null,
+            "lora_strength": 1.0,
+            "voice_id": null,
+            "voice_ref_audio": null,
+            "voice_gender": "male",
+            "voice_order": 1
+          }
+        },
+        "locations": {
+          "loc_rooftop": {
+            "location_id": "loc_rooftop",
+            "name": "天台",
+            "space": "老式写字楼顶层，水泥地面，一圈锈蚀铁栏杆",
+            "lighting": "冷调顶光，远处霓虹反光",
+            "palette": "青灰为主，点缀品红",
+            "ref_empty": "refs/loc_rooftop_empty.png"
+          },
+          "loc_alley": {
+            "location_id": "loc_alley",
+            "name": "小巷",
+            "space": "两侧是斑驳砖墙的窄巷",
+            "lighting": "暖调侧逆光",
+            "palette": "",
+            "ref_empty": null
+          },
+          "loc_rooftop_night": {
+            "location_id": "loc_rooftop_night",
+            "name": "夜间天台",
+            "space": "水泥地面，锈蚀的护栏",
+            "lighting": "夜间冷调顶光",
+            "palette": "冷蓝为主",
+            "ref_empty": null
+          }
+        },
+        "style": {
+          "style_line": "realistic",
+          "global_style": "写实电影感，浅景深",
+          "negative_prompt": "模糊，低质量",
+          "aspect_ratio": "9:16"
+        }
+      },
+      "project_after": {
+        "schema_version": 1,
+        "project_id": "yuye-tiantai",
+        "title": "雨夜天台",
+        "style_line": "realistic",
+        "premise": "一个关于错过与和解的都市电影。全片九十分钟，横屏。",
+        "created_at": "2026-09-07T14:56:29.511392+00:00",
+        "updated_at": "2026-09-07T16:57:14.334085+00:00",
+        "episodes": [
+          {
+            "episode_id": "ep01",
+            "title": "第一章 · 雨",
+            "synopsis": "林渊在天台等一个不会来的人。",
+            "target_duration_s": 180.0,
+            "script": "（雨声起）\n林渊站在栏杆前，没有回头。",
+            "shots": [
+              {
+                "shot_id": "ep01_s03_sh007",
+                "scene_id": "ep01_s03",
+                "order": 6,
+                "visual_desc": "雨夜天台，男主背对镜头站在栏杆前，远处霓虹在雨幕里散成一片光晕",
+                "first_frame_prompt": "cinematic, rooftop at night, heavy rain, neon bokeh, back view",
+                "last_frame_prompt": "cinematic, rooftop at night, man turns around, rain on face",
+                "motion_prompt": "缓慢推进，雨丝斜掠，人物微微转头",
+                "negative_prompt": "模糊, 低质量, 多余的手指",
+                "shot_size": "MCU",
+                "camera_angle": "low",
+                "camera_move": "push_in",
+                "lens": "auto",
+                "lighting": "",
+                "continuous_with_prev": false,
+                "camera_id": "cam_rooftop_a",
+                "characters": [
+                  {
+                    "char_id": "lin_yuan",
+                    "expression": "隐忍",
+                    "action": "握紧栏杆，指节发白",
+                    "wardrobe_state": "suit_soaked",
+                    "face_pose": "three_quarter",
+                    "screen_pos": "center"
+                  },
+                  {
+                    "char_id": "chen_mo",
+                    "expression": "愕然",
+                    "action": "停在门口，没有再往前",
+                    "wardrobe_state": "default",
+                    "face_pose": "profile",
+                    "screen_pos": "left"
+                  }
+                ],
+                "location_id": "loc_rooftop",
+                "prop_ids": [
+                  "prop_umbrella",
+                  "prop_phone"
+                ],
+                "duration_s": 6.5,
+                "duration_locked": true,
+                "dialogue": [
+                  {
+                    "char_id": "lin_yuan",
+                    "text": "你要是早半个小时来，什么都还来得及。",
+                    "emotion": "压抑",
+                    "emotion_intensity": 0.8,
+                    "voice_id": "voice_lin",
+                    "audio_path": "audio/ep01_s03_sh007_01.wav",
+                    "actual_duration_s": 3.2
+                  },
+                  {
+                    "char_id": null,
+                    "text": "雨声盖过了他后半句。",
+                    "emotion": "neutral",
+                    "emotion_intensity": 0.3,
+                    "voice_id": null,
+                    "audio_path": null,
+                    "actual_duration_s": null
+                  }
+                ],
+                "sfx": [
+                  "雨声",
+                  "远处车流"
+                ],
+                "bgm_cue": "bgm_tension_low",
+                "needs_lipsync": false,
+                "transition_in": "dissolve",
+                "transition_dur_s": 0.8,
+                "subtitle_text": "你要是早半个小时来，什么都还来得及。",
+                "beat": "反转",
+                "continuity_notes": "上一镜他还没湿透，这里服装状态要接上 suit_soaked",
+                "missing_info": [
+                  "未确定陈墨是否带伞"
+                ],
+                "status": "planned",
+                "attempts": 0,
+                "frame_path": "frames/ep01_s03_sh007.png",
+                "end_frame_path": null,
+                "video_path": null,
+                "gate_notes": []
+              },
+              {
+                "shot_id": "ep01_s01_sh001",
+                "scene_id": "ep01_s01",
+                "order": 0,
+                "visual_desc": "",
+                "first_frame_prompt": "",
+                "last_frame_prompt": null,
+                "motion_prompt": "",
+                "negative_prompt": "",
+                "shot_size": "MS",
+                "camera_angle": "eye_level",
+                "camera_move": "static",
+                "lens": "auto",
+                "lighting": "",
+                "continuous_with_prev": false,
+                "camera_id": null,
+                "characters": [],
+                "location_id": null,
+                "prop_ids": [],
+                "duration_s": 5.0,
+                "duration_locked": false,
+                "dialogue": [],
+                "sfx": [],
+                "bgm_cue": null,
+                "needs_lipsync": false,
+                "transition_in": "cut",
+                "transition_dur_s": 0.0,
+                "subtitle_text": "",
+                "beat": "",
+                "continuity_notes": "",
+                "missing_info": [],
+                "status": "planned",
+                "attempts": 0,
+                "frame_path": null,
+                "end_frame_path": null,
+                "video_path": null,
+                "gate_notes": []
+              }
+            ],
+            "chapter_refs": []
+          },
+          {
+            "episode_id": "ep02",
+            "title": "第二章 · 晴",
+            "synopsis": "三年后，同一个天台。",
+            "target_duration_s": 200.0,
+            "script": "",
+            "shots": [],
+            "chapter_refs": []
+          }
+        ]
+      }
+    },
+    {
+      "name": "圣经：用已存的剧本",
+      "url": "/api/bible",
+      "body": {
+        "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_planning_3brmf2ea\\case03"
+      },
+      "clear_assets": false,
+      "llm_bible": "{\"characters\": [{\"key\": \"lin_wan\", \"name\": \"林晚\", \"identity\": \"二十七岁女性，外表冷静，内里执拗。\", \"body\": \"偏瘦，中等身高\", \"face\": \"黑色长直发，鹅蛋脸，杏眼，眼尾微垂，薄唇。\", \"attire\": \"白色衬衫，深色西装裤\"}, {\"key\": \"chen_mo\", \"name\": \"陈默\", \"identity\": \"三十出头男性，沉默寡言\", \"body\": \"高瘦\", \"face\": \"短寸黑发，方脸，浓眉，单眼皮\", \"attire\": \"黑色风衣\"}], \"locations\": [{\"key\": \"rooftop_night\", \"name\": \"夜间天台\", \"space\": \"水泥地面，锈蚀的护栏\", \"lighting\": \"夜间冷调顶光。\", \"palette\": \"冷蓝为主\"}], \"global_style\": \"电影感，浅景深，冷色调。\"}",
+      "llm_storyboard": "{\"shots\": [{\"shot_id\": \"ep01_sh001\", \"scene_id\": \"loc_rooftop_night\", \"order\": 0, \"first_frame_prompt\": \"夜间天台，雨中，女子背对镜头\", \"shot_size\": \"MS\", \"camera_angle\": \"eye_level\", \"duration_s\": 5.0, \"characters\": [{\"char_id\": \"c_lin_wan\", \"expression\": \"落寞\", \"action\": \"扶着护栏\", \"face_pose\": \"back\"}], \"dialogue\": [], \"transition_in\": \"cut\"}, {\"shot_id\": \"ep01_sh002\", \"scene_id\": \"loc_rooftop_night\", \"order\": 1, \"first_frame_prompt\": \"近景，女子转身\", \"shot_size\": \"CU\", \"camera_angle\": \"eye_level\", \"duration_s\": 3.0, \"characters\": [{\"char_id\": \"c_lin_wan\", \"expression\": \"克制\", \"action\": \"转身\", \"face_pose\": \"front\"}], \"dialogue\": [{\"char_id\": \"c_lin_wan\", \"text\": \"你说过会来的\"}], \"transition_in\": \"cut\"}, {\"shot_id\": \"ep01_sh003\", \"scene_id\": \"loc_rooftop_night\", \"order\": 2, \"first_frame_prompt\": \"男子从阴影里走出\", \"shot_size\": \"MCU\", \"camera_angle\": \"eye_level\", \"duration_s\": 4.0, \"characters\": [{\"char_id\": \"c_chen_mo\", \"expression\": \"克制\", \"action\": \"握伞\", \"face_pose\": \"front\"}], \"dialogue\": [{\"char_id\": \"c_chen_mo\", \"text\": \"我来了。晚了七年。\"}], \"transition_in\": \"cut\"}]}",
+      "prompts": [
+        {
+          "stage": "bible",
+          "prompt": "你是一位电影美术指导。读下面的剧本，产出角色设定和场景设定。\n\n画风是真人写实，描述用自然的中文短句。\n\n要求：\n\n1. 只写剧本里真实出现的角色和场景，不要自己加人加景。\n2. face 这一段会在几十个镜头里被逐字复用，是角色能不能保持一致的关键。\n   写具体的、可画出来的特征：发型、发色、脸型、眼型。\n   不要写\"好看\"\"气质佳\"这类无法转成画面的词。\n3. identity 用一句话说清性别、年龄段、气质。\n4. attire 写这个角色的默认服装。剧情中的换装不在这里写。\n5. key 用英文小写和下划线：角色按中文名音译，场景按这个地方的英文说法，\n   都加上区分用的后缀（哪个时段、哪一间）。\n6. lighting 要说清时间和光质：什么时段、光从哪儿来、冷还是暖、硬还是软。\n7. global_style 是全片统一的调子，所有镜头都会带上它。写成配方，四样都要有：\n   胶片或画质的质感、焦段倾向和景深、色板（饱和度、冷暖）、光的性格\n   （硬软、暗部占多少）。不要写「电影感」这三个字，它没有信息量。\n\n剧本：\n\n（雨声起）\n林渊站在栏杆前，没有回头。\n\n只输出 JSON，不要任何解释文字。"
+        }
+      ],
+      "status": 200,
+      "response": {
+        "added_characters": [
+          "c_lin_wan",
+          "c_chen_mo"
+        ],
+        "added_locations": [
+          "loc_rooftop_night"
+        ],
+        "kept": 0,
+        "merged": 0,
+        "remapped_shots": 0,
+        "characters": [
+          {
+            "char_id": "c_lin_yuan",
+            "name": "林渊",
+            "identity": "三十岁上下的男性，沉默寡言。",
+            "face": "单眼皮，短碎发，眼下有一道旧疤",
+            "attire": "深灰西装，衬衫领口松着",
+            "is_new": false
+          },
+          {
+            "char_id": "c_lin_wan",
+            "name": "林晚",
+            "identity": "二十七岁女性，外表冷静，内里执拗",
+            "face": "黑色长直发，鹅蛋脸，杏眼，眼尾微垂，薄唇",
+            "attire": "白色衬衫，深色西装裤",
+            "is_new": true
+          },
+          {
+            "char_id": "c_chen_mo",
+            "name": "陈默",
+            "identity": "三十出头男性，沉默寡言",
+            "face": "短寸黑发，方脸，浓眉，单眼皮",
+            "attire": "黑色风衣",
+            "is_new": true
+          }
+        ],
+        "locations": [
+          {
+            "location_id": "loc_rooftop",
+            "name": "天台",
+            "space": "老式写字楼顶层，水泥地面，一圈锈蚀铁栏杆",
+            "lighting": "冷调顶光，远处霓虹反光",
+            "is_new": false
+          },
+          {
+            "location_id": "loc_alley",
+            "name": "小巷",
+            "space": "两侧是斑驳砖墙的窄巷",
+            "lighting": "暖调侧逆光",
+            "is_new": false
+          },
+          {
+            "location_id": "loc_rooftop_night",
+            "name": "夜间天台",
+            "space": "水泥地面，锈蚀的护栏",
+            "lighting": "夜间冷调顶光",
+            "is_new": true
+          }
+        ],
+        "reset_shots": 0,
+        "source": "script"
+      },
+      "compare": "full",
+      "cpp_status": 200,
+      "cpp_note": null,
+      "assets_after": {
+        "characters": {
+          "c_lin_yuan": {
+            "char_id": "c_lin_yuan",
+            "name": "林渊",
+            "appearance": {
+              "identity": "三十岁上下的男性，沉默寡言。",
+              "body": "偏瘦，肩背挺直",
+              "face": "单眼皮，短碎发，眼下有一道旧疤",
+              "attire": "深灰西装，衬衫领口松着",
+              "style": "低饱和，胶片颗粒"
+            },
+            "wardrobe": [
+              {
+                "wardrobe_id": "suit_soaked",
+                "description": "西装被雨淋透，紧贴身体"
+              },
+              {
+                "wardrobe_id": "casual",
+                "description": "灰色卫衣，牛仔裤"
+              }
+            ],
+            "ref_front": "refs/c_lin_yuan_front.png",
+            "ref_three_quarter": "refs/c_lin_yuan_tq.png",
+            "ref_back": null,
+            "lora_path": null,
+            "lora_trigger": "linyuan_v3",
+            "lora_strength": 0.85,
+            "voice_id": null,
+            "voice_ref_audio": null,
+            "voice_gender": "male",
+            "voice_order": 1
+          },
+          "c_lin_wan": {
+            "char_id": "c_lin_wan",
+            "name": "林晚",
+            "appearance": {
+              "identity": "二十七岁女性，外表冷静，内里执拗",
+              "body": "偏瘦，中等身高",
+              "face": "黑色长直发，鹅蛋脸，杏眼，眼尾微垂，薄唇",
+              "attire": "白色衬衫，深色西装裤",
+              "style": ""
+            },
+            "wardrobe": [],
+            "ref_front": null,
+            "ref_three_quarter": null,
+            "ref_back": null,
+            "lora_path": null,
+            "lora_trigger": null,
+            "lora_strength": 1.0,
+            "voice_id": null,
+            "voice_ref_audio": null,
+            "voice_gender": "female",
+            "voice_order": 0
+          },
+          "c_chen_mo": {
+            "char_id": "c_chen_mo",
+            "name": "陈默",
+            "appearance": {
+              "identity": "三十出头男性，沉默寡言",
+              "body": "高瘦",
+              "face": "短寸黑发，方脸，浓眉，单眼皮",
+              "attire": "黑色风衣",
+              "style": ""
+            },
+            "wardrobe": [],
+            "ref_front": null,
+            "ref_three_quarter": null,
+            "ref_back": null,
+            "lora_path": null,
+            "lora_trigger": null,
+            "lora_strength": 1.0,
+            "voice_id": null,
+            "voice_ref_audio": null,
+            "voice_gender": "male",
+            "voice_order": 1
+          }
+        },
+        "locations": {
+          "loc_rooftop": {
+            "location_id": "loc_rooftop",
+            "name": "天台",
+            "space": "老式写字楼顶层，水泥地面，一圈锈蚀铁栏杆",
+            "lighting": "冷调顶光，远处霓虹反光",
+            "palette": "青灰为主，点缀品红",
+            "ref_empty": "refs/loc_rooftop_empty.png"
+          },
+          "loc_alley": {
+            "location_id": "loc_alley",
+            "name": "小巷",
+            "space": "两侧是斑驳砖墙的窄巷",
+            "lighting": "暖调侧逆光",
+            "palette": "",
+            "ref_empty": null
+          },
+          "loc_rooftop_night": {
+            "location_id": "loc_rooftop_night",
+            "name": "夜间天台",
+            "space": "水泥地面，锈蚀的护栏",
+            "lighting": "夜间冷调顶光",
+            "palette": "冷蓝为主",
+            "ref_empty": null
+          }
+        },
+        "style": {
+          "style_line": "realistic",
+          "global_style": "写实电影感，浅景深",
+          "negative_prompt": "模糊，低质量",
+          "aspect_ratio": "9:16"
+        }
+      },
+      "project_after": {
+        "schema_version": 1,
+        "project_id": "yuye-tiantai",
+        "title": "雨夜天台",
+        "style_line": "realistic",
+        "premise": "一个关于错过与和解的都市电影。全片九十分钟，横屏。",
+        "created_at": "2026-09-07T14:56:29.511392+00:00",
+        "updated_at": "2026-09-07T14:56:29.524529+00:00",
+        "episodes": [
+          {
+            "episode_id": "ep01",
+            "title": "第一章 · 雨",
+            "synopsis": "林渊在天台等一个不会来的人。",
+            "target_duration_s": 180.0,
+            "script": "（雨声起）\n林渊站在栏杆前，没有回头。",
+            "shots": [
+              {
+                "shot_id": "ep01_s03_sh007",
+                "scene_id": "ep01_s03",
+                "order": 6,
+                "visual_desc": "雨夜天台，男主背对镜头站在栏杆前，远处霓虹在雨幕里散成一片光晕",
+                "first_frame_prompt": "cinematic, rooftop at night, heavy rain, neon bokeh, back view",
+                "last_frame_prompt": "cinematic, rooftop at night, man turns around, rain on face",
+                "motion_prompt": "缓慢推进，雨丝斜掠，人物微微转头",
+                "negative_prompt": "模糊, 低质量, 多余的手指",
+                "shot_size": "MCU",
+                "camera_angle": "low",
+                "camera_move": "push_in",
+                "camera_id": "cam_rooftop_a",
+                "characters": [
+                  {
+                    "char_id": "lin_yuan",
+                    "expression": "隐忍",
+                    "action": "握紧栏杆，指节发白",
+                    "wardrobe_state": "suit_soaked",
+                    "face_pose": "three_quarter",
+                    "screen_pos": "center"
+                  },
+                  {
+                    "char_id": "chen_mo",
+                    "expression": "愕然",
+                    "action": "停在门口，没有再往前",
+                    "wardrobe_state": "default",
+                    "face_pose": "profile",
+                    "screen_pos": "left"
+                  }
+                ],
+                "location_id": "loc_rooftop",
+                "prop_ids": [
+                  "prop_umbrella",
+                  "prop_phone"
+                ],
+                "duration_s": 6.5,
+                "duration_locked": true,
+                "dialogue": [
+                  {
+                    "char_id": "lin_yuan",
+                    "text": "你要是早半个小时来，什么都还来得及。",
+                    "emotion": "压抑",
+                    "emotion_intensity": 0.8,
+                    "voice_id": "voice_lin",
+                    "audio_path": "audio/ep01_s03_sh007_01.wav",
+                    "actual_duration_s": 3.2
+                  },
+                  {
+                    "char_id": null,
+                    "text": "雨声盖过了他后半句。",
+                    "emotion": "neutral",
+                    "emotion_intensity": 0.3,
+                    "voice_id": null,
+                    "audio_path": null,
+                    "actual_duration_s": null
+                  }
+                ],
+                "sfx": [
+                  "雨声",
+                  "远处车流"
+                ],
+                "bgm_cue": "bgm_tension_low",
+                "needs_lipsync": false,
+                "transition_in": "dissolve",
+                "transition_dur_s": 0.8,
+                "subtitle_text": "你要是早半个小时来，什么都还来得及。",
+                "beat": "反转",
+                "continuity_notes": "上一镜他还没湿透，这里服装状态要接上 suit_soaked",
+                "missing_info": [
+                  "未确定陈墨是否带伞"
+                ],
+                "status": "audio_done",
+                "attempts": 2,
+                "frame_path": "frames/ep01_s03_sh007.png",
+                "video_path": null,
+                "gate_notes": [
+                  "草稿档画面偏暗，已调高曝光重跑"
+                ]
+              },
+              {
+                "shot_id": "ep01_s01_sh001",
+                "scene_id": "ep01_s01",
+                "order": 0,
+                "visual_desc": "",
+                "first_frame_prompt": "",
+                "last_frame_prompt": null,
+                "motion_prompt": "",
+                "negative_prompt": "",
+                "shot_size": "MS",
+                "camera_angle": "eye_level",
+                "camera_move": "static",
+                "camera_id": null,
+                "characters": [],
+                "location_id": null,
+                "prop_ids": [],
+                "duration_s": 5.0,
+                "duration_locked": false,
+                "dialogue": [],
+                "sfx": [],
+                "bgm_cue": null,
+                "needs_lipsync": false,
+                "transition_in": "cut",
+                "transition_dur_s": 0.0,
+                "subtitle_text": "",
+                "beat": "",
+                "continuity_notes": "",
+                "missing_info": [],
+                "status": "planned",
+                "attempts": 0,
+                "frame_path": null,
+                "video_path": null,
+                "gate_notes": []
+              }
+            ]
+          },
+          {
+            "episode_id": "ep02",
+            "title": "第二章 · 晴",
+            "synopsis": "三年后，同一个天台。",
+            "target_duration_s": 200.0,
+            "script": "",
+            "shots": []
+          }
+        ]
+      }
+    },
+    {
+      "name": "圣经：指定章号",
+      "url": "/api/bible",
+      "body": {
+        "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_planning_3brmf2ea\\case04",
+        "episode_id": "ep01"
+      },
+      "clear_assets": false,
+      "llm_bible": "{\"characters\": [{\"key\": \"lin_wan\", \"name\": \"林晚\", \"identity\": \"二十七岁女性，外表冷静，内里执拗。\", \"body\": \"偏瘦，中等身高\", \"face\": \"黑色长直发，鹅蛋脸，杏眼，眼尾微垂，薄唇。\", \"attire\": \"白色衬衫，深色西装裤\"}, {\"key\": \"chen_mo\", \"name\": \"陈默\", \"identity\": \"三十出头男性，沉默寡言\", \"body\": \"高瘦\", \"face\": \"短寸黑发，方脸，浓眉，单眼皮\", \"attire\": \"黑色风衣\"}], \"locations\": [{\"key\": \"rooftop_night\", \"name\": \"夜间天台\", \"space\": \"水泥地面，锈蚀的护栏\", \"lighting\": \"夜间冷调顶光。\", \"palette\": \"冷蓝为主\"}], \"global_style\": \"电影感，浅景深，冷色调。\"}",
+      "llm_storyboard": "{\"shots\": [{\"shot_id\": \"ep01_sh001\", \"scene_id\": \"loc_rooftop_night\", \"order\": 0, \"first_frame_prompt\": \"夜间天台，雨中，女子背对镜头\", \"shot_size\": \"MS\", \"camera_angle\": \"eye_level\", \"duration_s\": 5.0, \"characters\": [{\"char_id\": \"c_lin_wan\", \"expression\": \"落寞\", \"action\": \"扶着护栏\", \"face_pose\": \"back\"}], \"dialogue\": [], \"transition_in\": \"cut\"}, {\"shot_id\": \"ep01_sh002\", \"scene_id\": \"loc_rooftop_night\", \"order\": 1, \"first_frame_prompt\": \"近景，女子转身\", \"shot_size\": \"CU\", \"camera_angle\": \"eye_level\", \"duration_s\": 3.0, \"characters\": [{\"char_id\": \"c_lin_wan\", \"expression\": \"克制\", \"action\": \"转身\", \"face_pose\": \"front\"}], \"dialogue\": [{\"char_id\": \"c_lin_wan\", \"text\": \"你说过会来的\"}], \"transition_in\": \"cut\"}, {\"shot_id\": \"ep01_sh003\", \"scene_id\": \"loc_rooftop_night\", \"order\": 2, \"first_frame_prompt\": \"男子从阴影里走出\", \"shot_size\": \"MCU\", \"camera_angle\": \"eye_level\", \"duration_s\": 4.0, \"characters\": [{\"char_id\": \"c_chen_mo\", \"expression\": \"克制\", \"action\": \"握伞\", \"face_pose\": \"front\"}], \"dialogue\": [{\"char_id\": \"c_chen_mo\", \"text\": \"我来了。晚了七年。\"}], \"transition_in\": \"cut\"}]}",
+      "prompts": [
+        {
+          "stage": "bible",
+          "prompt": "你是一位电影美术指导。读下面的剧本，产出角色设定和场景设定。\n\n画风是真人写实，描述用自然的中文短句。\n\n要求：\n\n1. 只写剧本里真实出现的角色和场景，不要自己加人加景。\n2. face 这一段会在几十个镜头里被逐字复用，是角色能不能保持一致的关键。\n   写具体的、可画出来的特征：发型、发色、脸型、眼型。\n   不要写\"好看\"\"气质佳\"这类无法转成画面的词。\n3. identity 用一句话说清性别、年龄段、气质。\n4. attire 写这个角色的默认服装。剧情中的换装不在这里写。\n5. key 用英文小写和下划线：角色按中文名音译，场景按这个地方的英文说法，\n   都加上区分用的后缀（哪个时段、哪一间）。\n6. lighting 要说清时间和光质：什么时段、光从哪儿来、冷还是暖、硬还是软。\n7. global_style 是全片统一的调子，所有镜头都会带上它。写成配方，四样都要有：\n   胶片或画质的质感、焦段倾向和景深、色板（饱和度、冷暖）、光的性格\n   （硬软、暗部占多少）。不要写「电影感」这三个字，它没有信息量。\n\n剧本：\n\n（雨声起）\n林渊站在栏杆前，没有回头。\n\n只输出 JSON，不要任何解释文字。"
+        }
+      ],
+      "status": 200,
+      "response": {
+        "added_characters": [
+          "c_lin_wan",
+          "c_chen_mo"
+        ],
+        "added_locations": [
+          "loc_rooftop_night"
+        ],
+        "kept": 0,
+        "merged": 0,
+        "remapped_shots": 0,
+        "characters": [
+          {
+            "char_id": "c_lin_yuan",
+            "name": "林渊",
+            "identity": "三十岁上下的男性，沉默寡言。",
+            "face": "单眼皮，短碎发，眼下有一道旧疤",
+            "attire": "深灰西装，衬衫领口松着",
+            "is_new": false
+          },
+          {
+            "char_id": "c_lin_wan",
+            "name": "林晚",
+            "identity": "二十七岁女性，外表冷静，内里执拗",
+            "face": "黑色长直发，鹅蛋脸，杏眼，眼尾微垂，薄唇",
+            "attire": "白色衬衫，深色西装裤",
+            "is_new": true
+          },
+          {
+            "char_id": "c_chen_mo",
+            "name": "陈默",
+            "identity": "三十出头男性，沉默寡言",
+            "face": "短寸黑发，方脸，浓眉，单眼皮",
+            "attire": "黑色风衣",
+            "is_new": true
+          }
+        ],
+        "locations": [
+          {
+            "location_id": "loc_rooftop",
+            "name": "天台",
+            "space": "老式写字楼顶层，水泥地面，一圈锈蚀铁栏杆",
+            "lighting": "冷调顶光，远处霓虹反光",
+            "is_new": false
+          },
+          {
+            "location_id": "loc_alley",
+            "name": "小巷",
+            "space": "两侧是斑驳砖墙的窄巷",
+            "lighting": "暖调侧逆光",
+            "is_new": false
+          },
+          {
+            "location_id": "loc_rooftop_night",
+            "name": "夜间天台",
+            "space": "水泥地面，锈蚀的护栏",
+            "lighting": "夜间冷调顶光",
+            "is_new": true
+          }
+        ],
+        "reset_shots": 0,
+        "source": "script"
+      },
+      "compare": "full",
+      "cpp_status": 200,
+      "cpp_note": null,
+      "assets_after": {
+        "characters": {
+          "c_lin_yuan": {
+            "char_id": "c_lin_yuan",
+            "name": "林渊",
+            "appearance": {
+              "identity": "三十岁上下的男性，沉默寡言。",
+              "body": "偏瘦，肩背挺直",
+              "face": "单眼皮，短碎发，眼下有一道旧疤",
+              "attire": "深灰西装，衬衫领口松着",
+              "style": "低饱和，胶片颗粒"
+            },
+            "wardrobe": [
+              {
+                "wardrobe_id": "suit_soaked",
+                "description": "西装被雨淋透，紧贴身体"
+              },
+              {
+                "wardrobe_id": "casual",
+                "description": "灰色卫衣，牛仔裤"
+              }
+            ],
+            "ref_front": "refs/c_lin_yuan_front.png",
+            "ref_three_quarter": "refs/c_lin_yuan_tq.png",
+            "ref_back": null,
+            "lora_path": null,
+            "lora_trigger": "linyuan_v3",
+            "lora_strength": 0.85,
+            "voice_id": null,
+            "voice_ref_audio": null,
+            "voice_gender": "male",
+            "voice_order": 1
+          },
+          "c_lin_wan": {
+            "char_id": "c_lin_wan",
+            "name": "林晚",
+            "appearance": {
+              "identity": "二十七岁女性，外表冷静，内里执拗",
+              "body": "偏瘦，中等身高",
+              "face": "黑色长直发，鹅蛋脸，杏眼，眼尾微垂，薄唇",
+              "attire": "白色衬衫，深色西装裤",
+              "style": ""
+            },
+            "wardrobe": [],
+            "ref_front": null,
+            "ref_three_quarter": null,
+            "ref_back": null,
+            "lora_path": null,
+            "lora_trigger": null,
+            "lora_strength": 1.0,
+            "voice_id": null,
+            "voice_ref_audio": null,
+            "voice_gender": "female",
+            "voice_order": 0
+          },
+          "c_chen_mo": {
+            "char_id": "c_chen_mo",
+            "name": "陈默",
+            "appearance": {
+              "identity": "三十出头男性，沉默寡言",
+              "body": "高瘦",
+              "face": "短寸黑发，方脸，浓眉，单眼皮",
+              "attire": "黑色风衣",
+              "style": ""
+            },
+            "wardrobe": [],
+            "ref_front": null,
+            "ref_three_quarter": null,
+            "ref_back": null,
+            "lora_path": null,
+            "lora_trigger": null,
+            "lora_strength": 1.0,
+            "voice_id": null,
+            "voice_ref_audio": null,
+            "voice_gender": "male",
+            "voice_order": 1
+          }
+        },
+        "locations": {
+          "loc_rooftop": {
+            "location_id": "loc_rooftop",
+            "name": "天台",
+            "space": "老式写字楼顶层，水泥地面，一圈锈蚀铁栏杆",
+            "lighting": "冷调顶光，远处霓虹反光",
+            "palette": "青灰为主，点缀品红",
+            "ref_empty": "refs/loc_rooftop_empty.png"
+          },
+          "loc_alley": {
+            "location_id": "loc_alley",
+            "name": "小巷",
+            "space": "两侧是斑驳砖墙的窄巷",
+            "lighting": "暖调侧逆光",
+            "palette": "",
+            "ref_empty": null
+          },
+          "loc_rooftop_night": {
+            "location_id": "loc_rooftop_night",
+            "name": "夜间天台",
+            "space": "水泥地面，锈蚀的护栏",
+            "lighting": "夜间冷调顶光",
+            "palette": "冷蓝为主",
+            "ref_empty": null
+          }
+        },
+        "style": {
+          "style_line": "realistic",
+          "global_style": "写实电影感，浅景深",
+          "negative_prompt": "模糊，低质量",
+          "aspect_ratio": "9:16"
+        }
+      },
+      "project_after": {
+        "schema_version": 1,
+        "project_id": "yuye-tiantai",
+        "title": "雨夜天台",
+        "style_line": "realistic",
+        "premise": "一个关于错过与和解的都市电影。全片九十分钟，横屏。",
+        "created_at": "2026-09-07T14:56:29.511392+00:00",
+        "updated_at": "2026-09-07T14:56:29.524529+00:00",
+        "episodes": [
+          {
+            "episode_id": "ep01",
+            "title": "第一章 · 雨",
+            "synopsis": "林渊在天台等一个不会来的人。",
+            "target_duration_s": 180.0,
+            "script": "（雨声起）\n林渊站在栏杆前，没有回头。",
+            "shots": [
+              {
+                "shot_id": "ep01_s03_sh007",
+                "scene_id": "ep01_s03",
+                "order": 6,
+                "visual_desc": "雨夜天台，男主背对镜头站在栏杆前，远处霓虹在雨幕里散成一片光晕",
+                "first_frame_prompt": "cinematic, rooftop at night, heavy rain, neon bokeh, back view",
+                "last_frame_prompt": "cinematic, rooftop at night, man turns around, rain on face",
+                "motion_prompt": "缓慢推进，雨丝斜掠，人物微微转头",
+                "negative_prompt": "模糊, 低质量, 多余的手指",
+                "shot_size": "MCU",
+                "camera_angle": "low",
+                "camera_move": "push_in",
+                "camera_id": "cam_rooftop_a",
+                "characters": [
+                  {
+                    "char_id": "lin_yuan",
+                    "expression": "隐忍",
+                    "action": "握紧栏杆，指节发白",
+                    "wardrobe_state": "suit_soaked",
+                    "face_pose": "three_quarter",
+                    "screen_pos": "center"
+                  },
+                  {
+                    "char_id": "chen_mo",
+                    "expression": "愕然",
+                    "action": "停在门口，没有再往前",
+                    "wardrobe_state": "default",
+                    "face_pose": "profile",
+                    "screen_pos": "left"
+                  }
+                ],
+                "location_id": "loc_rooftop",
+                "prop_ids": [
+                  "prop_umbrella",
+                  "prop_phone"
+                ],
+                "duration_s": 6.5,
+                "duration_locked": true,
+                "dialogue": [
+                  {
+                    "char_id": "lin_yuan",
+                    "text": "你要是早半个小时来，什么都还来得及。",
+                    "emotion": "压抑",
+                    "emotion_intensity": 0.8,
+                    "voice_id": "voice_lin",
+                    "audio_path": "audio/ep01_s03_sh007_01.wav",
+                    "actual_duration_s": 3.2
+                  },
+                  {
+                    "char_id": null,
+                    "text": "雨声盖过了他后半句。",
+                    "emotion": "neutral",
+                    "emotion_intensity": 0.3,
+                    "voice_id": null,
+                    "audio_path": null,
+                    "actual_duration_s": null
+                  }
+                ],
+                "sfx": [
+                  "雨声",
+                  "远处车流"
+                ],
+                "bgm_cue": "bgm_tension_low",
+                "needs_lipsync": false,
+                "transition_in": "dissolve",
+                "transition_dur_s": 0.8,
+                "subtitle_text": "你要是早半个小时来，什么都还来得及。",
+                "beat": "反转",
+                "continuity_notes": "上一镜他还没湿透，这里服装状态要接上 suit_soaked",
+                "missing_info": [
+                  "未确定陈墨是否带伞"
+                ],
+                "status": "audio_done",
+                "attempts": 2,
+                "frame_path": "frames/ep01_s03_sh007.png",
+                "video_path": null,
+                "gate_notes": [
+                  "草稿档画面偏暗，已调高曝光重跑"
+                ]
+              },
+              {
+                "shot_id": "ep01_s01_sh001",
+                "scene_id": "ep01_s01",
+                "order": 0,
+                "visual_desc": "",
+                "first_frame_prompt": "",
+                "last_frame_prompt": null,
+                "motion_prompt": "",
+                "negative_prompt": "",
+                "shot_size": "MS",
+                "camera_angle": "eye_level",
+                "camera_move": "static",
+                "camera_id": null,
+                "characters": [],
+                "location_id": null,
+                "prop_ids": [],
+                "duration_s": 5.0,
+                "duration_locked": false,
+                "dialogue": [],
+                "sfx": [],
+                "bgm_cue": null,
+                "needs_lipsync": false,
+                "transition_in": "cut",
+                "transition_dur_s": 0.0,
+                "subtitle_text": "",
+                "beat": "",
+                "continuity_notes": "",
+                "missing_info": [],
+                "status": "planned",
+                "attempts": 0,
+                "frame_path": null,
+                "video_path": null,
+                "gate_notes": []
+              }
+            ]
+          },
+          {
+            "episode_id": "ep02",
+            "title": "第二章 · 晴",
+            "synopsis": "三年后，同一个天台。",
+            "target_duration_s": 200.0,
+            "script": "",
+            "shots": []
+          }
+        ]
+      }
+    },
+    {
+      "name": "圣经：指定没剧本的章",
+      "url": "/api/bible",
+      "body": {
+        "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_planning_3brmf2ea\\case05",
+        "episode_id": "ep02"
+      },
+      "clear_assets": false,
+      "llm_bible": "{\"characters\": [{\"key\": \"lin_wan\", \"name\": \"林晚\", \"identity\": \"二十七岁女性，外表冷静，内里执拗。\", \"body\": \"偏瘦，中等身高\", \"face\": \"黑色长直发，鹅蛋脸，杏眼，眼尾微垂，薄唇。\", \"attire\": \"白色衬衫，深色西装裤\"}, {\"key\": \"chen_mo\", \"name\": \"陈默\", \"identity\": \"三十出头男性，沉默寡言\", \"body\": \"高瘦\", \"face\": \"短寸黑发，方脸，浓眉，单眼皮\", \"attire\": \"黑色风衣\"}], \"locations\": [{\"key\": \"rooftop_night\", \"name\": \"夜间天台\", \"space\": \"水泥地面，锈蚀的护栏\", \"lighting\": \"夜间冷调顶光。\", \"palette\": \"冷蓝为主\"}], \"global_style\": \"电影感，浅景深，冷色调。\"}",
+      "llm_storyboard": "{\"shots\": [{\"shot_id\": \"ep01_sh001\", \"scene_id\": \"loc_rooftop_night\", \"order\": 0, \"first_frame_prompt\": \"夜间天台，雨中，女子背对镜头\", \"shot_size\": \"MS\", \"camera_angle\": \"eye_level\", \"duration_s\": 5.0, \"characters\": [{\"char_id\": \"c_lin_wan\", \"expression\": \"落寞\", \"action\": \"扶着护栏\", \"face_pose\": \"back\"}], \"dialogue\": [], \"transition_in\": \"cut\"}, {\"shot_id\": \"ep01_sh002\", \"scene_id\": \"loc_rooftop_night\", \"order\": 1, \"first_frame_prompt\": \"近景，女子转身\", \"shot_size\": \"CU\", \"camera_angle\": \"eye_level\", \"duration_s\": 3.0, \"characters\": [{\"char_id\": \"c_lin_wan\", \"expression\": \"克制\", \"action\": \"转身\", \"face_pose\": \"front\"}], \"dialogue\": [{\"char_id\": \"c_lin_wan\", \"text\": \"你说过会来的\"}], \"transition_in\": \"cut\"}, {\"shot_id\": \"ep01_sh003\", \"scene_id\": \"loc_rooftop_night\", \"order\": 2, \"first_frame_prompt\": \"男子从阴影里走出\", \"shot_size\": \"MCU\", \"camera_angle\": \"eye_level\", \"duration_s\": 4.0, \"characters\": [{\"char_id\": \"c_chen_mo\", \"expression\": \"克制\", \"action\": \"握伞\", \"face_pose\": \"front\"}], \"dialogue\": [{\"char_id\": \"c_chen_mo\", \"text\": \"我来了。晚了七年。\"}], \"transition_in\": \"cut\"}]}",
+      "prompts": [
+        {
+          "stage": "bible",
+          "prompt": "你是一位电影美术指导。读下面的剧本，产出角色设定和场景设定。\n\n画风是真人写实，描述用自然的中文短句。\n\n要求：\n\n1. 只写剧本里真实出现的角色和场景，不要自己加人加景。\n2. face 这一段会在几十个镜头里被逐字复用，是角色能不能保持一致的关键。\n   写具体的、可画出来的特征：发型、发色、脸型、眼型。\n   不要写\"好看\"\"气质佳\"这类无法转成画面的词。\n3. identity 用一句话说清性别、年龄段、气质。\n4. attire 写这个角色的默认服装。剧情中的换装不在这里写。\n5. key 用英文小写和下划线：角色按中文名音译，场景按这个地方的英文说法，\n   都加上区分用的后缀（哪个时段、哪一间）。\n6. lighting 要说清时间和光质：什么时段、光从哪儿来、冷还是暖、硬还是软。\n7. global_style 是全片统一的调子，所有镜头都会带上它。写成配方，四样都要有：\n   胶片或画质的质感、焦段倾向和景深、色板（饱和度、冷暖）、光的性格\n   （硬软、暗部占多少）。不要写「电影感」这三个字，它没有信息量。\n\n剧本：\n\n（雨声起）\n林渊站在栏杆前，没有回头。\n\n只输出 JSON，不要任何解释文字。"
+        }
+      ],
+      "status": 200,
+      "response": {
+        "added_characters": [
+          "c_lin_wan",
+          "c_chen_mo"
+        ],
+        "added_locations": [
+          "loc_rooftop_night"
+        ],
+        "kept": 0,
+        "merged": 0,
+        "remapped_shots": 0,
+        "characters": [
+          {
+            "char_id": "c_lin_yuan",
+            "name": "林渊",
+            "identity": "三十岁上下的男性，沉默寡言。",
+            "face": "单眼皮，短碎发，眼下有一道旧疤",
+            "attire": "深灰西装，衬衫领口松着",
+            "is_new": false
+          },
+          {
+            "char_id": "c_lin_wan",
+            "name": "林晚",
+            "identity": "二十七岁女性，外表冷静，内里执拗",
+            "face": "黑色长直发，鹅蛋脸，杏眼，眼尾微垂，薄唇",
+            "attire": "白色衬衫，深色西装裤",
+            "is_new": true
+          },
+          {
+            "char_id": "c_chen_mo",
+            "name": "陈默",
+            "identity": "三十出头男性，沉默寡言",
+            "face": "短寸黑发，方脸，浓眉，单眼皮",
+            "attire": "黑色风衣",
+            "is_new": true
+          }
+        ],
+        "locations": [
+          {
+            "location_id": "loc_rooftop",
+            "name": "天台",
+            "space": "老式写字楼顶层，水泥地面，一圈锈蚀铁栏杆",
+            "lighting": "冷调顶光，远处霓虹反光",
+            "is_new": false
+          },
+          {
+            "location_id": "loc_alley",
+            "name": "小巷",
+            "space": "两侧是斑驳砖墙的窄巷",
+            "lighting": "暖调侧逆光",
+            "is_new": false
+          },
+          {
+            "location_id": "loc_rooftop_night",
+            "name": "夜间天台",
+            "space": "水泥地面，锈蚀的护栏",
+            "lighting": "夜间冷调顶光",
+            "is_new": true
+          }
+        ],
+        "reset_shots": 0,
+        "source": "script"
+      },
+      "compare": "full",
+      "cpp_status": 200,
+      "cpp_note": null,
+      "assets_after": {
+        "characters": {
+          "c_lin_yuan": {
+            "char_id": "c_lin_yuan",
+            "name": "林渊",
+            "appearance": {
+              "identity": "三十岁上下的男性，沉默寡言。",
+              "body": "偏瘦，肩背挺直",
+              "face": "单眼皮，短碎发，眼下有一道旧疤",
+              "attire": "深灰西装，衬衫领口松着",
+              "style": "低饱和，胶片颗粒"
+            },
+            "wardrobe": [
+              {
+                "wardrobe_id": "suit_soaked",
+                "description": "西装被雨淋透，紧贴身体"
+              },
+              {
+                "wardrobe_id": "casual",
+                "description": "灰色卫衣，牛仔裤"
+              }
+            ],
+            "ref_front": "refs/c_lin_yuan_front.png",
+            "ref_three_quarter": "refs/c_lin_yuan_tq.png",
+            "ref_back": null,
+            "lora_path": null,
+            "lora_trigger": "linyuan_v3",
+            "lora_strength": 0.85,
+            "voice_id": null,
+            "voice_ref_audio": null,
+            "voice_gender": "male",
+            "voice_order": 1
+          },
+          "c_lin_wan": {
+            "char_id": "c_lin_wan",
+            "name": "林晚",
+            "appearance": {
+              "identity": "二十七岁女性，外表冷静，内里执拗",
+              "body": "偏瘦，中等身高",
+              "face": "黑色长直发，鹅蛋脸，杏眼，眼尾微垂，薄唇",
+              "attire": "白色衬衫，深色西装裤",
+              "style": ""
+            },
+            "wardrobe": [],
+            "ref_front": null,
+            "ref_three_quarter": null,
+            "ref_back": null,
+            "lora_path": null,
+            "lora_trigger": null,
+            "lora_strength": 1.0,
+            "voice_id": null,
+            "voice_ref_audio": null,
+            "voice_gender": "female",
+            "voice_order": 0
+          },
+          "c_chen_mo": {
+            "char_id": "c_chen_mo",
+            "name": "陈默",
+            "appearance": {
+              "identity": "三十出头男性，沉默寡言",
+              "body": "高瘦",
+              "face": "短寸黑发，方脸，浓眉，单眼皮",
+              "attire": "黑色风衣",
+              "style": ""
+            },
+            "wardrobe": [],
+            "ref_front": null,
+            "ref_three_quarter": null,
+            "ref_back": null,
+            "lora_path": null,
+            "lora_trigger": null,
+            "lora_strength": 1.0,
+            "voice_id": null,
+            "voice_ref_audio": null,
+            "voice_gender": "male",
+            "voice_order": 1
+          }
+        },
+        "locations": {
+          "loc_rooftop": {
+            "location_id": "loc_rooftop",
+            "name": "天台",
+            "space": "老式写字楼顶层，水泥地面，一圈锈蚀铁栏杆",
+            "lighting": "冷调顶光，远处霓虹反光",
+            "palette": "青灰为主，点缀品红",
+            "ref_empty": "refs/loc_rooftop_empty.png"
+          },
+          "loc_alley": {
+            "location_id": "loc_alley",
+            "name": "小巷",
+            "space": "两侧是斑驳砖墙的窄巷",
+            "lighting": "暖调侧逆光",
+            "palette": "",
+            "ref_empty": null
+          },
+          "loc_rooftop_night": {
+            "location_id": "loc_rooftop_night",
+            "name": "夜间天台",
+            "space": "水泥地面，锈蚀的护栏",
+            "lighting": "夜间冷调顶光",
+            "palette": "冷蓝为主",
+            "ref_empty": null
+          }
+        },
+        "style": {
+          "style_line": "realistic",
+          "global_style": "写实电影感，浅景深",
+          "negative_prompt": "模糊，低质量",
+          "aspect_ratio": "9:16"
+        }
+      },
+      "project_after": {
+        "schema_version": 1,
+        "project_id": "yuye-tiantai",
+        "title": "雨夜天台",
+        "style_line": "realistic",
+        "premise": "一个关于错过与和解的都市电影。全片九十分钟，横屏。",
+        "created_at": "2026-09-07T14:56:29.511392+00:00",
+        "updated_at": "2026-09-07T14:56:29.524529+00:00",
+        "episodes": [
+          {
+            "episode_id": "ep01",
+            "title": "第一章 · 雨",
+            "synopsis": "林渊在天台等一个不会来的人。",
+            "target_duration_s": 180.0,
+            "script": "（雨声起）\n林渊站在栏杆前，没有回头。",
+            "shots": [
+              {
+                "shot_id": "ep01_s03_sh007",
+                "scene_id": "ep01_s03",
+                "order": 6,
+                "visual_desc": "雨夜天台，男主背对镜头站在栏杆前，远处霓虹在雨幕里散成一片光晕",
+                "first_frame_prompt": "cinematic, rooftop at night, heavy rain, neon bokeh, back view",
+                "last_frame_prompt": "cinematic, rooftop at night, man turns around, rain on face",
+                "motion_prompt": "缓慢推进，雨丝斜掠，人物微微转头",
+                "negative_prompt": "模糊, 低质量, 多余的手指",
+                "shot_size": "MCU",
+                "camera_angle": "low",
+                "camera_move": "push_in",
+                "camera_id": "cam_rooftop_a",
+                "characters": [
+                  {
+                    "char_id": "lin_yuan",
+                    "expression": "隐忍",
+                    "action": "握紧栏杆，指节发白",
+                    "wardrobe_state": "suit_soaked",
+                    "face_pose": "three_quarter",
+                    "screen_pos": "center"
+                  },
+                  {
+                    "char_id": "chen_mo",
+                    "expression": "愕然",
+                    "action": "停在门口，没有再往前",
+                    "wardrobe_state": "default",
+                    "face_pose": "profile",
+                    "screen_pos": "left"
+                  }
+                ],
+                "location_id": "loc_rooftop",
+                "prop_ids": [
+                  "prop_umbrella",
+                  "prop_phone"
+                ],
+                "duration_s": 6.5,
+                "duration_locked": true,
+                "dialogue": [
+                  {
+                    "char_id": "lin_yuan",
+                    "text": "你要是早半个小时来，什么都还来得及。",
+                    "emotion": "压抑",
+                    "emotion_intensity": 0.8,
+                    "voice_id": "voice_lin",
+                    "audio_path": "audio/ep01_s03_sh007_01.wav",
+                    "actual_duration_s": 3.2
+                  },
+                  {
+                    "char_id": null,
+                    "text": "雨声盖过了他后半句。",
+                    "emotion": "neutral",
+                    "emotion_intensity": 0.3,
+                    "voice_id": null,
+                    "audio_path": null,
+                    "actual_duration_s": null
+                  }
+                ],
+                "sfx": [
+                  "雨声",
+                  "远处车流"
+                ],
+                "bgm_cue": "bgm_tension_low",
+                "needs_lipsync": false,
+                "transition_in": "dissolve",
+                "transition_dur_s": 0.8,
+                "subtitle_text": "你要是早半个小时来，什么都还来得及。",
+                "beat": "反转",
+                "continuity_notes": "上一镜他还没湿透，这里服装状态要接上 suit_soaked",
+                "missing_info": [
+                  "未确定陈墨是否带伞"
+                ],
+                "status": "audio_done",
+                "attempts": 2,
+                "frame_path": "frames/ep01_s03_sh007.png",
+                "video_path": null,
+                "gate_notes": [
+                  "草稿档画面偏暗，已调高曝光重跑"
+                ]
+              },
+              {
+                "shot_id": "ep01_s01_sh001",
+                "scene_id": "ep01_s01",
+                "order": 0,
+                "visual_desc": "",
+                "first_frame_prompt": "",
+                "last_frame_prompt": null,
+                "motion_prompt": "",
+                "negative_prompt": "",
+                "shot_size": "MS",
+                "camera_angle": "eye_level",
+                "camera_move": "static",
+                "camera_id": null,
+                "characters": [],
+                "location_id": null,
+                "prop_ids": [],
+                "duration_s": 5.0,
+                "duration_locked": false,
+                "dialogue": [],
+                "sfx": [],
+                "bgm_cue": null,
+                "needs_lipsync": false,
+                "transition_in": "cut",
+                "transition_dur_s": 0.0,
+                "subtitle_text": "",
+                "beat": "",
+                "continuity_notes": "",
+                "missing_info": [],
+                "status": "planned",
+                "attempts": 0,
+                "frame_path": null,
+                "video_path": null,
+                "gate_notes": []
+              }
+            ]
+          },
+          {
+            "episode_id": "ep02",
+            "title": "第二章 · 晴",
+            "synopsis": "三年后，同一个天台。",
+            "target_duration_s": 200.0,
+            "script": "",
+            "shots": []
+          }
+        ]
+      }
+    },
+    {
+      "name": "圣经：多余字段",
+      "url": "/api/bible",
+      "body": {
+        "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_planning_3brmf2ea\\case06",
+        "typo": 1
+      },
+      "clear_assets": false,
+      "llm_bible": "{\"characters\": [{\"key\": \"lin_wan\", \"name\": \"林晚\", \"identity\": \"二十七岁女性，外表冷静，内里执拗。\", \"body\": \"偏瘦，中等身高\", \"face\": \"黑色长直发，鹅蛋脸，杏眼，眼尾微垂，薄唇。\", \"attire\": \"白色衬衫，深色西装裤\"}, {\"key\": \"chen_mo\", \"name\": \"陈默\", \"identity\": \"三十出头男性，沉默寡言\", \"body\": \"高瘦\", \"face\": \"短寸黑发，方脸，浓眉，单眼皮\", \"attire\": \"黑色风衣\"}], \"locations\": [{\"key\": \"rooftop_night\", \"name\": \"夜间天台\", \"space\": \"水泥地面，锈蚀的护栏\", \"lighting\": \"夜间冷调顶光。\", \"palette\": \"冷蓝为主\"}], \"global_style\": \"电影感，浅景深，冷色调。\"}",
+      "llm_storyboard": "{\"shots\": [{\"shot_id\": \"ep01_sh001\", \"scene_id\": \"loc_rooftop_night\", \"order\": 0, \"first_frame_prompt\": \"夜间天台，雨中，女子背对镜头\", \"shot_size\": \"MS\", \"camera_angle\": \"eye_level\", \"duration_s\": 5.0, \"characters\": [{\"char_id\": \"c_lin_wan\", \"expression\": \"落寞\", \"action\": \"扶着护栏\", \"face_pose\": \"back\"}], \"dialogue\": [], \"transition_in\": \"cut\"}, {\"shot_id\": \"ep01_sh002\", \"scene_id\": \"loc_rooftop_night\", \"order\": 1, \"first_frame_prompt\": \"近景，女子转身\", \"shot_size\": \"CU\", \"camera_angle\": \"eye_level\", \"duration_s\": 3.0, \"characters\": [{\"char_id\": \"c_lin_wan\", \"expression\": \"克制\", \"action\": \"转身\", \"face_pose\": \"front\"}], \"dialogue\": [{\"char_id\": \"c_lin_wan\", \"text\": \"你说过会来的\"}], \"transition_in\": \"cut\"}, {\"shot_id\": \"ep01_sh003\", \"scene_id\": \"loc_rooftop_night\", \"order\": 2, \"first_frame_prompt\": \"男子从阴影里走出\", \"shot_size\": \"MCU\", \"camera_angle\": \"eye_level\", \"duration_s\": 4.0, \"characters\": [{\"char_id\": \"c_chen_mo\", \"expression\": \"克制\", \"action\": \"握伞\", \"face_pose\": \"front\"}], \"dialogue\": [{\"char_id\": \"c_chen_mo\", \"text\": \"我来了。晚了七年。\"}], \"transition_in\": \"cut\"}]}",
+      "prompts": [],
+      "status": 422,
+      "response": {
+        "detail": [
+          {
+            "type": "extra_forbidden",
+            "loc": [
+              "body",
+              "typo"
+            ],
+            "msg": "Extra inputs are not permitted",
+            "input": 1
+          }
+        ]
+      },
+      "compare": "detail_arr",
+      "cpp_status": 422,
+      "cpp_note": null,
+      "assets_after": null,
+      "project_after": null
+    },
+    {
+      "name": "圣经：项目不存在",
+      "url": "/api/bible",
+      "body": {
+        "project": "Z:/没有这个目录"
+      },
+      "clear_assets": false,
+      "llm_bible": "{\"characters\": [{\"key\": \"lin_wan\", \"name\": \"林晚\", \"identity\": \"二十七岁女性，外表冷静，内里执拗。\", \"body\": \"偏瘦，中等身高\", \"face\": \"黑色长直发，鹅蛋脸，杏眼，眼尾微垂，薄唇。\", \"attire\": \"白色衬衫，深色西装裤\"}, {\"key\": \"chen_mo\", \"name\": \"陈默\", \"identity\": \"三十出头男性，沉默寡言\", \"body\": \"高瘦\", \"face\": \"短寸黑发，方脸，浓眉，单眼皮\", \"attire\": \"黑色风衣\"}], \"locations\": [{\"key\": \"rooftop_night\", \"name\": \"夜间天台\", \"space\": \"水泥地面，锈蚀的护栏\", \"lighting\": \"夜间冷调顶光。\", \"palette\": \"冷蓝为主\"}], \"global_style\": \"电影感，浅景深，冷色调。\"}",
+      "llm_storyboard": "{\"shots\": [{\"shot_id\": \"ep01_sh001\", \"scene_id\": \"loc_rooftop_night\", \"order\": 0, \"first_frame_prompt\": \"夜间天台，雨中，女子背对镜头\", \"shot_size\": \"MS\", \"camera_angle\": \"eye_level\", \"duration_s\": 5.0, \"characters\": [{\"char_id\": \"c_lin_wan\", \"expression\": \"落寞\", \"action\": \"扶着护栏\", \"face_pose\": \"back\"}], \"dialogue\": [], \"transition_in\": \"cut\"}, {\"shot_id\": \"ep01_sh002\", \"scene_id\": \"loc_rooftop_night\", \"order\": 1, \"first_frame_prompt\": \"近景，女子转身\", \"shot_size\": \"CU\", \"camera_angle\": \"eye_level\", \"duration_s\": 3.0, \"characters\": [{\"char_id\": \"c_lin_wan\", \"expression\": \"克制\", \"action\": \"转身\", \"face_pose\": \"front\"}], \"dialogue\": [{\"char_id\": \"c_lin_wan\", \"text\": \"你说过会来的\"}], \"transition_in\": \"cut\"}, {\"shot_id\": \"ep01_sh003\", \"scene_id\": \"loc_rooftop_night\", \"order\": 2, \"first_frame_prompt\": \"男子从阴影里走出\", \"shot_size\": \"MCU\", \"camera_angle\": \"eye_level\", \"duration_s\": 4.0, \"characters\": [{\"char_id\": \"c_chen_mo\", \"expression\": \"克制\", \"action\": \"握伞\", \"face_pose\": \"front\"}], \"dialogue\": [{\"char_id\": \"c_chen_mo\", \"text\": \"我来了。晚了七年。\"}], \"transition_in\": \"cut\"}]}",
+      "prompts": [],
+      "status": 400,
+      "response": {
+        "detail": "这里不是一个项目目录：Z:\\没有这个目录\n先建一部，或者换一个目录"
+      },
+      "compare": "detail_str",
+      "cpp_status": 400,
+      "cpp_note": null,
+      "assets_after": null,
+      "project_after": null
+    },
+    {
+      "name": "圣经：模型吐了垃圾",
+      "url": "/api/bible",
+      "body": {
+        "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_planning_3brmf2ea\\case08"
+      },
+      "clear_assets": false,
+      "llm_bible": "抱歉，我做不到。",
+      "llm_storyboard": "{\"shots\": [{\"shot_id\": \"ep01_sh001\", \"scene_id\": \"loc_rooftop_night\", \"order\": 0, \"first_frame_prompt\": \"夜间天台，雨中，女子背对镜头\", \"shot_size\": \"MS\", \"camera_angle\": \"eye_level\", \"duration_s\": 5.0, \"characters\": [{\"char_id\": \"c_lin_wan\", \"expression\": \"落寞\", \"action\": \"扶着护栏\", \"face_pose\": \"back\"}], \"dialogue\": [], \"transition_in\": \"cut\"}, {\"shot_id\": \"ep01_sh002\", \"scene_id\": \"loc_rooftop_night\", \"order\": 1, \"first_frame_prompt\": \"近景，女子转身\", \"shot_size\": \"CU\", \"camera_angle\": \"eye_level\", \"duration_s\": 3.0, \"characters\": [{\"char_id\": \"c_lin_wan\", \"expression\": \"克制\", \"action\": \"转身\", \"face_pose\": \"front\"}], \"dialogue\": [{\"char_id\": \"c_lin_wan\", \"text\": \"你说过会来的\"}], \"transition_in\": \"cut\"}, {\"shot_id\": \"ep01_sh003\", \"scene_id\": \"loc_rooftop_night\", \"order\": 2, \"first_frame_prompt\": \"男子从阴影里走出\", \"shot_size\": \"MCU\", \"camera_angle\": \"eye_level\", \"duration_s\": 4.0, \"characters\": [{\"char_id\": \"c_chen_mo\", \"expression\": \"克制\", \"action\": \"握伞\", \"face_pose\": \"front\"}], \"dialogue\": [{\"char_id\": \"c_chen_mo\", \"text\": \"我来了。晚了七年。\"}], \"transition_in\": \"cut\"}]}",
+      "prompts": [
+        {
+          "stage": "bible",
+          "prompt": "你是一位电影美术指导。读下面的剧本，产出角色设定和场景设定。\n\n画风是真人写实，描述用自然的中文短句。\n\n要求：\n\n1. 只写剧本里真实出现的角色和场景，不要自己加人加景。\n2. face 这一段会在几十个镜头里被逐字复用，是角色能不能保持一致的关键。\n   写具体的、可画出来的特征：发型、发色、脸型、眼型。\n   不要写\"好看\"\"气质佳\"这类无法转成画面的词。\n3. identity 用一句话说清性别、年龄段、气质。\n4. attire 写这个角色的默认服装。剧情中的换装不在这里写。\n5. key 用英文小写和下划线：角色按中文名音译，场景按这个地方的英文说法，\n   都加上区分用的后缀（哪个时段、哪一间）。\n6. lighting 要说清时间和光质：什么时段、光从哪儿来、冷还是暖、硬还是软。\n7. global_style 是全片统一的调子，所有镜头都会带上它。写成配方，四样都要有：\n   胶片或画质的质感、焦段倾向和景深、色板（饱和度、冷暖）、光的性格\n   （硬软、暗部占多少）。不要写「电影感」这三个字，它没有信息量。\n\n剧本：\n\n（雨声起）\n林渊站在栏杆前，没有回头。\n\n只输出 JSON，不要任何解释文字。"
+        }
+      ],
+      "status": 500,
+      "response": {
+        "__raw__": "Internal Server Error"
+      },
+      "compare": "detail_str",
+      "cpp_status": 400,
+      "cpp_note": "Python 的 StoryboardError 穿透 bug，C++ 有意回 400",
+      "assets_after": null,
+      "project_after": null
+    },
+    {
+      "name": "圣经：模型没产出角色",
+      "url": "/api/bible",
+      "body": {
+        "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_planning_3brmf2ea\\case09"
+      },
+      "clear_assets": false,
+      "llm_bible": "{\"characters\": [], \"locations\": [], \"global_style\": \"x\"}",
+      "llm_storyboard": "{\"shots\": [{\"shot_id\": \"ep01_sh001\", \"scene_id\": \"loc_rooftop_night\", \"order\": 0, \"first_frame_prompt\": \"夜间天台，雨中，女子背对镜头\", \"shot_size\": \"MS\", \"camera_angle\": \"eye_level\", \"duration_s\": 5.0, \"characters\": [{\"char_id\": \"c_lin_wan\", \"expression\": \"落寞\", \"action\": \"扶着护栏\", \"face_pose\": \"back\"}], \"dialogue\": [], \"transition_in\": \"cut\"}, {\"shot_id\": \"ep01_sh002\", \"scene_id\": \"loc_rooftop_night\", \"order\": 1, \"first_frame_prompt\": \"近景，女子转身\", \"shot_size\": \"CU\", \"camera_angle\": \"eye_level\", \"duration_s\": 3.0, \"characters\": [{\"char_id\": \"c_lin_wan\", \"expression\": \"克制\", \"action\": \"转身\", \"face_pose\": \"front\"}], \"dialogue\": [{\"char_id\": \"c_lin_wan\", \"text\": \"你说过会来的\"}], \"transition_in\": \"cut\"}, {\"shot_id\": \"ep01_sh003\", \"scene_id\": \"loc_rooftop_night\", \"order\": 2, \"first_frame_prompt\": \"男子从阴影里走出\", \"shot_size\": \"MCU\", \"camera_angle\": \"eye_level\", \"duration_s\": 4.0, \"characters\": [{\"char_id\": \"c_chen_mo\", \"expression\": \"克制\", \"action\": \"握伞\", \"face_pose\": \"front\"}], \"dialogue\": [{\"char_id\": \"c_chen_mo\", \"text\": \"我来了。晚了七年。\"}], \"transition_in\": \"cut\"}]}",
+      "prompts": [
+        {
+          "stage": "bible",
+          "prompt": "你是一位电影美术指导。读下面的剧本，产出角色设定和场景设定。\n\n画风是真人写实，描述用自然的中文短句。\n\n要求：\n\n1. 只写剧本里真实出现的角色和场景，不要自己加人加景。\n2. face 这一段会在几十个镜头里被逐字复用，是角色能不能保持一致的关键。\n   写具体的、可画出来的特征：发型、发色、脸型、眼型。\n   不要写\"好看\"\"气质佳\"这类无法转成画面的词。\n3. identity 用一句话说清性别、年龄段、气质。\n4. attire 写这个角色的默认服装。剧情中的换装不在这里写。\n5. key 用英文小写和下划线：角色按中文名音译，场景按这个地方的英文说法，\n   都加上区分用的后缀（哪个时段、哪一间）。\n6. lighting 要说清时间和光质：什么时段、光从哪儿来、冷还是暖、硬还是软。\n7. global_style 是全片统一的调子，所有镜头都会带上它。写成配方，四样都要有：\n   胶片或画质的质感、焦段倾向和景深、色板（饱和度、冷暖）、光的性格\n   （硬软、暗部占多少）。不要写「电影感」这三个字，它没有信息量。\n\n剧本：\n\n（雨声起）\n林渊站在栏杆前，没有回头。\n\n只输出 JSON，不要任何解释文字。"
+        }
+      ],
+      "status": 400,
+      "response": {
+        "detail": "大模型没有产出任何角色。检查剧本里是否真的有人物，或者换一个更强的模型"
+      },
+      "compare": "detail_str",
+      "cpp_status": 400,
+      "cpp_note": null,
+      "assets_after": null,
+      "project_after": null
+    },
+    {
+      "name": "出分镜：资产库已有角色",
+      "url": "/api/plan",
+      "body": {
+        "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_planning_3brmf2ea\\case10",
+        "script": "林晚站在天台边缘，雨水打湿了她的白衬衫。\n林晚：你说过会来的。\n陈默从阴影里走出来。\n陈默：我来了。晚了七年。",
+        "episode_id": "ep01"
+      },
+      "clear_assets": false,
+      "llm_bible": "{\"characters\": [{\"key\": \"lin_wan\", \"name\": \"林晚\", \"identity\": \"二十七岁女性，外表冷静，内里执拗。\", \"body\": \"偏瘦，中等身高\", \"face\": \"黑色长直发，鹅蛋脸，杏眼，眼尾微垂，薄唇。\", \"attire\": \"白色衬衫，深色西装裤\"}, {\"key\": \"chen_mo\", \"name\": \"陈默\", \"identity\": \"三十出头男性，沉默寡言\", \"body\": \"高瘦\", \"face\": \"短寸黑发，方脸，浓眉，单眼皮\", \"attire\": \"黑色风衣\"}], \"locations\": [{\"key\": \"rooftop_night\", \"name\": \"夜间天台\", \"space\": \"水泥地面，锈蚀的护栏\", \"lighting\": \"夜间冷调顶光。\", \"palette\": \"冷蓝为主\"}], \"global_style\": \"电影感，浅景深，冷色调。\"}",
+      "llm_storyboard": "{\"shots\": [{\"shot_id\": \"ep01_sh001\", \"scene_id\": \"loc_rooftop\", \"order\": 0, \"first_frame_prompt\": \"夜间天台，雨中\", \"shot_size\": \"MS\", \"camera_angle\": \"eye_level\", \"duration_s\": 5.0, \"characters\": [{\"char_id\": \"c_lin_yuan\", \"expression\": \"落寞\", \"action\": \"扶着护栏\", \"face_pose\": \"back\"}], \"dialogue\": [], \"transition_in\": \"cut\"}, {\"shot_id\": \"ep01_sh002\", \"scene_id\": \"loc_rooftop\", \"order\": 1, \"first_frame_prompt\": \"近景，转身\", \"shot_size\": \"CU\", \"camera_angle\": \"eye_level\", \"duration_s\": 3.0, \"characters\": [{\"char_id\": \"c_lin_yuan\", \"expression\": \"克制\", \"action\": \"转身\", \"face_pose\": \"front\"}], \"dialogue\": [{\"char_id\": \"c_lin_yuan\", \"text\": \"你说过会来的\"}, {\"char_id\": \"c_lin_yuan\", \"text\": \"我来了。晚了七年。\", \"emotion\": \"neutral\", \"emotion_intensity\": 0.5}], \"transition_in\": \"cut\"}]}",
+      "prompts": [
+        {
+          "stage": "storyboard",
+          "prompt": "你是一位电影分镜师。把下面的剧本拆成分镜表。\n\n可用角色（只能用这些 id）：\n  c_lin_yuan：林渊\n\n可用场景：\n  loc_alley：小巷\n  loc_rooftop：天台\n\n镜头配额，必须严格按这个数量和时长分配：\n  3 个 2 秒镜头，4 个 3 秒镜头，3 个 4 秒镜头，6 个 5 秒镜头\n  合计 16 个镜头，总时长 60 秒\n\n硬性要求：\n\n1. shot_id 用 ep01_sh001 这样的格式，三位数字，按顺序递增。\n2. order 按镜头的先后填。\n3. duration_s 各档位的数量必须与配额完全一致。\n4. **角色长什么样不归你写**：长相、发型、发色、身材、穿着，哪一栏都不要。\n   那几样由系统按资产库统一拼进去，你写了会被丢弃并造成前后不一致。\n   剧本里提到的东西照写——手套、账册、撬棍、伞都是道具和动作，不是长相。\n5. first_frame_prompt 描述这一镜的画面：环境、构图、角色的姿态和位置。\n6. motion_prompt 按秒分段写这几秒里画面怎么动，格式是\n   「[0-2秒] …… [2-5秒] ……」，段要连起来盖满整镜的时长。\n   每段写：谁在动、朝哪个方向、快还是慢；镜头怎么动写名字、幅度和速度。\n   人以外在动的东西（天气、烟尘、水、火光、布料、头发）有就写上；\n   会响的东西用画面写出来，不要单独写音效。不要写剪辑用语。\n   **只能写第一帧里已经看得见的东西怎么动**：\n   · 不写进画、出画。后续运动的主体必须已经在第一帧里。\n   · 不写开门、开窗、拉抽屉。门必须开的话，第一帧就把门开着、门后写清楚。\n   · 不写镜头穿过门框、窗户、走廊拐角。\n   · 一镜只演一件事。\n7. camera_move 一场里要有变化，**任何一种都不要超过三成**。\n   推进情绪用 push_in，交代环境用 pull_out 或 pan_left / pan_right，\n   跟着人走用 handheld，绕着看用 orbit；\n   **画面里没有任何东西在动**时才填 static。\n8. dialogue 里说话的角色，必须同时出现在这一镜的 characters 里。\n   剧本里名字后面括号里写的「怎么说的」，填进这一句的 emotion。\n9. 剧本里〔〕括起来的是潜台词，只用来挑机位、表情和光，不要写进画面描述。\n10. shot_size 要有节奏，**整场不能只用一种**。\n    **拉开景别靠换内容，不靠换标签**：要大景就写环境、写空镜；要特写就让\n    画面里只剩一个局部（手、证件、杯子），别写成「某人的特写」。\n    · 每一场的第一镜用 LS / MLS 交代这是哪儿。\n    · 主力是 MS / MCU，占一半左右。\n    · CU / ECU 只给情绪爆发那一两个瞬间，整场不超过三成。\n      填 ECU 时 first_frame_prompt 要点名是谁的手、谁的眼、什么物件。\n    · 冲突过去之后拉回 MLS / LS，再进下一场。\n\n\n剧本：\n\n林晚站在天台边缘，雨水打湿了她的白衬衫。\n林晚：你说过会来的。\n陈默从阴影里走出来。\n陈默：我来了。晚了七年。\n\n只输出 JSON，不要任何解释文字。"
+        }
+      ],
+      "status": 200,
+      "response": {
+        "episode_id": "ep01",
+        "shots": 2,
+        "duration_s": 8.1,
+        "missing_lines": [],
+        "placed_lines": 0,
+        "shots_without_location": 0,
+        "lipsync": 1,
+        "characters": [
+          {
+            "char_id": "c_lin_yuan",
+            "name": "林渊",
+            "face": "单眼皮，短碎发，眼下有一道旧疤"
+          }
+        ],
+        "locations": [
+          {
+            "location_id": "loc_rooftop",
+            "name": "天台"
+          },
+          {
+            "location_id": "loc_alley",
+            "name": "小巷"
+          }
+        ]
+      },
+      "compare": "full",
+      "cpp_status": 200,
+      "cpp_note": null,
+      "assets_after": {
+        "characters": {
+          "c_lin_yuan": {
+            "char_id": "c_lin_yuan",
+            "name": "林渊",
+            "appearance": {
+              "identity": "三十岁上下的男性，沉默寡言。",
+              "body": "偏瘦，肩背挺直",
+              "face": "单眼皮，短碎发，眼下有一道旧疤",
+              "attire": "深灰西装，衬衫领口松着",
+              "style": "低饱和，胶片颗粒"
+            },
+            "wardrobe": [
+              {
+                "wardrobe_id": "suit_soaked",
+                "description": "西装被雨淋透，紧贴身体"
+              },
+              {
+                "wardrobe_id": "casual",
+                "description": "灰色卫衣，牛仔裤"
+              }
+            ],
+            "ref_front": "refs/c_lin_yuan_front.png",
+            "ref_three_quarter": "refs/c_lin_yuan_tq.png",
+            "ref_back": null,
+            "lora_path": null,
+            "lora_trigger": "linyuan_v3",
+            "lora_strength": 0.85,
+            "voice_id": null,
+            "voice_ref_audio": null,
+            "voice_gender": "male",
+            "voice_order": 1
+          }
+        },
+        "locations": {
+          "loc_rooftop": {
+            "location_id": "loc_rooftop",
+            "name": "天台",
+            "space": "老式写字楼顶层，水泥地面，一圈锈蚀铁栏杆",
+            "lighting": "冷调顶光，远处霓虹反光",
+            "palette": "青灰为主，点缀品红",
+            "ref_empty": "refs/loc_rooftop_empty.png"
+          },
+          "loc_alley": {
+            "location_id": "loc_alley",
+            "name": "小巷",
+            "space": "两侧是斑驳砖墙的窄巷",
+            "lighting": "暖调侧逆光",
+            "palette": "",
+            "ref_empty": null
+          }
+        },
+        "style": {
+          "style_line": "realistic",
+          "global_style": "写实电影感，浅景深",
+          "negative_prompt": "模糊，低质量",
+          "aspect_ratio": "9:16"
+        }
+      },
+      "project_after": {
+        "schema_version": 1,
+        "project_id": "yuye-tiantai",
+        "title": "雨夜天台",
+        "style_line": "realistic",
+        "premise": "一个关于错过与和解的都市电影。全片九十分钟，横屏。",
+        "created_at": "2026-09-07T14:56:29.511392+00:00",
+        "updated_at": "2026-09-07T16:57:14.545313+00:00",
+        "episodes": [
+          {
+            "episode_id": "ep01",
+            "title": "第一章 · 雨",
+            "synopsis": "林渊在天台等一个不会来的人。",
+            "target_duration_s": 60.0,
+            "script": "林晚站在天台边缘，雨水打湿了她的白衬衫。\n林晚：你说过会来的。\n陈默从阴影里走出来。\n陈默：我来了。晚了七年。",
+            "shots": [
+              {
+                "shot_id": "ep01_sh001",
+                "scene_id": "loc_rooftop",
+                "order": 0,
+                "visual_desc": "",
+                "first_frame_prompt": "夜间天台，雨中",
+                "last_frame_prompt": null,
+                "motion_prompt": "",
+                "negative_prompt": "",
+                "shot_size": "MS",
+                "camera_angle": "eye_level",
+                "camera_move": "static",
+                "lens": "auto",
+                "lighting": "",
+                "continuous_with_prev": false,
+                "camera_id": null,
+                "characters": [
+                  {
+                    "char_id": "c_lin_yuan",
+                    "expression": "落寞",
+                    "action": "扶着护栏",
+                    "wardrobe_state": "default",
+                    "face_pose": "back",
+                    "screen_pos": "center"
+                  }
+                ],
+                "location_id": "loc_rooftop",
+                "prop_ids": [],
+                "duration_s": 5.0,
+                "duration_locked": false,
+                "dialogue": [],
+                "sfx": [],
+                "bgm_cue": null,
+                "needs_lipsync": false,
+                "transition_in": "cut",
+                "transition_dur_s": 0.0,
+                "subtitle_text": "",
+                "beat": "",
+                "continuity_notes": "",
+                "missing_info": [],
+                "status": "planned",
+                "attempts": 0,
+                "frame_path": null,
+                "end_frame_path": null,
+                "video_path": null,
+                "gate_notes": []
+              },
+              {
+                "shot_id": "ep01_sh002",
+                "scene_id": "loc_rooftop",
+                "order": 1,
+                "visual_desc": "",
+                "first_frame_prompt": "近景，转身",
+                "last_frame_prompt": null,
+                "motion_prompt": "",
+                "negative_prompt": "",
+                "shot_size": "CU",
+                "camera_angle": "eye_level",
+                "camera_move": "static",
+                "lens": "auto",
+                "lighting": "",
+                "continuous_with_prev": false,
+                "camera_id": null,
+                "characters": [
+                  {
+                    "char_id": "c_lin_yuan",
+                    "expression": "克制",
+                    "action": "转身",
+                    "wardrobe_state": "default",
+                    "face_pose": "front",
+                    "screen_pos": "center"
+                  }
+                ],
+                "location_id": "loc_rooftop",
+                "prop_ids": [],
+                "duration_s": 3.0,
+                "duration_locked": false,
+                "dialogue": [
+                  {
+                    "char_id": "c_lin_yuan",
+                    "text": "你说过会来的",
+                    "emotion": "neutral",
+                    "emotion_intensity": 0.5,
+                    "voice_id": null,
+                    "audio_path": null,
+                    "actual_duration_s": null
+                  },
+                  {
+                    "char_id": "c_lin_yuan",
+                    "text": "我来了。晚了七年。",
+                    "emotion": "neutral",
+                    "emotion_intensity": 0.5,
+                    "voice_id": null,
+                    "audio_path": null,
+                    "actual_duration_s": null
+                  }
+                ],
+                "sfx": [],
+                "bgm_cue": null,
+                "needs_lipsync": true,
+                "transition_in": "cut",
+                "transition_dur_s": 0.0,
+                "subtitle_text": "",
+                "beat": "",
+                "continuity_notes": "",
+                "missing_info": [],
+                "status": "planned",
+                "attempts": 0,
+                "frame_path": null,
+                "end_frame_path": null,
+                "video_path": null,
+                "gate_notes": []
+              }
+            ],
+            "chapter_refs": []
+          },
+          {
+            "episode_id": "ep02",
+            "title": "第二章 · 晴",
+            "synopsis": "三年后，同一个天台。",
+            "target_duration_s": 200.0,
+            "script": "",
+            "shots": [],
+            "chapter_refs": []
+          }
+        ]
+      }
+    },
+    {
+      "name": "出分镜：资产库是空的",
+      "url": "/api/plan",
+      "body": {
+        "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_planning_3brmf2ea\\case11",
+        "script": "林晚站在天台边缘，雨水打湿了她的白衬衫。\n林晚：你说过会来的。\n陈默从阴影里走出来。\n陈默：我来了。晚了七年。",
+        "episode_id": "ep01"
+      },
+      "clear_assets": true,
+      "llm_bible": "{\"characters\": [{\"key\": \"lin_wan\", \"name\": \"林晚\", \"identity\": \"二十七岁女性，外表冷静，内里执拗。\", \"body\": \"偏瘦，中等身高\", \"face\": \"黑色长直发，鹅蛋脸，杏眼，眼尾微垂，薄唇。\", \"attire\": \"白色衬衫，深色西装裤\"}, {\"key\": \"chen_mo\", \"name\": \"陈默\", \"identity\": \"三十出头男性，沉默寡言\", \"body\": \"高瘦\", \"face\": \"短寸黑发，方脸，浓眉，单眼皮\", \"attire\": \"黑色风衣\"}], \"locations\": [{\"key\": \"rooftop_night\", \"name\": \"夜间天台\", \"space\": \"水泥地面，锈蚀的护栏\", \"lighting\": \"夜间冷调顶光。\", \"palette\": \"冷蓝为主\"}], \"global_style\": \"电影感，浅景深，冷色调。\"}",
+      "llm_storyboard": "{\"shots\": [{\"shot_id\": \"ep01_sh001\", \"scene_id\": \"loc_rooftop_night\", \"order\": 0, \"first_frame_prompt\": \"夜间天台，雨中，女子背对镜头\", \"shot_size\": \"MS\", \"camera_angle\": \"eye_level\", \"duration_s\": 5.0, \"characters\": [{\"char_id\": \"c_lin_wan\", \"expression\": \"落寞\", \"action\": \"扶着护栏\", \"face_pose\": \"back\"}], \"dialogue\": [], \"transition_in\": \"cut\"}, {\"shot_id\": \"ep01_sh002\", \"scene_id\": \"loc_rooftop_night\", \"order\": 1, \"first_frame_prompt\": \"近景，女子转身\", \"shot_size\": \"CU\", \"camera_angle\": \"eye_level\", \"duration_s\": 3.0, \"characters\": [{\"char_id\": \"c_lin_wan\", \"expression\": \"克制\", \"action\": \"转身\", \"face_pose\": \"front\"}], \"dialogue\": [{\"char_id\": \"c_lin_wan\", \"text\": \"你说过会来的\"}], \"transition_in\": \"cut\"}, {\"shot_id\": \"ep01_sh003\", \"scene_id\": \"loc_rooftop_night\", \"order\": 2, \"first_frame_prompt\": \"男子从阴影里走出\", \"shot_size\": \"MCU\", \"camera_angle\": \"eye_level\", \"duration_s\": 4.0, \"characters\": [{\"char_id\": \"c_chen_mo\", \"expression\": \"克制\", \"action\": \"握伞\", \"face_pose\": \"front\"}], \"dialogue\": [{\"char_id\": \"c_chen_mo\", \"text\": \"我来了。晚了七年。\"}], \"transition_in\": \"cut\"}]}",
+      "prompts": [
+        {
+          "stage": "bible",
+          "prompt": "你是一位电影美术指导。读下面的剧本，产出角色设定和场景设定。\n\n画风是真人写实，描述用自然的中文短句。\n\n要求：\n\n1. 只写剧本里真实出现的角色和场景，不要自己加人加景。\n2. face 这一段会在几十个镜头里被逐字复用，是角色能不能保持一致的关键。\n   写具体的、可画出来的特征：发型、发色、脸型、眼型。\n   不要写\"好看\"\"气质佳\"这类无法转成画面的词。\n3. identity 用一句话说清性别、年龄段、气质。\n4. attire 写这个角色的默认服装。剧情中的换装不在这里写。\n5. key 用英文小写和下划线：角色按中文名音译，场景按这个地方的英文说法，\n   都加上区分用的后缀（哪个时段、哪一间）。\n6. lighting 要说清时间和光质：什么时段、光从哪儿来、冷还是暖、硬还是软。\n7. global_style 是全片统一的调子，所有镜头都会带上它。写成配方，四样都要有：\n   胶片或画质的质感、焦段倾向和景深、色板（饱和度、冷暖）、光的性格\n   （硬软、暗部占多少）。不要写「电影感」这三个字，它没有信息量。\n\n剧本：\n\n林晚站在天台边缘，雨水打湿了她的白衬衫。\n林晚：你说过会来的。\n陈默从阴影里走出来。\n陈默：我来了。晚了七年。\n\n只输出 JSON，不要任何解释文字。"
+        },
+        {
+          "stage": "storyboard",
+          "prompt": "你是一位电影分镜师。把下面的剧本拆成分镜表。\n\n可用角色（只能用这些 id）：\n  c_chen_mo：陈默\n  c_lin_wan：林晚\n\n可用场景：\n  loc_rooftop_night：夜间天台\n\n镜头配额，必须严格按这个数量和时长分配：\n  3 个 2 秒镜头，4 个 3 秒镜头，3 个 4 秒镜头，6 个 5 秒镜头\n  合计 16 个镜头，总时长 60 秒\n\n硬性要求：\n\n1. shot_id 用 ep01_sh001 这样的格式，三位数字，按顺序递增。\n2. order 按镜头的先后填。\n3. duration_s 各档位的数量必须与配额完全一致。\n4. **角色长什么样不归你写**：长相、发型、发色、身材、穿着，哪一栏都不要。\n   那几样由系统按资产库统一拼进去，你写了会被丢弃并造成前后不一致。\n   剧本里提到的东西照写——手套、账册、撬棍、伞都是道具和动作，不是长相。\n5. first_frame_prompt 描述这一镜的画面：环境、构图、角色的姿态和位置。\n6. motion_prompt 按秒分段写这几秒里画面怎么动，格式是\n   「[0-2秒] …… [2-5秒] ……」，段要连起来盖满整镜的时长。\n   每段写：谁在动、朝哪个方向、快还是慢；镜头怎么动写名字、幅度和速度。\n   人以外在动的东西（天气、烟尘、水、火光、布料、头发）有就写上；\n   会响的东西用画面写出来，不要单独写音效。不要写剪辑用语。\n   **只能写第一帧里已经看得见的东西怎么动**：\n   · 不写进画、出画。后续运动的主体必须已经在第一帧里。\n   · 不写开门、开窗、拉抽屉。门必须开的话，第一帧就把门开着、门后写清楚。\n   · 不写镜头穿过门框、窗户、走廊拐角。\n   · 一镜只演一件事。\n7. camera_move 一场里要有变化，**任何一种都不要超过三成**。\n   推进情绪用 push_in，交代环境用 pull_out 或 pan_left / pan_right，\n   跟着人走用 handheld，绕着看用 orbit；\n   **画面里没有任何东西在动**时才填 static。\n8. dialogue 里说话的角色，必须同时出现在这一镜的 characters 里。\n   剧本里名字后面括号里写的「怎么说的」，填进这一句的 emotion。\n9. 剧本里〔〕括起来的是潜台词，只用来挑机位、表情和光，不要写进画面描述。\n10. shot_size 要有节奏，**整场不能只用一种**。\n    **拉开景别靠换内容，不靠换标签**：要大景就写环境、写空镜；要特写就让\n    画面里只剩一个局部（手、证件、杯子），别写成「某人的特写」。\n    · 每一场的第一镜用 LS / MLS 交代这是哪儿。\n    · 主力是 MS / MCU，占一半左右。\n    · CU / ECU 只给情绪爆发那一两个瞬间，整场不超过三成。\n      填 ECU 时 first_frame_prompt 要点名是谁的手、谁的眼、什么物件。\n    · 冲突过去之后拉回 MLS / LS，再进下一场。\n\n\n剧本：\n\n林晚站在天台边缘，雨水打湿了她的白衬衫。\n林晚：你说过会来的。\n陈默从阴影里走出来。\n陈默：我来了。晚了七年。\n\n只输出 JSON，不要任何解释文字。"
+        }
+      ],
+      "status": 200,
+      "response": {
+        "episode_id": "ep01",
+        "shots": 3,
+        "duration_s": 12.1,
+        "missing_lines": [],
+        "placed_lines": 0,
+        "shots_without_location": 0,
+        "lipsync": 2,
+        "characters": [
+          {
+            "char_id": "c_lin_wan",
+            "name": "林晚",
+            "face": "黑色长直发，鹅蛋脸，杏眼，眼尾微垂，薄唇"
+          },
+          {
+            "char_id": "c_chen_mo",
+            "name": "陈默",
+            "face": "短寸黑发，方脸，浓眉，单眼皮"
+          }
+        ],
+        "locations": [
+          {
+            "location_id": "loc_rooftop_night",
+            "name": "夜间天台"
+          }
+        ]
+      },
+      "compare": "full",
+      "cpp_status": 200,
+      "cpp_note": null,
+      "assets_after": {
+        "characters": {
+          "c_lin_wan": {
+            "char_id": "c_lin_wan",
+            "name": "林晚",
+            "appearance": {
+              "identity": "二十七岁女性，外表冷静，内里执拗",
+              "body": "偏瘦，中等身高",
+              "face": "黑色长直发，鹅蛋脸，杏眼，眼尾微垂，薄唇",
+              "attire": "白色衬衫，深色西装裤",
+              "style": ""
+            },
+            "wardrobe": [],
+            "ref_front": null,
+            "ref_three_quarter": null,
+            "ref_back": null,
+            "lora_path": null,
+            "lora_trigger": null,
+            "lora_strength": 1.0,
+            "voice_id": null,
+            "voice_ref_audio": null,
+            "voice_gender": "female",
+            "voice_order": 0
+          },
+          "c_chen_mo": {
+            "char_id": "c_chen_mo",
+            "name": "陈默",
+            "appearance": {
+              "identity": "三十出头男性，沉默寡言",
+              "body": "高瘦",
+              "face": "短寸黑发，方脸，浓眉，单眼皮",
+              "attire": "黑色风衣",
+              "style": ""
+            },
+            "wardrobe": [],
+            "ref_front": null,
+            "ref_three_quarter": null,
+            "ref_back": null,
+            "lora_path": null,
+            "lora_trigger": null,
+            "lora_strength": 1.0,
+            "voice_id": null,
+            "voice_ref_audio": null,
+            "voice_gender": "male",
+            "voice_order": 1
+          }
+        },
+        "locations": {
+          "loc_rooftop_night": {
+            "location_id": "loc_rooftop_night",
+            "name": "夜间天台",
+            "space": "水泥地面，锈蚀的护栏",
+            "lighting": "夜间冷调顶光",
+            "palette": "冷蓝为主",
+            "ref_empty": null
+          }
+        },
+        "style": {
+          "style_line": "realistic",
+          "global_style": "电影感，浅景深，冷色调",
+          "negative_prompt": "低质量，模糊，过曝，畸形，多余的手指，画得不好的手部，画得不好的脸部，静止不动的画面，字幕，水印",
+          "aspect_ratio": "9:16"
+        }
+      },
+      "project_after": {
+        "schema_version": 1,
+        "project_id": "yuye-tiantai",
+        "title": "雨夜天台",
+        "style_line": "realistic",
+        "premise": "一个关于错过与和解的都市电影。全片九十分钟，横屏。",
+        "created_at": "2026-09-07T14:56:29.511392+00:00",
+        "updated_at": "2026-09-07T16:57:14.594453+00:00",
+        "episodes": [
+          {
+            "episode_id": "ep01",
+            "title": "第一章 · 雨",
+            "synopsis": "林渊在天台等一个不会来的人。",
+            "target_duration_s": 60.0,
+            "script": "林晚站在天台边缘，雨水打湿了她的白衬衫。\n林晚：你说过会来的。\n陈默从阴影里走出来。\n陈默：我来了。晚了七年。",
+            "shots": [
+              {
+                "shot_id": "ep01_sh001",
+                "scene_id": "loc_rooftop_night",
+                "order": 0,
+                "visual_desc": "",
+                "first_frame_prompt": "夜间天台，雨中，女子背对镜头",
+                "last_frame_prompt": null,
+                "motion_prompt": "",
+                "negative_prompt": "",
+                "shot_size": "MS",
+                "camera_angle": "eye_level",
+                "camera_move": "static",
+                "lens": "auto",
+                "lighting": "",
+                "continuous_with_prev": false,
+                "camera_id": null,
+                "characters": [
+                  {
+                    "char_id": "c_lin_wan",
+                    "expression": "落寞",
+                    "action": "扶着护栏",
+                    "wardrobe_state": "default",
+                    "face_pose": "back",
+                    "screen_pos": "center"
+                  }
+                ],
+                "location_id": "loc_rooftop_night",
+                "prop_ids": [],
+                "duration_s": 5.0,
+                "duration_locked": false,
+                "dialogue": [],
+                "sfx": [],
+                "bgm_cue": null,
+                "needs_lipsync": false,
+                "transition_in": "cut",
+                "transition_dur_s": 0.0,
+                "subtitle_text": "",
+                "beat": "",
+                "continuity_notes": "",
+                "missing_info": [],
+                "status": "planned",
+                "attempts": 0,
+                "frame_path": null,
+                "end_frame_path": null,
+                "video_path": null,
+                "gate_notes": []
+              },
+              {
+                "shot_id": "ep01_sh002",
+                "scene_id": "loc_rooftop_night",
+                "order": 1,
+                "visual_desc": "",
+                "first_frame_prompt": "近景，女子转身",
+                "last_frame_prompt": null,
+                "motion_prompt": "",
+                "negative_prompt": "",
+                "shot_size": "CU",
+                "camera_angle": "eye_level",
+                "camera_move": "static",
+                "lens": "auto",
+                "lighting": "",
+                "continuous_with_prev": false,
+                "camera_id": null,
+                "characters": [
+                  {
+                    "char_id": "c_lin_wan",
+                    "expression": "克制",
+                    "action": "转身",
+                    "wardrobe_state": "default",
+                    "face_pose": "front",
+                    "screen_pos": "center"
+                  }
+                ],
+                "location_id": "loc_rooftop_night",
+                "prop_ids": [],
+                "duration_s": 3.0,
+                "duration_locked": false,
+                "dialogue": [
+                  {
+                    "char_id": "c_lin_wan",
+                    "text": "你说过会来的",
+                    "emotion": "neutral",
+                    "emotion_intensity": 0.5,
+                    "voice_id": null,
+                    "audio_path": null,
+                    "actual_duration_s": null
+                  }
+                ],
+                "sfx": [],
+                "bgm_cue": null,
+                "needs_lipsync": true,
+                "transition_in": "cut",
+                "transition_dur_s": 0.0,
+                "subtitle_text": "",
+                "beat": "",
+                "continuity_notes": "",
+                "missing_info": [],
+                "status": "planned",
+                "attempts": 0,
+                "frame_path": null,
+                "end_frame_path": null,
+                "video_path": null,
+                "gate_notes": []
+              },
+              {
+                "shot_id": "ep01_sh003",
+                "scene_id": "loc_rooftop_night",
+                "order": 2,
+                "visual_desc": "",
+                "first_frame_prompt": "男子从阴影里走出",
+                "last_frame_prompt": null,
+                "motion_prompt": "",
+                "negative_prompt": "",
+                "shot_size": "MCU",
+                "camera_angle": "eye_level",
+                "camera_move": "static",
+                "lens": "auto",
+                "lighting": "",
+                "continuous_with_prev": false,
+                "camera_id": null,
+                "characters": [
+                  {
+                    "char_id": "c_chen_mo",
+                    "expression": "克制",
+                    "action": "握伞",
+                    "wardrobe_state": "default",
+                    "face_pose": "front",
+                    "screen_pos": "center"
+                  }
+                ],
+                "location_id": "loc_rooftop_night",
+                "prop_ids": [],
+                "duration_s": 4.0,
+                "duration_locked": false,
+                "dialogue": [
+                  {
+                    "char_id": "c_chen_mo",
+                    "text": "我来了。晚了七年。",
+                    "emotion": "neutral",
+                    "emotion_intensity": 0.5,
+                    "voice_id": null,
+                    "audio_path": null,
+                    "actual_duration_s": null
+                  }
+                ],
+                "sfx": [],
+                "bgm_cue": null,
+                "needs_lipsync": true,
+                "transition_in": "cut",
+                "transition_dur_s": 0.0,
+                "subtitle_text": "",
+                "beat": "",
+                "continuity_notes": "",
+                "missing_info": [],
+                "status": "planned",
+                "attempts": 0,
+                "frame_path": null,
+                "end_frame_path": null,
+                "video_path": null,
+                "gate_notes": []
+              }
+            ],
+            "chapter_refs": []
+          },
+          {
+            "episode_id": "ep02",
+            "title": "第二章 · 晴",
+            "synopsis": "三年后，同一个天台。",
+            "target_duration_s": 200.0,
+            "script": "",
+            "shots": [],
+            "chapter_refs": []
+          }
+        ]
+      }
+    },
+    {
+      "name": "出分镜：强制重出圣经",
+      "url": "/api/plan",
+      "body": {
+        "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_planning_3brmf2ea\\case12",
+        "script": "林晚站在天台边缘，雨水打湿了她的白衬衫。\n林晚：你说过会来的。\n陈默从阴影里走出来。\n陈默：我来了。晚了七年。",
+        "episode_id": "ep01",
+        "regenerate_bible": true
+      },
+      "clear_assets": false,
+      "llm_bible": "{\"characters\": [{\"key\": \"lin_wan\", \"name\": \"林晚\", \"identity\": \"二十七岁女性，外表冷静，内里执拗。\", \"body\": \"偏瘦，中等身高\", \"face\": \"黑色长直发，鹅蛋脸，杏眼，眼尾微垂，薄唇。\", \"attire\": \"白色衬衫，深色西装裤\"}, {\"key\": \"chen_mo\", \"name\": \"陈默\", \"identity\": \"三十出头男性，沉默寡言\", \"body\": \"高瘦\", \"face\": \"短寸黑发，方脸，浓眉，单眼皮\", \"attire\": \"黑色风衣\"}], \"locations\": [{\"key\": \"rooftop_night\", \"name\": \"夜间天台\", \"space\": \"水泥地面，锈蚀的护栏\", \"lighting\": \"夜间冷调顶光。\", \"palette\": \"冷蓝为主\"}], \"global_style\": \"电影感，浅景深，冷色调。\"}",
+      "llm_storyboard": "{\"shots\": [{\"shot_id\": \"ep01_sh001\", \"scene_id\": \"loc_rooftop_night\", \"order\": 0, \"first_frame_prompt\": \"夜间天台，雨中，女子背对镜头\", \"shot_size\": \"MS\", \"camera_angle\": \"eye_level\", \"duration_s\": 5.0, \"characters\": [{\"char_id\": \"c_lin_wan\", \"expression\": \"落寞\", \"action\": \"扶着护栏\", \"face_pose\": \"back\"}], \"dialogue\": [], \"transition_in\": \"cut\"}, {\"shot_id\": \"ep01_sh002\", \"scene_id\": \"loc_rooftop_night\", \"order\": 1, \"first_frame_prompt\": \"近景，女子转身\", \"shot_size\": \"CU\", \"camera_angle\": \"eye_level\", \"duration_s\": 3.0, \"characters\": [{\"char_id\": \"c_lin_wan\", \"expression\": \"克制\", \"action\": \"转身\", \"face_pose\": \"front\"}], \"dialogue\": [{\"char_id\": \"c_lin_wan\", \"text\": \"你说过会来的\"}], \"transition_in\": \"cut\"}, {\"shot_id\": \"ep01_sh003\", \"scene_id\": \"loc_rooftop_night\", \"order\": 2, \"first_frame_prompt\": \"男子从阴影里走出\", \"shot_size\": \"MCU\", \"camera_angle\": \"eye_level\", \"duration_s\": 4.0, \"characters\": [{\"char_id\": \"c_chen_mo\", \"expression\": \"克制\", \"action\": \"握伞\", \"face_pose\": \"front\"}], \"dialogue\": [{\"char_id\": \"c_chen_mo\", \"text\": \"我来了。晚了七年。\"}], \"transition_in\": \"cut\"}]}",
+      "prompts": [
+        {
+          "stage": "bible",
+          "prompt": "你是一位电影美术指导。读下面的剧本，产出角色设定和场景设定。\n\n画风是真人写实，描述用自然的中文短句。\n\n要求：\n\n1. 只写剧本里真实出现的角色和场景，不要自己加人加景。\n2. face 这一段会在几十个镜头里被逐字复用，是角色能不能保持一致的关键。\n   写具体的、可画出来的特征：发型、发色、脸型、眼型。\n   不要写\"好看\"\"气质佳\"这类无法转成画面的词。\n3. identity 用一句话说清性别、年龄段、气质。\n4. attire 写这个角色的默认服装。剧情中的换装不在这里写。\n5. key 用英文小写和下划线：角色按中文名音译，场景按这个地方的英文说法，\n   都加上区分用的后缀（哪个时段、哪一间）。\n6. lighting 要说清时间和光质：什么时段、光从哪儿来、冷还是暖、硬还是软。\n7. global_style 是全片统一的调子，所有镜头都会带上它。写成配方，四样都要有：\n   胶片或画质的质感、焦段倾向和景深、色板（饱和度、冷暖）、光的性格\n   （硬软、暗部占多少）。不要写「电影感」这三个字，它没有信息量。\n\n剧本：\n\n林晚站在天台边缘，雨水打湿了她的白衬衫。\n林晚：你说过会来的。\n陈默从阴影里走出来。\n陈默：我来了。晚了七年。\n\n只输出 JSON，不要任何解释文字。"
+        },
+        {
+          "stage": "storyboard",
+          "prompt": "你是一位电影分镜师。把下面的剧本拆成分镜表。\n\n可用角色（只能用这些 id）：\n  c_chen_mo：陈默\n  c_lin_wan：林晚\n\n可用场景：\n  loc_rooftop_night：夜间天台\n\n镜头配额，必须严格按这个数量和时长分配：\n  3 个 2 秒镜头，4 个 3 秒镜头，3 个 4 秒镜头，6 个 5 秒镜头\n  合计 16 个镜头，总时长 60 秒\n\n硬性要求：\n\n1. shot_id 用 ep01_sh001 这样的格式，三位数字，按顺序递增。\n2. order 按镜头的先后填。\n3. duration_s 各档位的数量必须与配额完全一致。\n4. **角色长什么样不归你写**：长相、发型、发色、身材、穿着，哪一栏都不要。\n   那几样由系统按资产库统一拼进去，你写了会被丢弃并造成前后不一致。\n   剧本里提到的东西照写——手套、账册、撬棍、伞都是道具和动作，不是长相。\n5. first_frame_prompt 描述这一镜的画面：环境、构图、角色的姿态和位置。\n6. motion_prompt 按秒分段写这几秒里画面怎么动，格式是\n   「[0-2秒] …… [2-5秒] ……」，段要连起来盖满整镜的时长。\n   每段写：谁在动、朝哪个方向、快还是慢；镜头怎么动写名字、幅度和速度。\n   人以外在动的东西（天气、烟尘、水、火光、布料、头发）有就写上；\n   会响的东西用画面写出来，不要单独写音效。不要写剪辑用语。\n   **只能写第一帧里已经看得见的东西怎么动**：\n   · 不写进画、出画。后续运动的主体必须已经在第一帧里。\n   · 不写开门、开窗、拉抽屉。门必须开的话，第一帧就把门开着、门后写清楚。\n   · 不写镜头穿过门框、窗户、走廊拐角。\n   · 一镜只演一件事。\n7. camera_move 一场里要有变化，**任何一种都不要超过三成**。\n   推进情绪用 push_in，交代环境用 pull_out 或 pan_left / pan_right，\n   跟着人走用 handheld，绕着看用 orbit；\n   **画面里没有任何东西在动**时才填 static。\n8. dialogue 里说话的角色，必须同时出现在这一镜的 characters 里。\n   剧本里名字后面括号里写的「怎么说的」，填进这一句的 emotion。\n9. 剧本里〔〕括起来的是潜台词，只用来挑机位、表情和光，不要写进画面描述。\n10. shot_size 要有节奏，**整场不能只用一种**。\n    **拉开景别靠换内容，不靠换标签**：要大景就写环境、写空镜；要特写就让\n    画面里只剩一个局部（手、证件、杯子），别写成「某人的特写」。\n    · 每一场的第一镜用 LS / MLS 交代这是哪儿。\n    · 主力是 MS / MCU，占一半左右。\n    · CU / ECU 只给情绪爆发那一两个瞬间，整场不超过三成。\n      填 ECU 时 first_frame_prompt 要点名是谁的手、谁的眼、什么物件。\n    · 冲突过去之后拉回 MLS / LS，再进下一场。\n\n\n剧本：\n\n林晚站在天台边缘，雨水打湿了她的白衬衫。\n林晚：你说过会来的。\n陈默从阴影里走出来。\n陈默：我来了。晚了七年。\n\n只输出 JSON，不要任何解释文字。"
+        }
+      ],
+      "status": 200,
+      "response": {
+        "episode_id": "ep01",
+        "shots": 3,
+        "duration_s": 12.1,
+        "missing_lines": [],
+        "placed_lines": 0,
+        "shots_without_location": 0,
+        "lipsync": 2,
+        "characters": [
+          {
+            "char_id": "c_lin_wan",
+            "name": "林晚",
+            "face": "黑色长直发，鹅蛋脸，杏眼，眼尾微垂，薄唇"
+          },
+          {
+            "char_id": "c_chen_mo",
+            "name": "陈默",
+            "face": "短寸黑发，方脸，浓眉，单眼皮"
+          }
+        ],
+        "locations": [
+          {
+            "location_id": "loc_rooftop_night",
+            "name": "夜间天台"
+          }
+        ]
+      },
+      "compare": "full",
+      "cpp_status": 200,
+      "cpp_note": null,
+      "assets_after": {
+        "characters": {
+          "c_lin_wan": {
+            "char_id": "c_lin_wan",
+            "name": "林晚",
+            "appearance": {
+              "identity": "二十七岁女性，外表冷静，内里执拗",
+              "body": "偏瘦，中等身高",
+              "face": "黑色长直发，鹅蛋脸，杏眼，眼尾微垂，薄唇",
+              "attire": "白色衬衫，深色西装裤",
+              "style": ""
+            },
+            "wardrobe": [],
+            "ref_front": null,
+            "ref_three_quarter": null,
+            "ref_back": null,
+            "lora_path": null,
+            "lora_trigger": null,
+            "lora_strength": 1.0,
+            "voice_id": null,
+            "voice_ref_audio": null,
+            "voice_gender": "female",
+            "voice_order": 0
+          },
+          "c_chen_mo": {
+            "char_id": "c_chen_mo",
+            "name": "陈默",
+            "appearance": {
+              "identity": "三十出头男性，沉默寡言",
+              "body": "高瘦",
+              "face": "短寸黑发，方脸，浓眉，单眼皮",
+              "attire": "黑色风衣",
+              "style": ""
+            },
+            "wardrobe": [],
+            "ref_front": null,
+            "ref_three_quarter": null,
+            "ref_back": null,
+            "lora_path": null,
+            "lora_trigger": null,
+            "lora_strength": 1.0,
+            "voice_id": null,
+            "voice_ref_audio": null,
+            "voice_gender": "male",
+            "voice_order": 1
+          }
+        },
+        "locations": {
+          "loc_rooftop_night": {
+            "location_id": "loc_rooftop_night",
+            "name": "夜间天台",
+            "space": "水泥地面，锈蚀的护栏",
+            "lighting": "夜间冷调顶光",
+            "palette": "冷蓝为主",
+            "ref_empty": null
+          }
+        },
+        "style": {
+          "style_line": "realistic",
+          "global_style": "电影感，浅景深，冷色调",
+          "negative_prompt": "低质量，模糊，过曝，畸形，多余的手指，画得不好的手部，画得不好的脸部，静止不动的画面，字幕，水印",
+          "aspect_ratio": "9:16"
+        }
+      },
+      "project_after": {
+        "schema_version": 1,
+        "project_id": "yuye-tiantai",
+        "title": "雨夜天台",
+        "style_line": "realistic",
+        "premise": "一个关于错过与和解的都市电影。全片九十分钟，横屏。",
+        "created_at": "2026-09-07T14:56:29.511392+00:00",
+        "updated_at": "2026-09-07T16:57:14.635391+00:00",
+        "episodes": [
+          {
+            "episode_id": "ep01",
+            "title": "第一章 · 雨",
+            "synopsis": "林渊在天台等一个不会来的人。",
+            "target_duration_s": 60.0,
+            "script": "林晚站在天台边缘，雨水打湿了她的白衬衫。\n林晚：你说过会来的。\n陈默从阴影里走出来。\n陈默：我来了。晚了七年。",
+            "shots": [
+              {
+                "shot_id": "ep01_sh001",
+                "scene_id": "loc_rooftop_night",
+                "order": 0,
+                "visual_desc": "",
+                "first_frame_prompt": "夜间天台，雨中，女子背对镜头",
+                "last_frame_prompt": null,
+                "motion_prompt": "",
+                "negative_prompt": "",
+                "shot_size": "MS",
+                "camera_angle": "eye_level",
+                "camera_move": "static",
+                "lens": "auto",
+                "lighting": "",
+                "continuous_with_prev": false,
+                "camera_id": null,
+                "characters": [
+                  {
+                    "char_id": "c_lin_wan",
+                    "expression": "落寞",
+                    "action": "扶着护栏",
+                    "wardrobe_state": "default",
+                    "face_pose": "back",
+                    "screen_pos": "center"
+                  }
+                ],
+                "location_id": "loc_rooftop_night",
+                "prop_ids": [],
+                "duration_s": 5.0,
+                "duration_locked": false,
+                "dialogue": [],
+                "sfx": [],
+                "bgm_cue": null,
+                "needs_lipsync": false,
+                "transition_in": "cut",
+                "transition_dur_s": 0.0,
+                "subtitle_text": "",
+                "beat": "",
+                "continuity_notes": "",
+                "missing_info": [],
+                "status": "planned",
+                "attempts": 0,
+                "frame_path": null,
+                "end_frame_path": null,
+                "video_path": null,
+                "gate_notes": []
+              },
+              {
+                "shot_id": "ep01_sh002",
+                "scene_id": "loc_rooftop_night",
+                "order": 1,
+                "visual_desc": "",
+                "first_frame_prompt": "近景，女子转身",
+                "last_frame_prompt": null,
+                "motion_prompt": "",
+                "negative_prompt": "",
+                "shot_size": "CU",
+                "camera_angle": "eye_level",
+                "camera_move": "static",
+                "lens": "auto",
+                "lighting": "",
+                "continuous_with_prev": false,
+                "camera_id": null,
+                "characters": [
+                  {
+                    "char_id": "c_lin_wan",
+                    "expression": "克制",
+                    "action": "转身",
+                    "wardrobe_state": "default",
+                    "face_pose": "front",
+                    "screen_pos": "center"
+                  }
+                ],
+                "location_id": "loc_rooftop_night",
+                "prop_ids": [],
+                "duration_s": 3.0,
+                "duration_locked": false,
+                "dialogue": [
+                  {
+                    "char_id": "c_lin_wan",
+                    "text": "你说过会来的",
+                    "emotion": "neutral",
+                    "emotion_intensity": 0.5,
+                    "voice_id": null,
+                    "audio_path": null,
+                    "actual_duration_s": null
+                  }
+                ],
+                "sfx": [],
+                "bgm_cue": null,
+                "needs_lipsync": true,
+                "transition_in": "cut",
+                "transition_dur_s": 0.0,
+                "subtitle_text": "",
+                "beat": "",
+                "continuity_notes": "",
+                "missing_info": [],
+                "status": "planned",
+                "attempts": 0,
+                "frame_path": null,
+                "end_frame_path": null,
+                "video_path": null,
+                "gate_notes": []
+              },
+              {
+                "shot_id": "ep01_sh003",
+                "scene_id": "loc_rooftop_night",
+                "order": 2,
+                "visual_desc": "",
+                "first_frame_prompt": "男子从阴影里走出",
+                "last_frame_prompt": null,
+                "motion_prompt": "",
+                "negative_prompt": "",
+                "shot_size": "MCU",
+                "camera_angle": "eye_level",
+                "camera_move": "static",
+                "lens": "auto",
+                "lighting": "",
+                "continuous_with_prev": false,
+                "camera_id": null,
+                "characters": [
+                  {
+                    "char_id": "c_chen_mo",
+                    "expression": "克制",
+                    "action": "握伞",
+                    "wardrobe_state": "default",
+                    "face_pose": "front",
+                    "screen_pos": "center"
+                  }
+                ],
+                "location_id": "loc_rooftop_night",
+                "prop_ids": [],
+                "duration_s": 4.0,
+                "duration_locked": false,
+                "dialogue": [
+                  {
+                    "char_id": "c_chen_mo",
+                    "text": "我来了。晚了七年。",
+                    "emotion": "neutral",
+                    "emotion_intensity": 0.5,
+                    "voice_id": null,
+                    "audio_path": null,
+                    "actual_duration_s": null
+                  }
+                ],
+                "sfx": [],
+                "bgm_cue": null,
+                "needs_lipsync": true,
+                "transition_in": "cut",
+                "transition_dur_s": 0.0,
+                "subtitle_text": "",
+                "beat": "",
+                "continuity_notes": "",
+                "missing_info": [],
+                "status": "planned",
+                "attempts": 0,
+                "frame_path": null,
+                "end_frame_path": null,
+                "video_path": null,
+                "gate_notes": []
+              }
+            ],
+            "chapter_refs": []
+          },
+          {
+            "episode_id": "ep02",
+            "title": "第二章 · 晴",
+            "synopsis": "三年后，同一个天台。",
+            "target_duration_s": 200.0,
+            "script": "",
+            "shots": [],
+            "chapter_refs": []
+          }
+        ]
+      }
+    },
+    {
+      "name": "出分镜：新建一章",
+      "url": "/api/plan",
+      "body": {
+        "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_planning_3brmf2ea\\case13",
+        "script": "林晚站在天台边缘，雨水打湿了她的白衬衫。\n林晚：你说过会来的。\n陈默从阴影里走出来。\n陈默：我来了。晚了七年。",
+        "episode_id": "ep09"
+      },
+      "clear_assets": true,
+      "llm_bible": "{\"characters\": [{\"key\": \"lin_wan\", \"name\": \"林晚\", \"identity\": \"二十七岁女性，外表冷静，内里执拗。\", \"body\": \"偏瘦，中等身高\", \"face\": \"黑色长直发，鹅蛋脸，杏眼，眼尾微垂，薄唇。\", \"attire\": \"白色衬衫，深色西装裤\"}, {\"key\": \"chen_mo\", \"name\": \"陈默\", \"identity\": \"三十出头男性，沉默寡言\", \"body\": \"高瘦\", \"face\": \"短寸黑发，方脸，浓眉，单眼皮\", \"attire\": \"黑色风衣\"}], \"locations\": [{\"key\": \"rooftop_night\", \"name\": \"夜间天台\", \"space\": \"水泥地面，锈蚀的护栏\", \"lighting\": \"夜间冷调顶光。\", \"palette\": \"冷蓝为主\"}], \"global_style\": \"电影感，浅景深，冷色调。\"}",
+      "llm_storyboard": "{\"shots\": [{\"shot_id\": \"ep01_sh001\", \"scene_id\": \"loc_rooftop_night\", \"order\": 0, \"first_frame_prompt\": \"夜间天台，雨中，女子背对镜头\", \"shot_size\": \"MS\", \"camera_angle\": \"eye_level\", \"duration_s\": 5.0, \"characters\": [{\"char_id\": \"c_lin_wan\", \"expression\": \"落寞\", \"action\": \"扶着护栏\", \"face_pose\": \"back\"}], \"dialogue\": [], \"transition_in\": \"cut\"}, {\"shot_id\": \"ep01_sh002\", \"scene_id\": \"loc_rooftop_night\", \"order\": 1, \"first_frame_prompt\": \"近景，女子转身\", \"shot_size\": \"CU\", \"camera_angle\": \"eye_level\", \"duration_s\": 3.0, \"characters\": [{\"char_id\": \"c_lin_wan\", \"expression\": \"克制\", \"action\": \"转身\", \"face_pose\": \"front\"}], \"dialogue\": [{\"char_id\": \"c_lin_wan\", \"text\": \"你说过会来的\"}], \"transition_in\": \"cut\"}, {\"shot_id\": \"ep01_sh003\", \"scene_id\": \"loc_rooftop_night\", \"order\": 2, \"first_frame_prompt\": \"男子从阴影里走出\", \"shot_size\": \"MCU\", \"camera_angle\": \"eye_level\", \"duration_s\": 4.0, \"characters\": [{\"char_id\": \"c_chen_mo\", \"expression\": \"克制\", \"action\": \"握伞\", \"face_pose\": \"front\"}], \"dialogue\": [{\"char_id\": \"c_chen_mo\", \"text\": \"我来了。晚了七年。\"}], \"transition_in\": \"cut\"}]}",
+      "prompts": [
+        {
+          "stage": "bible",
+          "prompt": "你是一位电影美术指导。读下面的剧本，产出角色设定和场景设定。\n\n画风是真人写实，描述用自然的中文短句。\n\n要求：\n\n1. 只写剧本里真实出现的角色和场景，不要自己加人加景。\n2. face 这一段会在几十个镜头里被逐字复用，是角色能不能保持一致的关键。\n   写具体的、可画出来的特征：发型、发色、脸型、眼型。\n   不要写\"好看\"\"气质佳\"这类无法转成画面的词。\n3. identity 用一句话说清性别、年龄段、气质。\n4. attire 写这个角色的默认服装。剧情中的换装不在这里写。\n5. key 用英文小写和下划线：角色按中文名音译，场景按这个地方的英文说法，\n   都加上区分用的后缀（哪个时段、哪一间）。\n6. lighting 要说清时间和光质：什么时段、光从哪儿来、冷还是暖、硬还是软。\n7. global_style 是全片统一的调子，所有镜头都会带上它。写成配方，四样都要有：\n   胶片或画质的质感、焦段倾向和景深、色板（饱和度、冷暖）、光的性格\n   （硬软、暗部占多少）。不要写「电影感」这三个字，它没有信息量。\n\n剧本：\n\n林晚站在天台边缘，雨水打湿了她的白衬衫。\n林晚：你说过会来的。\n陈默从阴影里走出来。\n陈默：我来了。晚了七年。\n\n只输出 JSON，不要任何解释文字。"
+        },
+        {
+          "stage": "storyboard",
+          "prompt": "你是一位电影分镜师。把下面的剧本拆成分镜表。\n\n可用角色（只能用这些 id）：\n  c_chen_mo：陈默\n  c_lin_wan：林晚\n\n可用场景：\n  loc_rooftop_night：夜间天台\n\n镜头配额，必须严格按这个数量和时长分配：\n  3 个 2 秒镜头，4 个 3 秒镜头，3 个 4 秒镜头，6 个 5 秒镜头\n  合计 16 个镜头，总时长 60 秒\n\n硬性要求：\n\n1. shot_id 用 ep09_sh001 这样的格式，三位数字，按顺序递增。\n2. order 按镜头的先后填。\n3. duration_s 各档位的数量必须与配额完全一致。\n4. **角色长什么样不归你写**：长相、发型、发色、身材、穿着，哪一栏都不要。\n   那几样由系统按资产库统一拼进去，你写了会被丢弃并造成前后不一致。\n   剧本里提到的东西照写——手套、账册、撬棍、伞都是道具和动作，不是长相。\n5. first_frame_prompt 描述这一镜的画面：环境、构图、角色的姿态和位置。\n6. motion_prompt 按秒分段写这几秒里画面怎么动，格式是\n   「[0-2秒] …… [2-5秒] ……」，段要连起来盖满整镜的时长。\n   每段写：谁在动、朝哪个方向、快还是慢；镜头怎么动写名字、幅度和速度。\n   人以外在动的东西（天气、烟尘、水、火光、布料、头发）有就写上；\n   会响的东西用画面写出来，不要单独写音效。不要写剪辑用语。\n   **只能写第一帧里已经看得见的东西怎么动**：\n   · 不写进画、出画。后续运动的主体必须已经在第一帧里。\n   · 不写开门、开窗、拉抽屉。门必须开的话，第一帧就把门开着、门后写清楚。\n   · 不写镜头穿过门框、窗户、走廊拐角。\n   · 一镜只演一件事。\n7. camera_move 一场里要有变化，**任何一种都不要超过三成**。\n   推进情绪用 push_in，交代环境用 pull_out 或 pan_left / pan_right，\n   跟着人走用 handheld，绕着看用 orbit；\n   **画面里没有任何东西在动**时才填 static。\n8. dialogue 里说话的角色，必须同时出现在这一镜的 characters 里。\n   剧本里名字后面括号里写的「怎么说的」，填进这一句的 emotion。\n9. 剧本里〔〕括起来的是潜台词，只用来挑机位、表情和光，不要写进画面描述。\n10. shot_size 要有节奏，**整场不能只用一种**。\n    **拉开景别靠换内容，不靠换标签**：要大景就写环境、写空镜；要特写就让\n    画面里只剩一个局部（手、证件、杯子），别写成「某人的特写」。\n    · 每一场的第一镜用 LS / MLS 交代这是哪儿。\n    · 主力是 MS / MCU，占一半左右。\n    · CU / ECU 只给情绪爆发那一两个瞬间，整场不超过三成。\n      填 ECU 时 first_frame_prompt 要点名是谁的手、谁的眼、什么物件。\n    · 冲突过去之后拉回 MLS / LS，再进下一场。\n\n\n剧本：\n\n林晚站在天台边缘，雨水打湿了她的白衬衫。\n林晚：你说过会来的。\n陈默从阴影里走出来。\n陈默：我来了。晚了七年。\n\n只输出 JSON，不要任何解释文字。"
+        }
+      ],
+      "status": 200,
+      "response": {
+        "episode_id": "ep09",
+        "shots": 3,
+        "duration_s": 12.1,
+        "missing_lines": [],
+        "placed_lines": 0,
+        "shots_without_location": 0,
+        "lipsync": 2,
+        "characters": [
+          {
+            "char_id": "c_lin_wan",
+            "name": "林晚",
+            "face": "黑色长直发，鹅蛋脸，杏眼，眼尾微垂，薄唇"
+          },
+          {
+            "char_id": "c_chen_mo",
+            "name": "陈默",
+            "face": "短寸黑发，方脸，浓眉，单眼皮"
+          }
+        ],
+        "locations": [
+          {
+            "location_id": "loc_rooftop_night",
+            "name": "夜间天台"
+          }
+        ]
+      },
+      "compare": "full",
+      "cpp_status": 200,
+      "cpp_note": null,
+      "assets_after": {
+        "characters": {
+          "c_lin_wan": {
+            "char_id": "c_lin_wan",
+            "name": "林晚",
+            "appearance": {
+              "identity": "二十七岁女性，外表冷静，内里执拗",
+              "body": "偏瘦，中等身高",
+              "face": "黑色长直发，鹅蛋脸，杏眼，眼尾微垂，薄唇",
+              "attire": "白色衬衫，深色西装裤",
+              "style": ""
+            },
+            "wardrobe": [],
+            "ref_front": null,
+            "ref_three_quarter": null,
+            "ref_back": null,
+            "lora_path": null,
+            "lora_trigger": null,
+            "lora_strength": 1.0,
+            "voice_id": null,
+            "voice_ref_audio": null,
+            "voice_gender": "female",
+            "voice_order": 0
+          },
+          "c_chen_mo": {
+            "char_id": "c_chen_mo",
+            "name": "陈默",
+            "appearance": {
+              "identity": "三十出头男性，沉默寡言",
+              "body": "高瘦",
+              "face": "短寸黑发，方脸，浓眉，单眼皮",
+              "attire": "黑色风衣",
+              "style": ""
+            },
+            "wardrobe": [],
+            "ref_front": null,
+            "ref_three_quarter": null,
+            "ref_back": null,
+            "lora_path": null,
+            "lora_trigger": null,
+            "lora_strength": 1.0,
+            "voice_id": null,
+            "voice_ref_audio": null,
+            "voice_gender": "male",
+            "voice_order": 1
+          }
+        },
+        "locations": {
+          "loc_rooftop_night": {
+            "location_id": "loc_rooftop_night",
+            "name": "夜间天台",
+            "space": "水泥地面，锈蚀的护栏",
+            "lighting": "夜间冷调顶光",
+            "palette": "冷蓝为主",
+            "ref_empty": null
+          }
+        },
+        "style": {
+          "style_line": "realistic",
+          "global_style": "电影感，浅景深，冷色调",
+          "negative_prompt": "低质量，模糊，过曝，畸形，多余的手指，画得不好的手部，画得不好的脸部，静止不动的画面，字幕，水印",
+          "aspect_ratio": "9:16"
+        }
+      },
+      "project_after": {
+        "schema_version": 1,
+        "project_id": "yuye-tiantai",
+        "title": "雨夜天台",
+        "style_line": "realistic",
+        "premise": "一个关于错过与和解的都市电影。全片九十分钟，横屏。",
+        "created_at": "2026-09-07T14:56:29.511392+00:00",
+        "updated_at": "2026-09-07T16:57:14.680933+00:00",
+        "episodes": [
+          {
+            "episode_id": "ep01",
+            "title": "第一章 · 雨",
+            "synopsis": "林渊在天台等一个不会来的人。",
+            "target_duration_s": 180.0,
+            "script": "（雨声起）\n林渊站在栏杆前，没有回头。",
+            "shots": [
+              {
+                "shot_id": "ep01_s03_sh007",
+                "scene_id": "ep01_s03",
+                "order": 6,
+                "visual_desc": "雨夜天台，男主背对镜头站在栏杆前，远处霓虹在雨幕里散成一片光晕",
+                "first_frame_prompt": "cinematic, rooftop at night, heavy rain, neon bokeh, back view",
+                "last_frame_prompt": "cinematic, rooftop at night, man turns around, rain on face",
+                "motion_prompt": "缓慢推进，雨丝斜掠，人物微微转头",
+                "negative_prompt": "模糊, 低质量, 多余的手指",
+                "shot_size": "MCU",
+                "camera_angle": "low",
+                "camera_move": "push_in",
+                "lens": "auto",
+                "lighting": "",
+                "continuous_with_prev": false,
+                "camera_id": "cam_rooftop_a",
+                "characters": [
+                  {
+                    "char_id": "lin_yuan",
+                    "expression": "隐忍",
+                    "action": "握紧栏杆，指节发白",
+                    "wardrobe_state": "suit_soaked",
+                    "face_pose": "three_quarter",
+                    "screen_pos": "center"
+                  },
+                  {
+                    "char_id": "chen_mo",
+                    "expression": "愕然",
+                    "action": "停在门口，没有再往前",
+                    "wardrobe_state": "default",
+                    "face_pose": "profile",
+                    "screen_pos": "left"
+                  }
+                ],
+                "location_id": "loc_rooftop",
+                "prop_ids": [
+                  "prop_umbrella",
+                  "prop_phone"
+                ],
+                "duration_s": 6.5,
+                "duration_locked": true,
+                "dialogue": [
+                  {
+                    "char_id": "lin_yuan",
+                    "text": "你要是早半个小时来，什么都还来得及。",
+                    "emotion": "压抑",
+                    "emotion_intensity": 0.8,
+                    "voice_id": "voice_lin",
+                    "audio_path": "audio/ep01_s03_sh007_01.wav",
+                    "actual_duration_s": 3.2
+                  },
+                  {
+                    "char_id": null,
+                    "text": "雨声盖过了他后半句。",
+                    "emotion": "neutral",
+                    "emotion_intensity": 0.3,
+                    "voice_id": null,
+                    "audio_path": null,
+                    "actual_duration_s": null
+                  }
+                ],
+                "sfx": [
+                  "雨声",
+                  "远处车流"
+                ],
+                "bgm_cue": "bgm_tension_low",
+                "needs_lipsync": false,
+                "transition_in": "dissolve",
+                "transition_dur_s": 0.8,
+                "subtitle_text": "你要是早半个小时来，什么都还来得及。",
+                "beat": "反转",
+                "continuity_notes": "上一镜他还没湿透，这里服装状态要接上 suit_soaked",
+                "missing_info": [
+                  "未确定陈墨是否带伞"
+                ],
+                "status": "audio_done",
+                "attempts": 2,
+                "frame_path": "frames/ep01_s03_sh007.png",
+                "end_frame_path": null,
+                "video_path": null,
+                "gate_notes": [
+                  "草稿档画面偏暗，已调高曝光重跑"
+                ]
+              },
+              {
+                "shot_id": "ep01_s01_sh001",
+                "scene_id": "ep01_s01",
+                "order": 0,
+                "visual_desc": "",
+                "first_frame_prompt": "",
+                "last_frame_prompt": null,
+                "motion_prompt": "",
+                "negative_prompt": "",
+                "shot_size": "MS",
+                "camera_angle": "eye_level",
+                "camera_move": "static",
+                "lens": "auto",
+                "lighting": "",
+                "continuous_with_prev": false,
+                "camera_id": null,
+                "characters": [],
+                "location_id": null,
+                "prop_ids": [],
+                "duration_s": 5.0,
+                "duration_locked": false,
+                "dialogue": [],
+                "sfx": [],
+                "bgm_cue": null,
+                "needs_lipsync": false,
+                "transition_in": "cut",
+                "transition_dur_s": 0.0,
+                "subtitle_text": "",
+                "beat": "",
+                "continuity_notes": "",
+                "missing_info": [],
+                "status": "planned",
+                "attempts": 0,
+                "frame_path": null,
+                "end_frame_path": null,
+                "video_path": null,
+                "gate_notes": []
+              }
+            ],
+            "chapter_refs": []
+          },
+          {
+            "episode_id": "ep02",
+            "title": "第二章 · 晴",
+            "synopsis": "三年后，同一个天台。",
+            "target_duration_s": 200.0,
+            "script": "",
+            "shots": [],
+            "chapter_refs": []
+          },
+          {
+            "episode_id": "ep09",
+            "title": "",
+            "synopsis": "",
+            "target_duration_s": 60.0,
+            "script": "林晚站在天台边缘，雨水打湿了她的白衬衫。\n林晚：你说过会来的。\n陈默从阴影里走出来。\n陈默：我来了。晚了七年。",
+            "shots": [
+              {
+                "shot_id": "ep09_sh001",
+                "scene_id": "loc_rooftop_night",
+                "order": 0,
+                "visual_desc": "",
+                "first_frame_prompt": "夜间天台，雨中，女子背对镜头",
+                "last_frame_prompt": null,
+                "motion_prompt": "",
+                "negative_prompt": "",
+                "shot_size": "MS",
+                "camera_angle": "eye_level",
+                "camera_move": "static",
+                "lens": "auto",
+                "lighting": "",
+                "continuous_with_prev": false,
+                "camera_id": null,
+                "characters": [
+                  {
+                    "char_id": "c_lin_wan",
+                    "expression": "落寞",
+                    "action": "扶着护栏",
+                    "wardrobe_state": "default",
+                    "face_pose": "back",
+                    "screen_pos": "center"
+                  }
+                ],
+                "location_id": "loc_rooftop_night",
+                "prop_ids": [],
+                "duration_s": 5.0,
+                "duration_locked": false,
+                "dialogue": [],
+                "sfx": [],
+                "bgm_cue": null,
+                "needs_lipsync": false,
+                "transition_in": "cut",
+                "transition_dur_s": 0.0,
+                "subtitle_text": "",
+                "beat": "",
+                "continuity_notes": "",
+                "missing_info": [],
+                "status": "planned",
+                "attempts": 0,
+                "frame_path": null,
+                "end_frame_path": null,
+                "video_path": null,
+                "gate_notes": []
+              },
+              {
+                "shot_id": "ep09_sh002",
+                "scene_id": "loc_rooftop_night",
+                "order": 1,
+                "visual_desc": "",
+                "first_frame_prompt": "近景，女子转身",
+                "last_frame_prompt": null,
+                "motion_prompt": "",
+                "negative_prompt": "",
+                "shot_size": "CU",
+                "camera_angle": "eye_level",
+                "camera_move": "static",
+                "lens": "auto",
+                "lighting": "",
+                "continuous_with_prev": false,
+                "camera_id": null,
+                "characters": [
+                  {
+                    "char_id": "c_lin_wan",
+                    "expression": "克制",
+                    "action": "转身",
+                    "wardrobe_state": "default",
+                    "face_pose": "front",
+                    "screen_pos": "center"
+                  }
+                ],
+                "location_id": "loc_rooftop_night",
+                "prop_ids": [],
+                "duration_s": 3.0,
+                "duration_locked": false,
+                "dialogue": [
+                  {
+                    "char_id": "c_lin_wan",
+                    "text": "你说过会来的",
+                    "emotion": "neutral",
+                    "emotion_intensity": 0.5,
+                    "voice_id": null,
+                    "audio_path": null,
+                    "actual_duration_s": null
+                  }
+                ],
+                "sfx": [],
+                "bgm_cue": null,
+                "needs_lipsync": true,
+                "transition_in": "cut",
+                "transition_dur_s": 0.0,
+                "subtitle_text": "",
+                "beat": "",
+                "continuity_notes": "",
+                "missing_info": [],
+                "status": "planned",
+                "attempts": 0,
+                "frame_path": null,
+                "end_frame_path": null,
+                "video_path": null,
+                "gate_notes": []
+              },
+              {
+                "shot_id": "ep09_sh003",
+                "scene_id": "loc_rooftop_night",
+                "order": 2,
+                "visual_desc": "",
+                "first_frame_prompt": "男子从阴影里走出",
+                "last_frame_prompt": null,
+                "motion_prompt": "",
+                "negative_prompt": "",
+                "shot_size": "MCU",
+                "camera_angle": "eye_level",
+                "camera_move": "static",
+                "lens": "auto",
+                "lighting": "",
+                "continuous_with_prev": false,
+                "camera_id": null,
+                "characters": [
+                  {
+                    "char_id": "c_chen_mo",
+                    "expression": "克制",
+                    "action": "握伞",
+                    "wardrobe_state": "default",
+                    "face_pose": "front",
+                    "screen_pos": "center"
+                  }
+                ],
+                "location_id": "loc_rooftop_night",
+                "prop_ids": [],
+                "duration_s": 4.0,
+                "duration_locked": false,
+                "dialogue": [
+                  {
+                    "char_id": "c_chen_mo",
+                    "text": "我来了。晚了七年。",
+                    "emotion": "neutral",
+                    "emotion_intensity": 0.5,
+                    "voice_id": null,
+                    "audio_path": null,
+                    "actual_duration_s": null
+                  }
+                ],
+                "sfx": [],
+                "bgm_cue": null,
+                "needs_lipsync": true,
+                "transition_in": "cut",
+                "transition_dur_s": 0.0,
+                "subtitle_text": "",
+                "beat": "",
+                "continuity_notes": "",
+                "missing_info": [],
+                "status": "planned",
+                "attempts": 0,
+                "frame_path": null,
+                "end_frame_path": null,
+                "video_path": null,
+                "gate_notes": []
+              }
+            ],
+            "chapter_refs": []
+          }
+        ]
+      }
+    },
+    {
+      "name": "出分镜：自定时长",
+      "url": "/api/plan",
+      "body": {
+        "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_planning_3brmf2ea\\case14",
+        "script": "林晚站在天台边缘，雨水打湿了她的白衬衫。\n林晚：你说过会来的。\n陈默从阴影里走出来。\n陈默：我来了。晚了七年。",
+        "episode_id": "ep01",
+        "duration_s": 30.0
+      },
+      "clear_assets": true,
+      "llm_bible": "{\"characters\": [{\"key\": \"lin_wan\", \"name\": \"林晚\", \"identity\": \"二十七岁女性，外表冷静，内里执拗。\", \"body\": \"偏瘦，中等身高\", \"face\": \"黑色长直发，鹅蛋脸，杏眼，眼尾微垂，薄唇。\", \"attire\": \"白色衬衫，深色西装裤\"}, {\"key\": \"chen_mo\", \"name\": \"陈默\", \"identity\": \"三十出头男性，沉默寡言\", \"body\": \"高瘦\", \"face\": \"短寸黑发，方脸，浓眉，单眼皮\", \"attire\": \"黑色风衣\"}], \"locations\": [{\"key\": \"rooftop_night\", \"name\": \"夜间天台\", \"space\": \"水泥地面，锈蚀的护栏\", \"lighting\": \"夜间冷调顶光。\", \"palette\": \"冷蓝为主\"}], \"global_style\": \"电影感，浅景深，冷色调。\"}",
+      "llm_storyboard": "{\"shots\": [{\"shot_id\": \"ep01_sh001\", \"scene_id\": \"loc_rooftop_night\", \"order\": 0, \"first_frame_prompt\": \"夜间天台，雨中，女子背对镜头\", \"shot_size\": \"MS\", \"camera_angle\": \"eye_level\", \"duration_s\": 5.0, \"characters\": [{\"char_id\": \"c_lin_wan\", \"expression\": \"落寞\", \"action\": \"扶着护栏\", \"face_pose\": \"back\"}], \"dialogue\": [], \"transition_in\": \"cut\"}, {\"shot_id\": \"ep01_sh002\", \"scene_id\": \"loc_rooftop_night\", \"order\": 1, \"first_frame_prompt\": \"近景，女子转身\", \"shot_size\": \"CU\", \"camera_angle\": \"eye_level\", \"duration_s\": 3.0, \"characters\": [{\"char_id\": \"c_lin_wan\", \"expression\": \"克制\", \"action\": \"转身\", \"face_pose\": \"front\"}], \"dialogue\": [{\"char_id\": \"c_lin_wan\", \"text\": \"你说过会来的\"}], \"transition_in\": \"cut\"}, {\"shot_id\": \"ep01_sh003\", \"scene_id\": \"loc_rooftop_night\", \"order\": 2, \"first_frame_prompt\": \"男子从阴影里走出\", \"shot_size\": \"MCU\", \"camera_angle\": \"eye_level\", \"duration_s\": 4.0, \"characters\": [{\"char_id\": \"c_chen_mo\", \"expression\": \"克制\", \"action\": \"握伞\", \"face_pose\": \"front\"}], \"dialogue\": [{\"char_id\": \"c_chen_mo\", \"text\": \"我来了。晚了七年。\"}], \"transition_in\": \"cut\"}]}",
+      "prompts": [
+        {
+          "stage": "bible",
+          "prompt": "你是一位电影美术指导。读下面的剧本，产出角色设定和场景设定。\n\n画风是真人写实，描述用自然的中文短句。\n\n要求：\n\n1. 只写剧本里真实出现的角色和场景，不要自己加人加景。\n2. face 这一段会在几十个镜头里被逐字复用，是角色能不能保持一致的关键。\n   写具体的、可画出来的特征：发型、发色、脸型、眼型。\n   不要写\"好看\"\"气质佳\"这类无法转成画面的词。\n3. identity 用一句话说清性别、年龄段、气质。\n4. attire 写这个角色的默认服装。剧情中的换装不在这里写。\n5. key 用英文小写和下划线：角色按中文名音译，场景按这个地方的英文说法，\n   都加上区分用的后缀（哪个时段、哪一间）。\n6. lighting 要说清时间和光质：什么时段、光从哪儿来、冷还是暖、硬还是软。\n7. global_style 是全片统一的调子，所有镜头都会带上它。写成配方，四样都要有：\n   胶片或画质的质感、焦段倾向和景深、色板（饱和度、冷暖）、光的性格\n   （硬软、暗部占多少）。不要写「电影感」这三个字，它没有信息量。\n\n剧本：\n\n林晚站在天台边缘，雨水打湿了她的白衬衫。\n林晚：你说过会来的。\n陈默从阴影里走出来。\n陈默：我来了。晚了七年。\n\n只输出 JSON，不要任何解释文字。"
+        },
+        {
+          "stage": "storyboard",
+          "prompt": "你是一位电影分镜师。把下面的剧本拆成分镜表。\n\n可用角色（只能用这些 id）：\n  c_chen_mo：陈默\n  c_lin_wan：林晚\n\n可用场景：\n  loc_rooftop_night：夜间天台\n\n镜头配额，必须严格按这个数量和时长分配：\n  2 个 2 秒镜头，2 个 3 秒镜头，1 个 4 秒镜头，3 个 5 秒镜头\n  合计 8 个镜头，总时长 29 秒\n\n硬性要求：\n\n1. shot_id 用 ep01_sh001 这样的格式，三位数字，按顺序递增。\n2. order 按镜头的先后填。\n3. duration_s 各档位的数量必须与配额完全一致。\n4. **角色长什么样不归你写**：长相、发型、发色、身材、穿着，哪一栏都不要。\n   那几样由系统按资产库统一拼进去，你写了会被丢弃并造成前后不一致。\n   剧本里提到的东西照写——手套、账册、撬棍、伞都是道具和动作，不是长相。\n5. first_frame_prompt 描述这一镜的画面：环境、构图、角色的姿态和位置。\n6. motion_prompt 按秒分段写这几秒里画面怎么动，格式是\n   「[0-2秒] …… [2-5秒] ……」，段要连起来盖满整镜的时长。\n   每段写：谁在动、朝哪个方向、快还是慢；镜头怎么动写名字、幅度和速度。\n   人以外在动的东西（天气、烟尘、水、火光、布料、头发）有就写上；\n   会响的东西用画面写出来，不要单独写音效。不要写剪辑用语。\n   **只能写第一帧里已经看得见的东西怎么动**：\n   · 不写进画、出画。后续运动的主体必须已经在第一帧里。\n   · 不写开门、开窗、拉抽屉。门必须开的话，第一帧就把门开着、门后写清楚。\n   · 不写镜头穿过门框、窗户、走廊拐角。\n   · 一镜只演一件事。\n7. camera_move 一场里要有变化，**任何一种都不要超过三成**。\n   推进情绪用 push_in，交代环境用 pull_out 或 pan_left / pan_right，\n   跟着人走用 handheld，绕着看用 orbit；\n   **画面里没有任何东西在动**时才填 static。\n8. dialogue 里说话的角色，必须同时出现在这一镜的 characters 里。\n   剧本里名字后面括号里写的「怎么说的」，填进这一句的 emotion。\n9. 剧本里〔〕括起来的是潜台词，只用来挑机位、表情和光，不要写进画面描述。\n10. shot_size 要有节奏，**整场不能只用一种**。\n    **拉开景别靠换内容，不靠换标签**：要大景就写环境、写空镜；要特写就让\n    画面里只剩一个局部（手、证件、杯子），别写成「某人的特写」。\n    · 每一场的第一镜用 LS / MLS 交代这是哪儿。\n    · 主力是 MS / MCU，占一半左右。\n    · CU / ECU 只给情绪爆发那一两个瞬间，整场不超过三成。\n      填 ECU 时 first_frame_prompt 要点名是谁的手、谁的眼、什么物件。\n    · 冲突过去之后拉回 MLS / LS，再进下一场。\n\n\n剧本：\n\n林晚站在天台边缘，雨水打湿了她的白衬衫。\n林晚：你说过会来的。\n陈默从阴影里走出来。\n陈默：我来了。晚了七年。\n\n只输出 JSON，不要任何解释文字。"
+        }
+      ],
+      "status": 200,
+      "response": {
+        "episode_id": "ep01",
+        "shots": 3,
+        "duration_s": 12.1,
+        "missing_lines": [],
+        "placed_lines": 0,
+        "shots_without_location": 0,
+        "lipsync": 2,
+        "characters": [
+          {
+            "char_id": "c_lin_wan",
+            "name": "林晚",
+            "face": "黑色长直发，鹅蛋脸，杏眼，眼尾微垂，薄唇"
+          },
+          {
+            "char_id": "c_chen_mo",
+            "name": "陈默",
+            "face": "短寸黑发，方脸，浓眉，单眼皮"
+          }
+        ],
+        "locations": [
+          {
+            "location_id": "loc_rooftop_night",
+            "name": "夜间天台"
+          }
+        ]
+      },
+      "compare": "full",
+      "cpp_status": 200,
+      "cpp_note": null,
+      "assets_after": {
+        "characters": {
+          "c_lin_wan": {
+            "char_id": "c_lin_wan",
+            "name": "林晚",
+            "appearance": {
+              "identity": "二十七岁女性，外表冷静，内里执拗",
+              "body": "偏瘦，中等身高",
+              "face": "黑色长直发，鹅蛋脸，杏眼，眼尾微垂，薄唇",
+              "attire": "白色衬衫，深色西装裤",
+              "style": ""
+            },
+            "wardrobe": [],
+            "ref_front": null,
+            "ref_three_quarter": null,
+            "ref_back": null,
+            "lora_path": null,
+            "lora_trigger": null,
+            "lora_strength": 1.0,
+            "voice_id": null,
+            "voice_ref_audio": null,
+            "voice_gender": "female",
+            "voice_order": 0
+          },
+          "c_chen_mo": {
+            "char_id": "c_chen_mo",
+            "name": "陈默",
+            "appearance": {
+              "identity": "三十出头男性，沉默寡言",
+              "body": "高瘦",
+              "face": "短寸黑发，方脸，浓眉，单眼皮",
+              "attire": "黑色风衣",
+              "style": ""
+            },
+            "wardrobe": [],
+            "ref_front": null,
+            "ref_three_quarter": null,
+            "ref_back": null,
+            "lora_path": null,
+            "lora_trigger": null,
+            "lora_strength": 1.0,
+            "voice_id": null,
+            "voice_ref_audio": null,
+            "voice_gender": "male",
+            "voice_order": 1
+          }
+        },
+        "locations": {
+          "loc_rooftop_night": {
+            "location_id": "loc_rooftop_night",
+            "name": "夜间天台",
+            "space": "水泥地面，锈蚀的护栏",
+            "lighting": "夜间冷调顶光",
+            "palette": "冷蓝为主",
+            "ref_empty": null
+          }
+        },
+        "style": {
+          "style_line": "realistic",
+          "global_style": "电影感，浅景深，冷色调",
+          "negative_prompt": "低质量，模糊，过曝，畸形，多余的手指，画得不好的手部，画得不好的脸部，静止不动的画面，字幕，水印",
+          "aspect_ratio": "9:16"
+        }
+      },
+      "project_after": {
+        "schema_version": 1,
+        "project_id": "yuye-tiantai",
+        "title": "雨夜天台",
+        "style_line": "realistic",
+        "premise": "一个关于错过与和解的都市电影。全片九十分钟，横屏。",
+        "created_at": "2026-09-07T14:56:29.511392+00:00",
+        "updated_at": "2026-09-07T16:57:14.725807+00:00",
+        "episodes": [
+          {
+            "episode_id": "ep01",
+            "title": "第一章 · 雨",
+            "synopsis": "林渊在天台等一个不会来的人。",
+            "target_duration_s": 30.0,
+            "script": "林晚站在天台边缘，雨水打湿了她的白衬衫。\n林晚：你说过会来的。\n陈默从阴影里走出来。\n陈默：我来了。晚了七年。",
+            "shots": [
+              {
+                "shot_id": "ep01_sh001",
+                "scene_id": "loc_rooftop_night",
+                "order": 0,
+                "visual_desc": "",
+                "first_frame_prompt": "夜间天台，雨中，女子背对镜头",
+                "last_frame_prompt": null,
+                "motion_prompt": "",
+                "negative_prompt": "",
+                "shot_size": "MS",
+                "camera_angle": "eye_level",
+                "camera_move": "static",
+                "lens": "auto",
+                "lighting": "",
+                "continuous_with_prev": false,
+                "camera_id": null,
+                "characters": [
+                  {
+                    "char_id": "c_lin_wan",
+                    "expression": "落寞",
+                    "action": "扶着护栏",
+                    "wardrobe_state": "default",
+                    "face_pose": "back",
+                    "screen_pos": "center"
+                  }
+                ],
+                "location_id": "loc_rooftop_night",
+                "prop_ids": [],
+                "duration_s": 5.0,
+                "duration_locked": false,
+                "dialogue": [],
+                "sfx": [],
+                "bgm_cue": null,
+                "needs_lipsync": false,
+                "transition_in": "cut",
+                "transition_dur_s": 0.0,
+                "subtitle_text": "",
+                "beat": "",
+                "continuity_notes": "",
+                "missing_info": [],
+                "status": "planned",
+                "attempts": 0,
+                "frame_path": null,
+                "end_frame_path": null,
+                "video_path": null,
+                "gate_notes": []
+              },
+              {
+                "shot_id": "ep01_sh002",
+                "scene_id": "loc_rooftop_night",
+                "order": 1,
+                "visual_desc": "",
+                "first_frame_prompt": "近景，女子转身",
+                "last_frame_prompt": null,
+                "motion_prompt": "",
+                "negative_prompt": "",
+                "shot_size": "CU",
+                "camera_angle": "eye_level",
+                "camera_move": "static",
+                "lens": "auto",
+                "lighting": "",
+                "continuous_with_prev": false,
+                "camera_id": null,
+                "characters": [
+                  {
+                    "char_id": "c_lin_wan",
+                    "expression": "克制",
+                    "action": "转身",
+                    "wardrobe_state": "default",
+                    "face_pose": "front",
+                    "screen_pos": "center"
+                  }
+                ],
+                "location_id": "loc_rooftop_night",
+                "prop_ids": [],
+                "duration_s": 3.0,
+                "duration_locked": false,
+                "dialogue": [
+                  {
+                    "char_id": "c_lin_wan",
+                    "text": "你说过会来的",
+                    "emotion": "neutral",
+                    "emotion_intensity": 0.5,
+                    "voice_id": null,
+                    "audio_path": null,
+                    "actual_duration_s": null
+                  }
+                ],
+                "sfx": [],
+                "bgm_cue": null,
+                "needs_lipsync": true,
+                "transition_in": "cut",
+                "transition_dur_s": 0.0,
+                "subtitle_text": "",
+                "beat": "",
+                "continuity_notes": "",
+                "missing_info": [],
+                "status": "planned",
+                "attempts": 0,
+                "frame_path": null,
+                "end_frame_path": null,
+                "video_path": null,
+                "gate_notes": []
+              },
+              {
+                "shot_id": "ep01_sh003",
+                "scene_id": "loc_rooftop_night",
+                "order": 2,
+                "visual_desc": "",
+                "first_frame_prompt": "男子从阴影里走出",
+                "last_frame_prompt": null,
+                "motion_prompt": "",
+                "negative_prompt": "",
+                "shot_size": "MCU",
+                "camera_angle": "eye_level",
+                "camera_move": "static",
+                "lens": "auto",
+                "lighting": "",
+                "continuous_with_prev": false,
+                "camera_id": null,
+                "characters": [
+                  {
+                    "char_id": "c_chen_mo",
+                    "expression": "克制",
+                    "action": "握伞",
+                    "wardrobe_state": "default",
+                    "face_pose": "front",
+                    "screen_pos": "center"
+                  }
+                ],
+                "location_id": "loc_rooftop_night",
+                "prop_ids": [],
+                "duration_s": 4.0,
+                "duration_locked": false,
+                "dialogue": [
+                  {
+                    "char_id": "c_chen_mo",
+                    "text": "我来了。晚了七年。",
+                    "emotion": "neutral",
+                    "emotion_intensity": 0.5,
+                    "voice_id": null,
+                    "audio_path": null,
+                    "actual_duration_s": null
+                  }
+                ],
+                "sfx": [],
+                "bgm_cue": null,
+                "needs_lipsync": true,
+                "transition_in": "cut",
+                "transition_dur_s": 0.0,
+                "subtitle_text": "",
+                "beat": "",
+                "continuity_notes": "",
+                "missing_info": [],
+                "status": "planned",
+                "attempts": 0,
+                "frame_path": null,
+                "end_frame_path": null,
+                "video_path": null,
+                "gate_notes": []
+              }
+            ],
+            "chapter_refs": []
+          },
+          {
+            "episode_id": "ep02",
+            "title": "第二章 · 晴",
+            "synopsis": "三年后，同一个天台。",
+            "target_duration_s": 200.0,
+            "script": "",
+            "shots": [],
+            "chapter_refs": []
+          }
+        ]
+      }
+    },
+    {
+      "name": "出分镜：空剧本",
+      "url": "/api/plan",
+      "body": {
+        "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_planning_3brmf2ea\\case15",
+        "script": "   ",
+        "episode_id": "ep01"
+      },
+      "clear_assets": false,
+      "llm_bible": "{\"characters\": [{\"key\": \"lin_wan\", \"name\": \"林晚\", \"identity\": \"二十七岁女性，外表冷静，内里执拗。\", \"body\": \"偏瘦，中等身高\", \"face\": \"黑色长直发，鹅蛋脸，杏眼，眼尾微垂，薄唇。\", \"attire\": \"白色衬衫，深色西装裤\"}, {\"key\": \"chen_mo\", \"name\": \"陈默\", \"identity\": \"三十出头男性，沉默寡言\", \"body\": \"高瘦\", \"face\": \"短寸黑发，方脸，浓眉，单眼皮\", \"attire\": \"黑色风衣\"}], \"locations\": [{\"key\": \"rooftop_night\", \"name\": \"夜间天台\", \"space\": \"水泥地面，锈蚀的护栏\", \"lighting\": \"夜间冷调顶光。\", \"palette\": \"冷蓝为主\"}], \"global_style\": \"电影感，浅景深，冷色调。\"}",
+      "llm_storyboard": "{\"shots\": [{\"shot_id\": \"ep01_sh001\", \"scene_id\": \"loc_rooftop_night\", \"order\": 0, \"first_frame_prompt\": \"夜间天台，雨中，女子背对镜头\", \"shot_size\": \"MS\", \"camera_angle\": \"eye_level\", \"duration_s\": 5.0, \"characters\": [{\"char_id\": \"c_lin_wan\", \"expression\": \"落寞\", \"action\": \"扶着护栏\", \"face_pose\": \"back\"}], \"dialogue\": [], \"transition_in\": \"cut\"}, {\"shot_id\": \"ep01_sh002\", \"scene_id\": \"loc_rooftop_night\", \"order\": 1, \"first_frame_prompt\": \"近景，女子转身\", \"shot_size\": \"CU\", \"camera_angle\": \"eye_level\", \"duration_s\": 3.0, \"characters\": [{\"char_id\": \"c_lin_wan\", \"expression\": \"克制\", \"action\": \"转身\", \"face_pose\": \"front\"}], \"dialogue\": [{\"char_id\": \"c_lin_wan\", \"text\": \"你说过会来的\"}], \"transition_in\": \"cut\"}, {\"shot_id\": \"ep01_sh003\", \"scene_id\": \"loc_rooftop_night\", \"order\": 2, \"first_frame_prompt\": \"男子从阴影里走出\", \"shot_size\": \"MCU\", \"camera_angle\": \"eye_level\", \"duration_s\": 4.0, \"characters\": [{\"char_id\": \"c_chen_mo\", \"expression\": \"克制\", \"action\": \"握伞\", \"face_pose\": \"front\"}], \"dialogue\": [{\"char_id\": \"c_chen_mo\", \"text\": \"我来了。晚了七年。\"}], \"transition_in\": \"cut\"}]}",
+      "prompts": [],
+      "status": 400,
+      "response": {
+        "detail": "剧本是空的"
+      },
+      "compare": "detail_str",
+      "cpp_status": 400,
+      "cpp_note": null,
+      "assets_after": null,
+      "project_after": null
+    },
+    {
+      "name": "出分镜：缺 script",
+      "url": "/api/plan",
+      "body": {
+        "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_planning_3brmf2ea\\case16",
+        "episode_id": "ep01"
+      },
+      "clear_assets": false,
+      "llm_bible": "{\"characters\": [{\"key\": \"lin_wan\", \"name\": \"林晚\", \"identity\": \"二十七岁女性，外表冷静，内里执拗。\", \"body\": \"偏瘦，中等身高\", \"face\": \"黑色长直发，鹅蛋脸，杏眼，眼尾微垂，薄唇。\", \"attire\": \"白色衬衫，深色西装裤\"}, {\"key\": \"chen_mo\", \"name\": \"陈默\", \"identity\": \"三十出头男性，沉默寡言\", \"body\": \"高瘦\", \"face\": \"短寸黑发，方脸，浓眉，单眼皮\", \"attire\": \"黑色风衣\"}], \"locations\": [{\"key\": \"rooftop_night\", \"name\": \"夜间天台\", \"space\": \"水泥地面，锈蚀的护栏\", \"lighting\": \"夜间冷调顶光。\", \"palette\": \"冷蓝为主\"}], \"global_style\": \"电影感，浅景深，冷色调。\"}",
+      "llm_storyboard": "{\"shots\": [{\"shot_id\": \"ep01_sh001\", \"scene_id\": \"loc_rooftop_night\", \"order\": 0, \"first_frame_prompt\": \"夜间天台，雨中，女子背对镜头\", \"shot_size\": \"MS\", \"camera_angle\": \"eye_level\", \"duration_s\": 5.0, \"characters\": [{\"char_id\": \"c_lin_wan\", \"expression\": \"落寞\", \"action\": \"扶着护栏\", \"face_pose\": \"back\"}], \"dialogue\": [], \"transition_in\": \"cut\"}, {\"shot_id\": \"ep01_sh002\", \"scene_id\": \"loc_rooftop_night\", \"order\": 1, \"first_frame_prompt\": \"近景，女子转身\", \"shot_size\": \"CU\", \"camera_angle\": \"eye_level\", \"duration_s\": 3.0, \"characters\": [{\"char_id\": \"c_lin_wan\", \"expression\": \"克制\", \"action\": \"转身\", \"face_pose\": \"front\"}], \"dialogue\": [{\"char_id\": \"c_lin_wan\", \"text\": \"你说过会来的\"}], \"transition_in\": \"cut\"}, {\"shot_id\": \"ep01_sh003\", \"scene_id\": \"loc_rooftop_night\", \"order\": 2, \"first_frame_prompt\": \"男子从阴影里走出\", \"shot_size\": \"MCU\", \"camera_angle\": \"eye_level\", \"duration_s\": 4.0, \"characters\": [{\"char_id\": \"c_chen_mo\", \"expression\": \"克制\", \"action\": \"握伞\", \"face_pose\": \"front\"}], \"dialogue\": [{\"char_id\": \"c_chen_mo\", \"text\": \"我来了。晚了七年。\"}], \"transition_in\": \"cut\"}]}",
+      "prompts": [],
+      "status": 422,
+      "response": {
+        "detail": [
+          {
+            "type": "missing",
+            "loc": [
+              "body",
+              "script"
+            ],
+            "msg": "Field required",
+            "input": {
+              "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_planning_3brmf2ea\\case16",
+              "episode_id": "ep01"
+            }
+          }
+        ]
+      },
+      "compare": "detail_arr",
+      "cpp_status": 422,
+      "cpp_note": null,
+      "assets_after": null,
+      "project_after": null
+    },
+    {
+      "name": "出分镜：多余字段照收",
+      "url": "/api/plan",
+      "body": {
+        "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_planning_3brmf2ea\\case17",
+        "script": "林晚站在天台边缘，雨水打湿了她的白衬衫。\n林晚：你说过会来的。\n陈默从阴影里走出来。\n陈默：我来了。晚了七年。",
+        "episode_id": "ep01",
+        "typo": 1
+      },
+      "clear_assets": true,
+      "llm_bible": "{\"characters\": [{\"key\": \"lin_wan\", \"name\": \"林晚\", \"identity\": \"二十七岁女性，外表冷静，内里执拗。\", \"body\": \"偏瘦，中等身高\", \"face\": \"黑色长直发，鹅蛋脸，杏眼，眼尾微垂，薄唇。\", \"attire\": \"白色衬衫，深色西装裤\"}, {\"key\": \"chen_mo\", \"name\": \"陈默\", \"identity\": \"三十出头男性，沉默寡言\", \"body\": \"高瘦\", \"face\": \"短寸黑发，方脸，浓眉，单眼皮\", \"attire\": \"黑色风衣\"}], \"locations\": [{\"key\": \"rooftop_night\", \"name\": \"夜间天台\", \"space\": \"水泥地面，锈蚀的护栏\", \"lighting\": \"夜间冷调顶光。\", \"palette\": \"冷蓝为主\"}], \"global_style\": \"电影感，浅景深，冷色调。\"}",
+      "llm_storyboard": "{\"shots\": [{\"shot_id\": \"ep01_sh001\", \"scene_id\": \"loc_rooftop_night\", \"order\": 0, \"first_frame_prompt\": \"夜间天台，雨中，女子背对镜头\", \"shot_size\": \"MS\", \"camera_angle\": \"eye_level\", \"duration_s\": 5.0, \"characters\": [{\"char_id\": \"c_lin_wan\", \"expression\": \"落寞\", \"action\": \"扶着护栏\", \"face_pose\": \"back\"}], \"dialogue\": [], \"transition_in\": \"cut\"}, {\"shot_id\": \"ep01_sh002\", \"scene_id\": \"loc_rooftop_night\", \"order\": 1, \"first_frame_prompt\": \"近景，女子转身\", \"shot_size\": \"CU\", \"camera_angle\": \"eye_level\", \"duration_s\": 3.0, \"characters\": [{\"char_id\": \"c_lin_wan\", \"expression\": \"克制\", \"action\": \"转身\", \"face_pose\": \"front\"}], \"dialogue\": [{\"char_id\": \"c_lin_wan\", \"text\": \"你说过会来的\"}], \"transition_in\": \"cut\"}, {\"shot_id\": \"ep01_sh003\", \"scene_id\": \"loc_rooftop_night\", \"order\": 2, \"first_frame_prompt\": \"男子从阴影里走出\", \"shot_size\": \"MCU\", \"camera_angle\": \"eye_level\", \"duration_s\": 4.0, \"characters\": [{\"char_id\": \"c_chen_mo\", \"expression\": \"克制\", \"action\": \"握伞\", \"face_pose\": \"front\"}], \"dialogue\": [{\"char_id\": \"c_chen_mo\", \"text\": \"我来了。晚了七年。\"}], \"transition_in\": \"cut\"}]}",
+      "prompts": [
+        {
+          "stage": "bible",
+          "prompt": "你是一位电影美术指导。读下面的剧本，产出角色设定和场景设定。\n\n画风是真人写实，描述用自然的中文短句。\n\n要求：\n\n1. 只写剧本里真实出现的角色和场景，不要自己加人加景。\n2. face 这一段会在几十个镜头里被逐字复用，是角色能不能保持一致的关键。\n   写具体的、可画出来的特征：发型、发色、脸型、眼型。\n   不要写\"好看\"\"气质佳\"这类无法转成画面的词。\n3. identity 用一句话说清性别、年龄段、气质。\n4. attire 写这个角色的默认服装。剧情中的换装不在这里写。\n5. key 用英文小写和下划线：角色按中文名音译，场景按这个地方的英文说法，\n   都加上区分用的后缀（哪个时段、哪一间）。\n6. lighting 要说清时间和光质：什么时段、光从哪儿来、冷还是暖、硬还是软。\n7. global_style 是全片统一的调子，所有镜头都会带上它。写成配方，四样都要有：\n   胶片或画质的质感、焦段倾向和景深、色板（饱和度、冷暖）、光的性格\n   （硬软、暗部占多少）。不要写「电影感」这三个字，它没有信息量。\n\n剧本：\n\n林晚站在天台边缘，雨水打湿了她的白衬衫。\n林晚：你说过会来的。\n陈默从阴影里走出来。\n陈默：我来了。晚了七年。\n\n只输出 JSON，不要任何解释文字。"
+        },
+        {
+          "stage": "storyboard",
+          "prompt": "你是一位电影分镜师。把下面的剧本拆成分镜表。\n\n可用角色（只能用这些 id）：\n  c_chen_mo：陈默\n  c_lin_wan：林晚\n\n可用场景：\n  loc_rooftop_night：夜间天台\n\n镜头配额，必须严格按这个数量和时长分配：\n  3 个 2 秒镜头，4 个 3 秒镜头，3 个 4 秒镜头，6 个 5 秒镜头\n  合计 16 个镜头，总时长 60 秒\n\n硬性要求：\n\n1. shot_id 用 ep01_sh001 这样的格式，三位数字，按顺序递增。\n2. order 按镜头的先后填。\n3. duration_s 各档位的数量必须与配额完全一致。\n4. **角色长什么样不归你写**：长相、发型、发色、身材、穿着，哪一栏都不要。\n   那几样由系统按资产库统一拼进去，你写了会被丢弃并造成前后不一致。\n   剧本里提到的东西照写——手套、账册、撬棍、伞都是道具和动作，不是长相。\n5. first_frame_prompt 描述这一镜的画面：环境、构图、角色的姿态和位置。\n6. motion_prompt 按秒分段写这几秒里画面怎么动，格式是\n   「[0-2秒] …… [2-5秒] ……」，段要连起来盖满整镜的时长。\n   每段写：谁在动、朝哪个方向、快还是慢；镜头怎么动写名字、幅度和速度。\n   人以外在动的东西（天气、烟尘、水、火光、布料、头发）有就写上；\n   会响的东西用画面写出来，不要单独写音效。不要写剪辑用语。\n   **只能写第一帧里已经看得见的东西怎么动**：\n   · 不写进画、出画。后续运动的主体必须已经在第一帧里。\n   · 不写开门、开窗、拉抽屉。门必须开的话，第一帧就把门开着、门后写清楚。\n   · 不写镜头穿过门框、窗户、走廊拐角。\n   · 一镜只演一件事。\n7. camera_move 一场里要有变化，**任何一种都不要超过三成**。\n   推进情绪用 push_in，交代环境用 pull_out 或 pan_left / pan_right，\n   跟着人走用 handheld，绕着看用 orbit；\n   **画面里没有任何东西在动**时才填 static。\n8. dialogue 里说话的角色，必须同时出现在这一镜的 characters 里。\n   剧本里名字后面括号里写的「怎么说的」，填进这一句的 emotion。\n9. 剧本里〔〕括起来的是潜台词，只用来挑机位、表情和光，不要写进画面描述。\n10. shot_size 要有节奏，**整场不能只用一种**。\n    **拉开景别靠换内容，不靠换标签**：要大景就写环境、写空镜；要特写就让\n    画面里只剩一个局部（手、证件、杯子），别写成「某人的特写」。\n    · 每一场的第一镜用 LS / MLS 交代这是哪儿。\n    · 主力是 MS / MCU，占一半左右。\n    · CU / ECU 只给情绪爆发那一两个瞬间，整场不超过三成。\n      填 ECU 时 first_frame_prompt 要点名是谁的手、谁的眼、什么物件。\n    · 冲突过去之后拉回 MLS / LS，再进下一场。\n\n\n剧本：\n\n林晚站在天台边缘，雨水打湿了她的白衬衫。\n林晚：你说过会来的。\n陈默从阴影里走出来。\n陈默：我来了。晚了七年。\n\n只输出 JSON，不要任何解释文字。"
+        }
+      ],
+      "status": 200,
+      "response": {
+        "episode_id": "ep01",
+        "shots": 3,
+        "duration_s": 12.1,
+        "missing_lines": [],
+        "placed_lines": 0,
+        "shots_without_location": 0,
+        "lipsync": 2,
+        "characters": [
+          {
+            "char_id": "c_lin_wan",
+            "name": "林晚",
+            "face": "黑色长直发，鹅蛋脸，杏眼，眼尾微垂，薄唇"
+          },
+          {
+            "char_id": "c_chen_mo",
+            "name": "陈默",
+            "face": "短寸黑发，方脸，浓眉，单眼皮"
+          }
+        ],
+        "locations": [
+          {
+            "location_id": "loc_rooftop_night",
+            "name": "夜间天台"
+          }
+        ]
+      },
+      "compare": "full",
+      "cpp_status": 200,
+      "cpp_note": null,
+      "assets_after": {
+        "characters": {
+          "c_lin_wan": {
+            "char_id": "c_lin_wan",
+            "name": "林晚",
+            "appearance": {
+              "identity": "二十七岁女性，外表冷静，内里执拗",
+              "body": "偏瘦，中等身高",
+              "face": "黑色长直发，鹅蛋脸，杏眼，眼尾微垂，薄唇",
+              "attire": "白色衬衫，深色西装裤",
+              "style": ""
+            },
+            "wardrobe": [],
+            "ref_front": null,
+            "ref_three_quarter": null,
+            "ref_back": null,
+            "lora_path": null,
+            "lora_trigger": null,
+            "lora_strength": 1.0,
+            "voice_id": null,
+            "voice_ref_audio": null,
+            "voice_gender": "female",
+            "voice_order": 0
+          },
+          "c_chen_mo": {
+            "char_id": "c_chen_mo",
+            "name": "陈默",
+            "appearance": {
+              "identity": "三十出头男性，沉默寡言",
+              "body": "高瘦",
+              "face": "短寸黑发，方脸，浓眉，单眼皮",
+              "attire": "黑色风衣",
+              "style": ""
+            },
+            "wardrobe": [],
+            "ref_front": null,
+            "ref_three_quarter": null,
+            "ref_back": null,
+            "lora_path": null,
+            "lora_trigger": null,
+            "lora_strength": 1.0,
+            "voice_id": null,
+            "voice_ref_audio": null,
+            "voice_gender": "male",
+            "voice_order": 1
+          }
+        },
+        "locations": {
+          "loc_rooftop_night": {
+            "location_id": "loc_rooftop_night",
+            "name": "夜间天台",
+            "space": "水泥地面，锈蚀的护栏",
+            "lighting": "夜间冷调顶光",
+            "palette": "冷蓝为主",
+            "ref_empty": null
+          }
+        },
+        "style": {
+          "style_line": "realistic",
+          "global_style": "电影感，浅景深，冷色调",
+          "negative_prompt": "低质量，模糊，过曝，畸形，多余的手指，画得不好的手部，画得不好的脸部，静止不动的画面，字幕，水印",
+          "aspect_ratio": "9:16"
+        }
+      },
+      "project_after": {
+        "schema_version": 1,
+        "project_id": "yuye-tiantai",
+        "title": "雨夜天台",
+        "style_line": "realistic",
+        "premise": "一个关于错过与和解的都市电影。全片九十分钟，横屏。",
+        "created_at": "2026-09-07T14:56:29.511392+00:00",
+        "updated_at": "2026-09-07T16:57:14.805356+00:00",
+        "episodes": [
+          {
+            "episode_id": "ep01",
+            "title": "第一章 · 雨",
+            "synopsis": "林渊在天台等一个不会来的人。",
+            "target_duration_s": 60.0,
+            "script": "林晚站在天台边缘，雨水打湿了她的白衬衫。\n林晚：你说过会来的。\n陈默从阴影里走出来。\n陈默：我来了。晚了七年。",
+            "shots": [
+              {
+                "shot_id": "ep01_sh001",
+                "scene_id": "loc_rooftop_night",
+                "order": 0,
+                "visual_desc": "",
+                "first_frame_prompt": "夜间天台，雨中，女子背对镜头",
+                "last_frame_prompt": null,
+                "motion_prompt": "",
+                "negative_prompt": "",
+                "shot_size": "MS",
+                "camera_angle": "eye_level",
+                "camera_move": "static",
+                "lens": "auto",
+                "lighting": "",
+                "continuous_with_prev": false,
+                "camera_id": null,
+                "characters": [
+                  {
+                    "char_id": "c_lin_wan",
+                    "expression": "落寞",
+                    "action": "扶着护栏",
+                    "wardrobe_state": "default",
+                    "face_pose": "back",
+                    "screen_pos": "center"
+                  }
+                ],
+                "location_id": "loc_rooftop_night",
+                "prop_ids": [],
+                "duration_s": 5.0,
+                "duration_locked": false,
+                "dialogue": [],
+                "sfx": [],
+                "bgm_cue": null,
+                "needs_lipsync": false,
+                "transition_in": "cut",
+                "transition_dur_s": 0.0,
+                "subtitle_text": "",
+                "beat": "",
+                "continuity_notes": "",
+                "missing_info": [],
+                "status": "planned",
+                "attempts": 0,
+                "frame_path": null,
+                "end_frame_path": null,
+                "video_path": null,
+                "gate_notes": []
+              },
+              {
+                "shot_id": "ep01_sh002",
+                "scene_id": "loc_rooftop_night",
+                "order": 1,
+                "visual_desc": "",
+                "first_frame_prompt": "近景，女子转身",
+                "last_frame_prompt": null,
+                "motion_prompt": "",
+                "negative_prompt": "",
+                "shot_size": "CU",
+                "camera_angle": "eye_level",
+                "camera_move": "static",
+                "lens": "auto",
+                "lighting": "",
+                "continuous_with_prev": false,
+                "camera_id": null,
+                "characters": [
+                  {
+                    "char_id": "c_lin_wan",
+                    "expression": "克制",
+                    "action": "转身",
+                    "wardrobe_state": "default",
+                    "face_pose": "front",
+                    "screen_pos": "center"
+                  }
+                ],
+                "location_id": "loc_rooftop_night",
+                "prop_ids": [],
+                "duration_s": 3.0,
+                "duration_locked": false,
+                "dialogue": [
+                  {
+                    "char_id": "c_lin_wan",
+                    "text": "你说过会来的",
+                    "emotion": "neutral",
+                    "emotion_intensity": 0.5,
+                    "voice_id": null,
+                    "audio_path": null,
+                    "actual_duration_s": null
+                  }
+                ],
+                "sfx": [],
+                "bgm_cue": null,
+                "needs_lipsync": true,
+                "transition_in": "cut",
+                "transition_dur_s": 0.0,
+                "subtitle_text": "",
+                "beat": "",
+                "continuity_notes": "",
+                "missing_info": [],
+                "status": "planned",
+                "attempts": 0,
+                "frame_path": null,
+                "end_frame_path": null,
+                "video_path": null,
+                "gate_notes": []
+              },
+              {
+                "shot_id": "ep01_sh003",
+                "scene_id": "loc_rooftop_night",
+                "order": 2,
+                "visual_desc": "",
+                "first_frame_prompt": "男子从阴影里走出",
+                "last_frame_prompt": null,
+                "motion_prompt": "",
+                "negative_prompt": "",
+                "shot_size": "MCU",
+                "camera_angle": "eye_level",
+                "camera_move": "static",
+                "lens": "auto",
+                "lighting": "",
+                "continuous_with_prev": false,
+                "camera_id": null,
+                "characters": [
+                  {
+                    "char_id": "c_chen_mo",
+                    "expression": "克制",
+                    "action": "握伞",
+                    "wardrobe_state": "default",
+                    "face_pose": "front",
+                    "screen_pos": "center"
+                  }
+                ],
+                "location_id": "loc_rooftop_night",
+                "prop_ids": [],
+                "duration_s": 4.0,
+                "duration_locked": false,
+                "dialogue": [
+                  {
+                    "char_id": "c_chen_mo",
+                    "text": "我来了。晚了七年。",
+                    "emotion": "neutral",
+                    "emotion_intensity": 0.5,
+                    "voice_id": null,
+                    "audio_path": null,
+                    "actual_duration_s": null
+                  }
+                ],
+                "sfx": [],
+                "bgm_cue": null,
+                "needs_lipsync": true,
+                "transition_in": "cut",
+                "transition_dur_s": 0.0,
+                "subtitle_text": "",
+                "beat": "",
+                "continuity_notes": "",
+                "missing_info": [],
+                "status": "planned",
+                "attempts": 0,
+                "frame_path": null,
+                "end_frame_path": null,
+                "video_path": null,
+                "gate_notes": []
+              }
+            ],
+            "chapter_refs": []
+          },
+          {
+            "episode_id": "ep02",
+            "title": "第二章 · 晴",
+            "synopsis": "三年后，同一个天台。",
+            "target_duration_s": 200.0,
+            "script": "",
+            "shots": [],
+            "chapter_refs": []
+          }
+        ]
+      }
+    },
+    {
+      "name": "出分镜：引用了没注册的角色",
+      "url": "/api/plan",
+      "body": {
+        "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_planning_3brmf2ea\\case18",
+        "script": "林晚站在天台边缘，雨水打湿了她的白衬衫。\n林晚：你说过会来的。\n陈默从阴影里走出来。\n陈默：我来了。晚了七年。",
+        "episode_id": "ep01"
+      },
+      "clear_assets": false,
+      "llm_bible": "{\"characters\": [{\"key\": \"lin_wan\", \"name\": \"林晚\", \"identity\": \"二十七岁女性，外表冷静，内里执拗。\", \"body\": \"偏瘦，中等身高\", \"face\": \"黑色长直发，鹅蛋脸，杏眼，眼尾微垂，薄唇。\", \"attire\": \"白色衬衫，深色西装裤\"}, {\"key\": \"chen_mo\", \"name\": \"陈默\", \"identity\": \"三十出头男性，沉默寡言\", \"body\": \"高瘦\", \"face\": \"短寸黑发，方脸，浓眉，单眼皮\", \"attire\": \"黑色风衣\"}], \"locations\": [{\"key\": \"rooftop_night\", \"name\": \"夜间天台\", \"space\": \"水泥地面，锈蚀的护栏\", \"lighting\": \"夜间冷调顶光。\", \"palette\": \"冷蓝为主\"}], \"global_style\": \"电影感，浅景深，冷色调。\"}",
+      "llm_storyboard": "{\"shots\": [{\"shot_id\": \"ep01_sh001\", \"scene_id\": \"loc_rooftop_night\", \"order\": 0, \"first_frame_prompt\": \"夜间天台，雨中，女子背对镜头\", \"shot_size\": \"MS\", \"camera_angle\": \"eye_level\", \"duration_s\": 5.0, \"characters\": [{\"char_id\": \"c_lin_wan\", \"expression\": \"落寞\", \"action\": \"扶着护栏\", \"face_pose\": \"back\"}], \"dialogue\": [], \"transition_in\": \"cut\"}, {\"shot_id\": \"ep01_sh002\", \"scene_id\": \"loc_rooftop_night\", \"order\": 1, \"first_frame_prompt\": \"近景，女子转身\", \"shot_size\": \"CU\", \"camera_angle\": \"eye_level\", \"duration_s\": 3.0, \"characters\": [{\"char_id\": \"c_lin_wan\", \"expression\": \"克制\", \"action\": \"转身\", \"face_pose\": \"front\"}], \"dialogue\": [{\"char_id\": \"c_lin_wan\", \"text\": \"你说过会来的\"}], \"transition_in\": \"cut\"}, {\"shot_id\": \"ep01_sh003\", \"scene_id\": \"loc_rooftop_night\", \"order\": 2, \"first_frame_prompt\": \"男子从阴影里走出\", \"shot_size\": \"MCU\", \"camera_angle\": \"eye_level\", \"duration_s\": 4.0, \"characters\": [{\"char_id\": \"c_chen_mo\", \"expression\": \"克制\", \"action\": \"握伞\", \"face_pose\": \"front\"}], \"dialogue\": [{\"char_id\": \"c_chen_mo\", \"text\": \"我来了。晚了七年。\"}], \"transition_in\": \"cut\"}]}",
+      "prompts": [
+        {
+          "stage": "storyboard",
+          "prompt": "你是一位电影分镜师。把下面的剧本拆成分镜表。\n\n可用角色（只能用这些 id）：\n  c_lin_yuan：林渊\n\n可用场景：\n  loc_alley：小巷\n  loc_rooftop：天台\n\n镜头配额，必须严格按这个数量和时长分配：\n  3 个 2 秒镜头，4 个 3 秒镜头，3 个 4 秒镜头，6 个 5 秒镜头\n  合计 16 个镜头，总时长 60 秒\n\n硬性要求：\n\n1. shot_id 用 ep01_sh001 这样的格式，三位数字，按顺序递增。\n2. order 按镜头的先后填。\n3. duration_s 各档位的数量必须与配额完全一致。\n4. **角色长什么样不归你写**：长相、发型、发色、身材、穿着，哪一栏都不要。\n   那几样由系统按资产库统一拼进去，你写了会被丢弃并造成前后不一致。\n   剧本里提到的东西照写——手套、账册、撬棍、伞都是道具和动作，不是长相。\n5. first_frame_prompt 描述这一镜的画面：环境、构图、角色的姿态和位置。\n6. motion_prompt 按秒分段写这几秒里画面怎么动，格式是\n   「[0-2秒] …… [2-5秒] ……」，段要连起来盖满整镜的时长。\n   每段写：谁在动、朝哪个方向、快还是慢；镜头怎么动写名字、幅度和速度。\n   人以外在动的东西（天气、烟尘、水、火光、布料、头发）有就写上；\n   会响的东西用画面写出来，不要单独写音效。不要写剪辑用语。\n   **只能写第一帧里已经看得见的东西怎么动**：\n   · 不写进画、出画。后续运动的主体必须已经在第一帧里。\n   · 不写开门、开窗、拉抽屉。门必须开的话，第一帧就把门开着、门后写清楚。\n   · 不写镜头穿过门框、窗户、走廊拐角。\n   · 一镜只演一件事。\n7. camera_move 一场里要有变化，**任何一种都不要超过三成**。\n   推进情绪用 push_in，交代环境用 pull_out 或 pan_left / pan_right，\n   跟着人走用 handheld，绕着看用 orbit；\n   **画面里没有任何东西在动**时才填 static。\n8. dialogue 里说话的角色，必须同时出现在这一镜的 characters 里。\n   剧本里名字后面括号里写的「怎么说的」，填进这一句的 emotion。\n9. 剧本里〔〕括起来的是潜台词，只用来挑机位、表情和光，不要写进画面描述。\n10. shot_size 要有节奏，**整场不能只用一种**。\n    **拉开景别靠换内容，不靠换标签**：要大景就写环境、写空镜；要特写就让\n    画面里只剩一个局部（手、证件、杯子），别写成「某人的特写」。\n    · 每一场的第一镜用 LS / MLS 交代这是哪儿。\n    · 主力是 MS / MCU，占一半左右。\n    · CU / ECU 只给情绪爆发那一两个瞬间，整场不超过三成。\n      填 ECU 时 first_frame_prompt 要点名是谁的手、谁的眼、什么物件。\n    · 冲突过去之后拉回 MLS / LS，再进下一场。\n\n\n剧本：\n\n林晚站在天台边缘，雨水打湿了她的白衬衫。\n林晚：你说过会来的。\n陈默从阴影里走出来。\n陈默：我来了。晚了七年。\n\n只输出 JSON，不要任何解释文字。"
+        }
+      ],
+      "status": 400,
+      "response": {
+        "detail": "分镜引用了未注册的资产：\n角色 c_chen_mo 未在资产库注册\n角色 c_lin_wan 未在资产库注册"
+      },
+      "compare": "detail_str",
+      "cpp_status": 400,
+      "cpp_note": null,
+      "assets_after": null,
+      "project_after": null
+    },
+    {
+      "name": "出分镜：模型吐了垃圾",
+      "url": "/api/plan",
+      "body": {
+        "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_planning_3brmf2ea\\case19",
+        "script": "林晚站在天台边缘，雨水打湿了她的白衬衫。\n林晚：你说过会来的。\n陈默从阴影里走出来。\n陈默：我来了。晚了七年。",
+        "episode_id": "ep01"
+      },
+      "clear_assets": false,
+      "llm_bible": "{\"characters\": [{\"key\": \"lin_wan\", \"name\": \"林晚\", \"identity\": \"二十七岁女性，外表冷静，内里执拗。\", \"body\": \"偏瘦，中等身高\", \"face\": \"黑色长直发，鹅蛋脸，杏眼，眼尾微垂，薄唇。\", \"attire\": \"白色衬衫，深色西装裤\"}, {\"key\": \"chen_mo\", \"name\": \"陈默\", \"identity\": \"三十出头男性，沉默寡言\", \"body\": \"高瘦\", \"face\": \"短寸黑发，方脸，浓眉，单眼皮\", \"attire\": \"黑色风衣\"}], \"locations\": [{\"key\": \"rooftop_night\", \"name\": \"夜间天台\", \"space\": \"水泥地面，锈蚀的护栏\", \"lighting\": \"夜间冷调顶光。\", \"palette\": \"冷蓝为主\"}], \"global_style\": \"电影感，浅景深，冷色调。\"}",
+      "llm_storyboard": "抱歉，我做不到。",
+      "prompts": [
+        {
+          "stage": "storyboard",
+          "prompt": "你是一位电影分镜师。把下面的剧本拆成分镜表。\n\n可用角色（只能用这些 id）：\n  c_lin_yuan：林渊\n\n可用场景：\n  loc_alley：小巷\n  loc_rooftop：天台\n\n镜头配额，必须严格按这个数量和时长分配：\n  3 个 2 秒镜头，4 个 3 秒镜头，3 个 4 秒镜头，6 个 5 秒镜头\n  合计 16 个镜头，总时长 60 秒\n\n硬性要求：\n\n1. shot_id 用 ep01_sh001 这样的格式，三位数字，按顺序递增。\n2. order 按镜头的先后填。\n3. duration_s 各档位的数量必须与配额完全一致。\n4. **角色长什么样不归你写**：长相、发型、发色、身材、穿着，哪一栏都不要。\n   那几样由系统按资产库统一拼进去，你写了会被丢弃并造成前后不一致。\n   剧本里提到的东西照写——手套、账册、撬棍、伞都是道具和动作，不是长相。\n5. first_frame_prompt 描述这一镜的画面：环境、构图、角色的姿态和位置。\n6. motion_prompt 按秒分段写这几秒里画面怎么动，格式是\n   「[0-2秒] …… [2-5秒] ……」，段要连起来盖满整镜的时长。\n   每段写：谁在动、朝哪个方向、快还是慢；镜头怎么动写名字、幅度和速度。\n   人以外在动的东西（天气、烟尘、水、火光、布料、头发）有就写上；\n   会响的东西用画面写出来，不要单独写音效。不要写剪辑用语。\n   **只能写第一帧里已经看得见的东西怎么动**：\n   · 不写进画、出画。后续运动的主体必须已经在第一帧里。\n   · 不写开门、开窗、拉抽屉。门必须开的话，第一帧就把门开着、门后写清楚。\n   · 不写镜头穿过门框、窗户、走廊拐角。\n   · 一镜只演一件事。\n7. camera_move 一场里要有变化，**任何一种都不要超过三成**。\n   推进情绪用 push_in，交代环境用 pull_out 或 pan_left / pan_right，\n   跟着人走用 handheld，绕着看用 orbit；\n   **画面里没有任何东西在动**时才填 static。\n8. dialogue 里说话的角色，必须同时出现在这一镜的 characters 里。\n   剧本里名字后面括号里写的「怎么说的」，填进这一句的 emotion。\n9. 剧本里〔〕括起来的是潜台词，只用来挑机位、表情和光，不要写进画面描述。\n10. shot_size 要有节奏，**整场不能只用一种**。\n    **拉开景别靠换内容，不靠换标签**：要大景就写环境、写空镜；要特写就让\n    画面里只剩一个局部（手、证件、杯子），别写成「某人的特写」。\n    · 每一场的第一镜用 LS / MLS 交代这是哪儿。\n    · 主力是 MS / MCU，占一半左右。\n    · CU / ECU 只给情绪爆发那一两个瞬间，整场不超过三成。\n      填 ECU 时 first_frame_prompt 要点名是谁的手、谁的眼、什么物件。\n    · 冲突过去之后拉回 MLS / LS，再进下一场。\n\n\n剧本：\n\n林晚站在天台边缘，雨水打湿了她的白衬衫。\n林晚：你说过会来的。\n陈默从阴影里走出来。\n陈默：我来了。晚了七年。\n\n只输出 JSON，不要任何解释文字。"
+        }
+      ],
+      "status": 400,
+      "response": {
+        "detail": "大模型输出里找不到合法 JSON：\n抱歉，我做不到。"
+      },
+      "compare": "detail_str",
+      "cpp_status": 400,
+      "cpp_note": null,
+      "assets_after": null,
+      "project_after": null
+    },
+    {
+      "name": "出分镜：模型没写台词，引擎照剧本补上",
+      "url": "/api/plan",
+      "body": {
+        "project": "C:\\Users\\ultra\\AppData\\Local\\Temp\\changji_planning_3brmf2ea\\case20",
+        "script": "林晚站在天台边缘，雨水打湿了她的白衬衫。\n林晚：你说过会来的。\n陈默从阴影里走出来。\n陈默：我来了。晚了七年。",
+        "episode_id": "ep01"
+      },
+      "clear_assets": false,
+      "llm_bible": "{\"characters\": [{\"key\": \"lin_wan\", \"name\": \"林晚\", \"identity\": \"二十七岁女性，外表冷静，内里执拗。\", \"body\": \"偏瘦，中等身高\", \"face\": \"黑色长直发，鹅蛋脸，杏眼，眼尾微垂，薄唇。\", \"attire\": \"白色衬衫，深色西装裤\"}, {\"key\": \"chen_mo\", \"name\": \"陈默\", \"identity\": \"三十出头男性，沉默寡言\", \"body\": \"高瘦\", \"face\": \"短寸黑发，方脸，浓眉，单眼皮\", \"attire\": \"黑色风衣\"}], \"locations\": [{\"key\": \"rooftop_night\", \"name\": \"夜间天台\", \"space\": \"水泥地面，锈蚀的护栏\", \"lighting\": \"夜间冷调顶光。\", \"palette\": \"冷蓝为主\"}], \"global_style\": \"电影感，浅景深，冷色调。\"}",
+      "llm_storyboard": "{\"shots\": [{\"shot_id\": \"ep01_sh001\", \"scene_id\": \"s\", \"order\": 0, \"first_frame_prompt\": \"x\", \"shot_size\": \"MS\", \"duration_s\": 5.0, \"characters\": [{\"char_id\": \"c_lin_yuan\", \"expression\": \"x\", \"action\": \"x\", \"face_pose\": \"front\"}], \"dialogue\": []}]}",
+      "prompts": [
+        {
+          "stage": "storyboard",
+          "prompt": "你是一位电影分镜师。把下面的剧本拆成分镜表。\n\n可用角色（只能用这些 id）：\n  c_lin_yuan：林渊\n\n可用场景：\n  loc_alley：小巷\n  loc_rooftop：天台\n\n镜头配额，必须严格按这个数量和时长分配：\n  3 个 2 秒镜头，4 个 3 秒镜头，3 个 4 秒镜头，6 个 5 秒镜头\n  合计 16 个镜头，总时长 60 秒\n\n硬性要求：\n\n1. shot_id 用 ep01_sh001 这样的格式，三位数字，按顺序递增。\n2. order 按镜头的先后填。\n3. duration_s 各档位的数量必须与配额完全一致。\n4. **角色长什么样不归你写**：长相、发型、发色、身材、穿着，哪一栏都不要。\n   那几样由系统按资产库统一拼进去，你写了会被丢弃并造成前后不一致。\n   剧本里提到的东西照写——手套、账册、撬棍、伞都是道具和动作，不是长相。\n5. first_frame_prompt 描述这一镜的画面：环境、构图、角色的姿态和位置。\n6. motion_prompt 按秒分段写这几秒里画面怎么动，格式是\n   「[0-2秒] …… [2-5秒] ……」，段要连起来盖满整镜的时长。\n   每段写：谁在动、朝哪个方向、快还是慢；镜头怎么动写名字、幅度和速度。\n   人以外在动的东西（天气、烟尘、水、火光、布料、头发）有就写上；\n   会响的东西用画面写出来，不要单独写音效。不要写剪辑用语。\n   **只能写第一帧里已经看得见的东西怎么动**：\n   · 不写进画、出画。后续运动的主体必须已经在第一帧里。\n   · 不写开门、开窗、拉抽屉。门必须开的话，第一帧就把门开着、门后写清楚。\n   · 不写镜头穿过门框、窗户、走廊拐角。\n   · 一镜只演一件事。\n7. camera_move 一场里要有变化，**任何一种都不要超过三成**。\n   推进情绪用 push_in，交代环境用 pull_out 或 pan_left / pan_right，\n   跟着人走用 handheld，绕着看用 orbit；\n   **画面里没有任何东西在动**时才填 static。\n8. dialogue 里说话的角色，必须同时出现在这一镜的 characters 里。\n   剧本里名字后面括号里写的「怎么说的」，填进这一句的 emotion。\n9. 剧本里〔〕括起来的是潜台词，只用来挑机位、表情和光，不要写进画面描述。\n10. shot_size 要有节奏，**整场不能只用一种**。\n    **拉开景别靠换内容，不靠换标签**：要大景就写环境、写空镜；要特写就让\n    画面里只剩一个局部（手、证件、杯子），别写成「某人的特写」。\n    · 每一场的第一镜用 LS / MLS 交代这是哪儿。\n    · 主力是 MS / MCU，占一半左右。\n    · CU / ECU 只给情绪爆发那一两个瞬间，整场不超过三成。\n      填 ECU 时 first_frame_prompt 要点名是谁的手、谁的眼、什么物件。\n    · 冲突过去之后拉回 MLS / LS，再进下一场。\n\n\n剧本：\n\n林晚站在天台边缘，雨水打湿了她的白衬衫。\n林晚：你说过会来的。\n陈默从阴影里走出来。\n陈默：我来了。晚了七年。\n\n只输出 JSON，不要任何解释文字。"
+        }
+      ],
+      "status": 400,
+      "response": {
+        "episode_id": "ep01",
+        "shots": 1,
+        "duration_s": 5.0,
+        "missing_lines": [],
+        "placed_lines": 2,
+        "shots_without_location": 1,
+        "lipsync": 0,
+        "characters": [
+          {
+            "char_id": "c_lin_yuan",
+            "name": "林渊",
+            "face": "单眼皮，短碎发，眼下有一道旧疤"
+          }
+        ],
+        "locations": [
+          {
+            "location_id": "loc_rooftop",
+            "name": "天台"
+          },
+          {
+            "location_id": "loc_alley",
+            "name": "小巷"
+          }
+        ]
+      },
+      "compare": "full",
+      "cpp_status": 200,
+      "cpp_note": "分镜模型不搬台词（实跑九句只写两句）。原来这里报 400 说「产出一部哑剧」，现在引擎照剧本把台词补进镜头，所以是 200 加 placed_lines。",
+      "assets_after": null,
+      "project_after": null
+    }
+  ]
+}

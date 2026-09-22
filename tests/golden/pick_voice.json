@@ -1,0 +1,71 @@
+{
+  "cases": [
+    {
+      "expected": "zh_female_sophie.wav",
+      "gender": "female",
+      "index": 0
+    },
+    {
+      "expected": "zh_female_sophie.wav",
+      "gender": "female",
+      "index": 1
+    },
+    {
+      "expected": "zh_female_sophie.wav",
+      "gender": "female",
+      "index": 2
+    },
+    {
+      "expected": "zh_male_chadwick.wav",
+      "gender": "male",
+      "index": 0
+    },
+    {
+      "expected": "zh_male_chadwick.wav",
+      "gender": "male",
+      "index": 1
+    },
+    {
+      "expected": "zh_male_chadwick.wav",
+      "gender": "male",
+      "index": 2
+    },
+    {
+      "expected": "zh_female_sophie.wav",
+      "gender": "",
+      "index": 0
+    },
+    {
+      "expected": "zh_male_chadwick.wav",
+      "gender": "",
+      "index": 1
+    },
+    {
+      "expected": "zh_female_sophie.wav",
+      "gender": "",
+      "index": 2
+    },
+    {
+      "expected": null,
+      "gender": "female",
+      "index": 0,
+      "pool": []
+    },
+    {
+      "expected": null,
+      "gender": "male",
+      "index": 0,
+      "pool": [
+        "none"
+      ]
+    }
+  ],
+  "pool": [
+    "none",
+    "en_female_belinda.wav",
+    "zh_male_chadwick.wav",
+    "zh_female_sophie.wav",
+    "en_male_freeman.wav",
+    "narrator.wav"
+  ]
+}

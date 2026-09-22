@@ -1,0 +1,23 @@
+{
+  "app_name": "changji",
+  "config_file_name": "config.toml",
+  "project_file_name": "changji.toml",
+  "platforms": {
+    "windows": {
+      "user_config_dir": "AppData/Local/changji",
+      "user_data_dir": "AppData/Local/changji",
+      "user_config_path": "AppData/Local/changji/config.toml"
+    },
+    "linux": {
+      "user_config_dir": ".config/changji",
+      "user_data_dir": ".local/share/changji",
+      "user_config_path": ".config/changji/config.toml"
+    },
+    "macos": {
+      "user_config_dir": "Library/Application Support/changji",
+      "user_data_dir": "Library/Application Support/changji",
+      "user_config_path": "Library/Application Support/changji/config.toml"
+    }
+  },
+  "note": "原来由 cpp/tests/export_paths_golden.py 从 platformdirs 导出，Python 引擎删掉之后那个脚本没了，这份就是冻住的答案。值是相对家目录的，按平台分开存——各系统的算法不同，而绝对路径里带着用户名，换台机器就对不上。只有默认环境下的值：改了 XDG_CONFIG_HOME / LOCALAPPDATA 就没有可比性。macos 那一份是照 util/paths.cpp 的 __APPLE__ 分支补的（platformdirs 在 macOS 上给的也是这个位置）。"
+}
