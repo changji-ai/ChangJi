@@ -375,8 +375,25 @@ jobs:
           modules: 'qtmultimedia qtwebsockets'
           cache: true
 
-      - name: Install ninja
-        uses: seanmiddleditch/gha-setup-ninja@v5
+      # ⚠️ **Not `gha-setup-ninja`, and not on Windows at all.**
+      #
+      # That action has no arm64 Linux build: on `ubuntu-22.04-arm` it fails
+      # with `Error: incorrect version detected (bad PATH configuration?)`,
+      # which reads like a PATH problem and is really "this platform is not
+      # published". Both arm64 Linux cells died there on 2026-09-22, at the
+      # step before anything was compiled.
+      #
+      # Windows does not need ninja: those cells configure with the Visual
+      # Studio generator.
+      - name: Install ninja (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq ninja-build
+          else
+            brew install ninja
+          fi
+          ninja --version
 
       # On Linux, Qt needs a pile of X / GL development packages to link.
       - name: Install the Linux libraries

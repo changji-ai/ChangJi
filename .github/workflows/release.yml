@@ -406,9 +406,21 @@ jobs:
           modules: 'qtmultimedia qtwebsockets'
           cache: true
 
-      - name: Install ninja
+      # The package manager, not `gha-setup-ninja`: that action publishes no
+      # arm64 Linux build and fails there with `incorrect version detected
+      # (bad PATH configuration?)`, which reads like a PATH problem. This cell
+      # is x64-only today, so the action worked — but the desktop pipeline
+      # added arm runners and died on exactly this, and leaving the same trap
+      # here buys nothing.
+      - name: Install ninja (Unix)
         if: runner.os != 'Windows'
-        uses: seanmiddleditch/gha-setup-ninja@v5
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq ninja-build
+          else
+            brew install ninja
+          fi
+          ninja --version
 
       # Same reason as the unit-test cell: all that matters here is whether the
       # desktop files compile, so there is no need to drag image generation,
