@@ -1,189 +1,237 @@
-# changji 引擎
+# The changji engine
 
-场记引擎。**一个二进制**：界面、接口、编排、推理全在进程内。
-方案写在主仓库（`integemjack/changji`）的 `docs/C++重构方案.md` 里——
-那份文档**不在这个仓库中**，这里只有引擎本身。
+The changji engine. **One binary**: interface, HTTP API, orchestration and
+inference all in a single process.
 
-迁移期间它和一份 Python 引擎并存，靠**对拍**逐条比响应保证两边一致。
-阶段 8 之后 Python 那一侧连同对拍工具一起删了——留下的安全网是
-`tests/golden/` 里那批 JSON：当年由 Python 侧真实函数导出，现在冻在
-版本库里，单元测试直接读文件。所以"C++ 有没有改坏"仍然测得出来，
-测不出来的是"Python 现在还是不是这样"，而那个问题已经没有意义了。
+This repository holds the engine and the pipelines that package it. The design
+document, the web UI source, the desktop shell and the brand assets live in the
+private product repository and **are not here**.
 
-## 构建
+During the migration it ran alongside a Python engine, kept in step by
+**response-by-response comparison**. After stage 8 the Python side and the
+comparison tooling were deleted; the safety net left behind is the JSON corpus
+under `tests/golden/`, exported from the real Python functions at the time and
+now frozen in version control, which the unit tests read directly. So "did the
+C++ break" is still answerable. "Is the Python still like this" is not — and no
+longer means anything.
 
-要 CMake ≥ 3.20 和一个 C++17 编译器。Linux/macOS 上装好 cmake、ninja、
-git 就能编；发布用的六个平台由主仓库的 `.github/workflows/release.yml`
-编——**CI 配置也不在这个仓库中**。
+## Installing
 
-**开了 `CHANGJI_LLAMA` 还要一个 Python 解释器**——llama.cpp 拉下来要就地
-打 leejet 的扩展补丁，配置期找不到解释器会当场停。这是构建期依赖，
-跑的时候不需要。
+```bash
+curl -fsSL https://raw.githubusercontent.com/changji-ai/ChangJi/main/install.sh | bash
+```
 
-**`CHANGJI_SSL`（默认 ON）要一份 OpenSSL ≥ 3.0，而且只认静态库。**
-httplib 发 https 靠它。不认动态库是有来历的：链上构建机那份
-`libssl.3.dylib` 的包，在构建机上跑得好好的，别人解开压缩包是
-`dyld: Library not loaded: /opt/homebrew/opt/openssl@3/...`。
+Or take a package from [Releases](https://github.com/changji-ai/ChangJi/releases)
+directly. Windows / macOS / Linux, x64 and arm64, named like
+`changji-linux-arm64.tar.gz`. The macOS binaries are signed with a Developer ID
+and notarised.
 
-- Linux：`apt install libssl-dev`（里面带 `libssl.a`）
-- macOS：`brew install openssl@3`，然后
+## Building
+
+Needs CMake ≥ 3.20 and a C++17 compiler. On Linux and macOS, cmake, ninja and
+git are enough.
+
+**`CHANGJI_LLAMA` also needs a Python interpreter** — llama.cpp is patched in
+place with leejet's extensions after it is fetched, and configure stops dead if
+it cannot find one. That is a build-time dependency only.
+
+**`CHANGJI_SSL` (ON by default) needs OpenSSL ≥ 3.0, and only accepts static
+libraries.** httplib uses it for https. Refusing shared libraries has a history:
+a package that linked the build machine's `libssl.3.dylib` ran perfectly on the
+build machine, and on somebody else's it was
+`dyld: Library not loaded: /opt/homebrew/opt/openssl@3/...`.
+
+- Linux: `apt install libssl-dev` (it carries `libssl.a`)
+- macOS: `brew install openssl@3`, then
   `-DOPENSSL_ROOT_DIR=$(brew --prefix openssl@3)`
-- 找不到静态库就**当场停**，不会悄悄退回动态链接
-- 本机只想快编一版、不关心 https：`-DCHANGJI_SSL=OFF`
+- If no static library is found it **stops there**; it never quietly falls back
+  to dynamic linking
+- Just want a fast local build with no https: `-DCHANGJI_SSL=OFF`
 
-发布的六个平台不靠任何一台机器上装了什么：release.yml 里 `openssl` 那个
-job 自己编一份钉死版本的静态库（带缓存），再 `-DOPENSSL_ROOT_DIR` 指过去。
-同一段里 brotli 和 zlib 走的是 FetchContent 拉源码静态编，什么都不用装。
+The released packages depend on nothing installed on any particular machine: the
+`openssl` job in `.github/workflows/openssl.yml` builds a pinned static copy
+itself (cached) and points `-DOPENSSL_ROOT_DIR` at it. In the same
+CMakeLists, brotli and zlib are fetched and built statically, so there is
+nothing to install for those either.
 
-Windows 上是 **MSVC 2022 Build Tools + Ninja**。先进 MSVC 的环境：
+Windows needs **MSVC 2022 Build Tools + Ninja**. Enter the MSVC environment
+first:
 
 ```powershell
 cmd /c '"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat" && set' |
   ForEach-Object { if ($_ -match '^([^=]+)=(.*)$') { Set-Item -Path ("env:" + $matches[1]) -Value $matches[2] } }
 ```
 
-> 少了这一步的表现是 `fatal error C1083: 无法打开包括文件: "algorithm"`。
-> 那不是代码问题，是 `INCLUDE` 没设。
+> Skipping that step shows up as `fatal error C1083: cannot open include file:
+> "algorithm"`. That is not a code problem; `INCLUDE` is simply not set.
 
 ```bash
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
 
-### 构建选项
+### Build options
 
-| 选项 | 默认 | 说明 |
+| Option | Default | What it does |
 |---|---|---|
-| `CHANGJI_SD` | ON | 链 stable-diffusion.cpp，进程内出图出片 |
-| `CHANGJI_SD_CUDA` | OFF | GPU 后端走 CUDA（N 卡）。要 CUDA Toolkit，而且 MSBuild 查的是**版本化**的 `CUDA_PATH_V13_3` 而不是 `CUDA_PATH`，两个都要在进程环境里 |
-| `CHANGJI_SD_HIP` | OFF | GPU 后端走 HIP / ROCm（A 卡）。要 ROCm ≥ 6.1（Linux）或 AMD HIP SDK（Windows）。跑的机器上也要有 ROCm 运行时 |
-| `CHANGJI_SD_SYCL` | OFF | GPU 后端走 SYCL（Intel 卡）。要 oneAPI 的 `icx`/`icpx`。**产物不是单文件**，跑的机器上要有 oneAPI 运行时 |
-| `CHANGJI_SD_VULKAN` | OFF | GPU 后端走 Vulkan，**N/A/I 三家都能用**。构建要 Vulkan SDK（`glslc`），跑的时候只要驱动自带的 Vulkan 运行时。A 卡和 Intel 卡想要"下载解开就能用"的话走这条 |
-| `CHANGJI_CUDA_ARCH` | `89` | 编给哪些 N 卡架构，分号隔开。发布包用的那一串在 release.yml 里 |
-| `CHANGJI_CUDA_STATIC` | OFF | CUDA 运行时（cudart / cuBLAS / cuBLASLt）静态链进二进制，**产物是单个可执行文件**。发布包用的形态，CI 的 linux-x64-cuda 那格开着。⚠️ **只有 Linux 做得到**：NVIDIA 在 Windows 上不提供静态 cuBLAS，那边的包必然是 exe 加两个 DLL |
-| `CHANGJI_HIP_ARCH` | `gfx1030;gfx1100;gfx1101;gfx1102` | 编给哪些 A 卡架构。**列表外的卡直接跑不了**——HIP 没有 CUDA 那种 PTX 兜底 |
-| `CHANGJI_LLAMA` | OFF | 链 llama.cpp + mtmd，**进程内配音**（阶段 9）。开着会让干净构建多编一份 llama.cpp 和一份打过补丁的 ggml |
-| `CHANGJI_SSL` | ON | 静态编进 OpenSSL，httplib 才发得了 https。**只认静态库**，见上面那段 |
-| `CHANGJI_BUILD_TESTS` | ON | 编 `changji_tests.exe` |
-| `CHANGJI_STATIC_RUNTIME` | ON | 静态链运行时。"零运行时依赖"是这个后端存在的理由之一。**macOS 上自动忽略**——Apple 的工具链没有静态 libc++ |
-| `CHANGJI_VERSION` | `dev` | 写进二进制的版本号，`--version` 打印它。发布时由 CI 填 git tag |
+| `CHANGJI_SD` | ON | Link stable-diffusion.cpp; images and video in-process |
+| `CHANGJI_SD_CUDA` | OFF | CUDA GPU backend (NVIDIA). Needs the CUDA Toolkit, and MSBuild looks for the **versioned** `CUDA_PATH_V13_2` rather than `CUDA_PATH` — both have to be in the process environment |
+| `CHANGJI_SD_HIP` | OFF | HIP / ROCm GPU backend (AMD). Needs ROCm ≥ 6.1 (Linux) or the AMD HIP SDK (Windows). The machine that runs it needs the ROCm runtime too |
+| `CHANGJI_SD_SYCL` | OFF | SYCL GPU backend (Intel). Needs oneAPI's `icx`/`icpx`. **The result is not a single file**; the machine that runs it needs the oneAPI runtime |
+| `CHANGJI_SD_VULKAN` | OFF | Vulkan GPU backend, **works on NVIDIA, AMD and Intel alike**. Building needs the Vulkan SDK (`glslc`); running needs only the Vulkan runtime that ships with the driver. This is the road to "download, unpack, run" on AMD and Intel |
+| `CHANGJI_CUDA_ARCH` | `89` | Which NVIDIA architectures to build for, semicolon separated. The list the release packages use is in release.yml |
+| `CHANGJI_CUDA_STATIC` | OFF | Link the CUDA runtime (cudart / cuBLAS / cuBLASLt) into the binary, so **the result is a single executable**. This is the shape the release packages take; CI's linux-x64-cuda cell has it on. ⚠️ **Only possible on Linux**: NVIDIA does not ship a static cuBLAS for Windows, so that package is necessarily an exe plus two DLLs |
+| `CHANGJI_HIP_ARCH` | `gfx1030;gfx1100;gfx1101;gfx1102` | Which AMD architectures to build for. **A card outside the list simply will not run** — HIP has no PTX-style fallback the way CUDA does |
+| `CHANGJI_LLAMA` | OFF | Link llama.cpp + mtmd for **in-process speech** (stage 9). Turning it on adds a llama.cpp and a patched ggml to a clean build |
+| `CHANGJI_SSL` | ON | Statically link OpenSSL, without which httplib cannot speak https. **Static libraries only**; see above |
+| `CHANGJI_BUILD_TESTS` | ON | Build `changji_tests` |
+| `CHANGJI_STATIC_RUNTIME` | ON | Statically link the runtime. "No runtime dependencies" is half the reason this backend exists. **Ignored on macOS** — Apple's toolchain has no static libc++ |
+| `CHANGJI_DESKTOP` | OFF | Build the Qt desktop shell. Its sources are in the product repository, so this needs both checked out |
+| `CHANGJI_VERSION` | `dev` | The version baked into the binary, printed by `--version`. CI fills it in from the git tag |
 
-四个 GPU 后端**一次只能开一个**，同时开两个配置期就停。挑哪个：
+The four GPU backends are **mutually exclusive**; turning on two stops
+configuration. Which to pick:
 
-| 显卡 | 首选 | 备选 |
+| Card | First choice | Alternative |
 |---|---|---|
 | NVIDIA | `CHANGJI_SD_CUDA` | `CHANGJI_SD_VULKAN` |
-| AMD | `CHANGJI_SD_VULKAN`（拿来就能跑） | `CHANGJI_SD_HIP`（快一些，但要装 ROCm） |
-| Intel | `CHANGJI_SD_VULKAN` | `CHANGJI_SD_SYCL`（要 oneAPI 运行时） |
+| AMD | `CHANGJI_SD_VULKAN` (runs as-is) | `CHANGJI_SD_HIP` (faster, but ROCm has to be installed) |
+| Intel | `CHANGJI_SD_VULKAN` | `CHANGJI_SD_SYCL` (needs the oneAPI runtime) |
 
-> A 卡和 Intel 卡首选 Vulkan 不是因为它快，是因为另外两条的产物都带着
-> 一大坨运行时依赖，而且 leejet 那套 ggml 扩展补丁**没有覆盖
-> ggml-sycl**（覆盖了 CPU / CUDA / Metal / Vulkan，见
-> [patches/README.md](patches/README.md)）——SYCL 上的 fp8 权重多半加载不了。
-> 八个 GPU 包由 CI 编，配置是主仓库的 `.github/workflows/release.yml`。
+> Vulkan is the first choice for AMD and Intel not because it is fast, but
+> because the other two produce artifacts dragging a pile of runtime
+> dependencies behind them — and because leejet's ggml extension patches
+> **do not cover ggml-sycl** (they cover CPU / CUDA / Metal / Vulkan; see
+> [patches/README.md](patches/README.md)), so fp8 weights most likely will not
+> load under SYCL.
 
-开 `CHANGJI_LLAMA` 时 ggml 由 llama.cpp 提供，并且**就地打上 leejet 的扩展
-补丁**（`patches/apply_to_llamacpp.py`，接在 FetchContent 的 `PATCH_COMMAND`
-上，幂等）。sd.cpp 硬依赖那些扩展（FP8 类型、int8 convrot、i8 tensorwise
-matmul），调用点没有 `#ifdef` 守卫。来龙去脉见
-[verify/RESULTS.md](verify/RESULTS.md) 和 [patches/README.md](patches/README.md)。
+With `CHANGJI_LLAMA` on, ggml comes from llama.cpp and is **patched in place
+with leejet's extensions** (`patches/apply_to_llamacpp.py`, hooked onto
+FetchContent's `PATCH_COMMAND`, idempotent). sd.cpp depends on those extensions
+outright — FP8 types, int8 convrot, i8 tensorwise matmul — with no `#ifdef`
+guarding the call sites. The whole story is in
+[verify/RESULTS.md](verify/RESULTS.md) and [patches/README.md](patches/README.md).
 
-两个构建目录并存是常态：`build/`（默认）和 `build_llama/`（`-DCHANGJI_LLAMA=ON`）。
+Two build directories side by side is normal: `build/` (default) and
+`build_llama/` (`-DCHANGJI_LLAMA=ON`).
 
-## 运行
-
-```bash
-./build/changji.exe --version      # 手上这个是哪一版
-./build/changji.exe --doctor       # 命令行体检，退出码非 0 表示有必须解决的项
-./build/changji.exe --init-config  # 生成带注释的配置模板
-./build/changji.exe --port 8080    # 起服务，前端嵌在二进制里，直接开浏览器
-```
-
-进程内配音（要 `CHANGJI_LLAMA=ON` 的二进制）：
+## Running
 
 ```bash
-# 先取权重：仓库根目录的 download_tts_gguf.ps1，约 1.34 GB
-./build_llama/changji.exe --say "雨夜的天台上，他没有回头。"
-./build_llama/changji.exe --say "试一句" --tts-model talker.gguf --tts-decoder tok.gguf
+./build/changji --version      # which build this is
+./build/changji --doctor       # command-line health check; a non-zero exit means something must be fixed
+./build/changji --init-config  # write an annotated configuration template
+./build/changji --port 8080    # start the server; the web UI is inside the binary, just open a browser
 ```
 
-`--say` 是阶段 9 的实机判据：**不用起服务、不用建项目、不用 ffmpeg**，
-出不出得了声一句话就知道。
-
-配置优先级：环境变量 > 项目目录的 `changji.toml` > 用户全局配置 > 内置默认值。
-
-常用环境变量（全部带 `CHANGJI_` 前缀）：`COMFY_BASE_URL`、`LLM_BASE_URL`、
-`LLM_MODEL`、`LLM_API_KEY`、`WORKSPACE`、`FFMPEG_PATH`、`VRAM_GB`，
-以及 C++ 独有的 `MODELS_DIR` / `MODELS_ENGINE` / `MODELS_VIDEO` /
-`MODELS_TTS` / `MODELS_TTS_DECODER` 等。加新的要**在两个地方各写一遍**
-（`env_mapping()` 那张表和 `apply_env()`），漏一处不会报错，
-`test_models_config.cpp` 里有用例专门拦这个。
-
-## 测试
-
-一条命令把全部四样跑完（在 `changji/` 下）：
+In-process speech (needs a binary built with `CHANGJI_LLAMA=ON`):
 
 ```bash
-powershell -ExecutionPolicy Bypass -File verify_all.ps1
-powershell -ExecutionPolicy Bypass -File verify_all.ps1 -Quick   # 跳过 llama 那一档
+# The weights are not in the repository. Open the interface and pick them on
+# the first-run setup page, which downloads them (about 1.34 GB), or point at
+# your own files with the two flags below.
+./build_llama/changji --say "He did not look back, there on the rooftop in the rain."
+./build_llama/changji --say "a test line" --tts-model talker.gguf --tts-decoder tok.gguf
 ```
 
-它替你做了两件容易出错的事：**进 MSVC 环境**（忘了的话报的是
-`fatal error C1083: 无法打开包括文件: "algorithm"`，看着像代码问题），
-以及**检查用例条数**——退出码为 0 只说明"跑到的都过了"，
-有测试文件没编进 CMakeLists 的话剩下的照样全绿。
+`--say` is stage 9's on-the-metal test: **no server, no project, no ffmpeg** —
+one line answers whether sound comes out.
 
-也可以分开跑：
+Configuration precedence: environment variables > the project directory's
+`changji.toml` > the user's global configuration > built-in defaults.
+
+Common environment variables (all prefixed `CHANGJI_`): `COMFY_BASE_URL`,
+`LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY`, `WORKSPACE`, `FFMPEG_PATH`,
+`VRAM_GB`, plus the C++-only `MODELS_DIR` / `MODELS_ENGINE` / `MODELS_VIDEO` /
+`MODELS_TTS` / `MODELS_TTS_DECODER` and others. Adding one means writing it
+**in two places** (the `env_mapping()` table and `apply_env()`); missing one is
+not an error, and `test_models_config.cpp` has a test whose whole job is to
+catch that.
+
+## Testing
 
 ```bash
-./build/changji_tests.exe            # 单元测试
-ctest --test-dir build               # 一样的东西，走 ctest
+./build/changji_tests            # the unit tests
+ctest --test-dir build           # the same thing, through ctest
 ```
 
-**语料读不到会当成失败，不是跳过。** 一条跳过的用例和一条通过的用例在总数里
-长得一样，但前者什么都没保证——`CHANGJI_GOLDEN_DIR` 指偏了的时候，
-那批读语料的用例会静静地什么都不验。
+**A corpus that cannot be read counts as a failure, not a skip.** A skipped test
+and a passing test look identical in the total, but the first guarantees
+nothing — point `CHANGJI_GOLDEN_DIR` somewhere wrong and every corpus-reading
+test silently verifies nothing at all.
 
-## 目录
+There is also a `verify_all.ps1` in the product repository that runs these
+together with the web UI's own tests and both build configurations. It cannot
+live here: the web UI is not in this repository.
+
+## Packaging
+
+`.github/workflows/` holds the whole release line, and it is the only copy —
+the product repository has none.
+
+| | |
+|---|---|
+| `release.yml` | The engine: six CPU platforms, four GPU cells, macOS signing and notarisation, publish |
+| `desktop.yml` | The desktop app: three platforms, packaged, signed, notarised, and **actually opened** before publishing |
+| `webapp.yml` | Build the web UI and bake it into a header (`workflow_call`; both lines use it) |
+| `openssl.yml` | The pinned static OpenSSL (`workflow_call`; both lines use it) |
+| `cloud-tool.yml` | The GPU-rental tool, which is entirely inside this repository |
+| `install.sh` | The one-line installer, which downloads from this repository's Releases |
+
+Every pipeline except `cloud-tool.yml` checks out the private product
+repository as `changji/` and lays this repository over `changji/cpp`, because
+the web UI, the desktop shell and the brand assets live there. That needs a
+`CHANGJI_PRODUCT_TOKEN` secret. `tools/setup_signing_secrets.sh` sets it
+together with the five macOS signing secrets, verifying each one locally before
+it uploads anything.
+
+## Layout
 
 ```
 src/
-├── main.cpp        命令行入口（--doctor / --init-config / --say / 起服务）
-├── util/           路径、子进程、文本、时间、东亚字宽
-├── config/         配置结构、TOML 读写、环境变量覆盖、校验
-├── models/         project / character / shot 与项目库读写
-├── http/           Crow 路由 + 各接口（只读、编辑、上传、媒体、LLM、run）
-├── llm/            OpenAI 兼容客户端
-├── stages/         剧本、圣经、分镜、提示词、首帧、渲染、配音
-├── infer/          sd.cpp 门面、显存调度、ggml ABI 探针、进程内配音
-├── net/            WebSocket 客户端的协议部分（留给多机互联，暂无调用方）
-├── setup/          首次运行那一页：模型清单、下载源、下载器
-├── media/          ffmpeg、字幕、装配
-├── gates/          质量闸门
-├── pipeline/       job 表与整章流水线
-└── doctor/         环境体检
+├── main.cpp        the command line (--doctor / --init-config / --say / serve)
+├── util/           paths, subprocesses, text, time, East Asian widths
+├── config/         configuration structs, TOML, environment overrides, validation
+├── models/         project / character / shot, and reading and writing the project library
+├── http/           Crow routes and the API (read, edit, upload, media, LLM, run)
+├── llm/            an OpenAI-compatible client
+├── agent/          the agent loop and the tools it can call
+├── lan/            finding other changji machines on the LAN (mDNS)
+├── stages/         screenplay, bible, storyboard, prompts, first frame, render, speech
+├── infer/          the sd.cpp façade, VRAM scheduling, the ggml ABI probe, in-process speech
+├── net/            the protocol half of a WebSocket client (for multi-machine work; no caller yet)
+├── setup/          the first-run page: model catalogue, download sources, downloader
+├── media/          ffmpeg, subtitles, assembly
+├── gates/          quality gates
+├── pipeline/       the job table and the whole-chapter pipeline
+└── doctor/         the environment health check
 
 tests/
-├── unit/           单元测试，读 tests/golden/ 里的语料
-└── golden/         金语料，当年由 Python 侧导出，**冻在版本库里**
+├── unit/           unit tests, reading the corpus in tests/golden/
+└── golden/         the golden corpus, exported from the Python side back then and **frozen in version control**
 
-prompts.toml        **所有提示词**（大模型的、出图的）。构建时生成进二进制，改提示词改这儿
-tools/              codegen（提示词、前端、东亚字宽）与假大模型
-patches/            leejet/ggml 扩展补丁集 + 自动应用脚本
-verify/             前置验证工程（一次性，结论在 RESULTS.md）
+prompts.toml        **every prompt** (for the LLM and for image generation). Generated into the binary at build time; edit prompts here
+tools/              code generation (prompts, web UI, East Asian widths), a fake LLM, and the GPU-rental tool
+patches/            the leejet/ggml extension patches and the script that applies them
+verify/             the up-front verification project (one-off; conclusions in RESULTS.md)
+i18n/               translation tables for eleven languages, baked into the binary
 ```
 
-## 现在到哪儿了
+## Where this stands
 
-阶段 0–9 走完了。进程内配音真出过声，进程内大模型在 5090 上跑通过，
-显存驱逐验过；**阶段 8 已经执行——Python 引擎、对拍工具、以及那 27 个
-import 引擎的脚本全删了**，只剩这一个二进制加一层可选的 Node BFF。
+Stages 0–9 are done. In-process speech has produced real audio, an in-process
+LLM has run on a 5090, and VRAM eviction has been exercised. **Stage 8 has been
+carried out**: the Python engine, the comparison tooling and the 27 scripts that
+imported the engine are all deleted. What is left is this one binary plus an
+optional Node BFF.
 
-| 还没验透 | |
+| Not yet proven | |
 |---|---|
-| 真出图、真成片 | 装配那一半验过，画面是占位的。这两样恰恰是重构最难、而且现在再也没有参照物的部分 |
-| macOS / arm64 | 由 CI 编出来了，但没有在真机上跑过一整章 |
+| Real images, a real finished film | The assembly half has been verified with placeholder frames. These two are exactly the hardest part of the rewrite, and the part that no longer has anything to compare against |
+| macOS / arm64 | CI builds it, but no full chapter has run on real hardware |
 
-契约兼容当初的标准是**字段名、嵌套结构、取值、状态码一致，key 顺序不管**；
-**提示词的拼接要逐字节一致**；校验错误的**文字**不算契约。
-这些标准现在只对着 `tests/golden/` 里那批冻住的语料成立。
+The contract-compatibility standard was: **field names, nesting, values and
+status codes identical; key order irrelevant**; **prompt concatenation identical
+byte for byte**; the **wording** of a validation error is not part of the
+contract. Those standards now hold only against the frozen corpus in
+`tests/golden/`.
