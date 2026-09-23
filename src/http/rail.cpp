@@ -211,10 +211,29 @@ ApiResult get_peek(const std::string& project, const std::string& key,
 
     std::string ep = episode_id;
     if (ep.empty() && (key == "script" || key == "shots")) {
+        // ⚠️ **读不动项目要照实说，不能落进下面「一章都没有」那一句。**
+        //
+        // 原来这儿读砸了就吞掉，`ep` 空着往下走，于是 project.json 写坏了的
+        // 项目点开「剧本」，看见的是灰色的「还没有剧本。先得有正文——说一句
+        // 『写第一章』」——**坏的装成了空的**，还在教人去重写一遍（2026-09-23
+        // 拿一个写坏的项目挨格点开时撞见）。
+        std::string why;
         try {
             const auto r = get_project(project);
-            if (r.status == 200) ep = first_episode_with(r.body, key);
-        } catch (const std::exception&) {}
+            if (r.status == 200) {
+                ep = first_episode_with(r.body, key);
+            } else {
+                why = agent::readable_detail(r.body);
+            }
+        } catch (const ApiError& e) {
+            why = e.detail().is_string() ? std::string(e.what())
+                                         : agent::readable_detail(e.detail());
+        } catch (const std::exception& e) {
+            why = e.what();
+        }
+        if (!why.empty()) {
+            return {200, {{"text", why}, {"key", key}, {"episode_id", ""}, {"failed", true}}};
+        }
     }
 
     // 这两格是**按章看**的。一章都没有的时候别去问工具——它回的是一句
@@ -233,10 +252,21 @@ ApiResult get_peek(const std::string& project, const std::string& key,
             //
             // 判据用和图标条同一个（`any_chapter_written`），别再数一遍。
             bool written = false;
+            // 读砸了同上：照实说，别落成「先得有正文」。
+            std::string why;
             try {
                 const auto r = get_story(project);
                 if (r.status == 200) written = any_chapter_written(r.body);
-            } catch (const std::exception&) {}
+                else why = agent::readable_detail(r.body);
+            } catch (const ApiError& e) {
+                why = e.detail().is_string() ? std::string(e.what())
+                                             : agent::readable_detail(e.detail());
+            } catch (const std::exception& e) {
+                why = e.what();
+            }
+            if (!why.empty()) {
+                return {200, {{"text", why}, {"key", key}, {"episode_id", ""}, {"failed", true}}};
+            }
             text = written
                        ? SAY("还没有剧本。正文有了——说一句「理解故事」就往下走。")
                        : SAY("还没有剧本。先得有正文——说一句「写第一章」。");
@@ -256,10 +286,14 @@ ApiResult get_peek(const std::string& project, const std::string& key,
     // `Audience::human()`（见 `util/say.hpp`）。不带的话，整条图标条和
     // 格子名都翻好了，点开一格却是一句中文——2026-09-22 在德语和阿拉伯语
     // 下实地撞见的就是这个。
-    return {200, {{"text", agent::run_tool(ctx, tool, args.dump(),
-                                           i18n::Audience::human())},
+    const std::string text = agent::run_tool(ctx, tool, args.dump(), i18n::Audience::human());
+    // **没读成要说出来**（`failed`，2026-09-23）：那一格摆的是一段话，读成了是
+    // 摘要、没读成是一句报错，两者在界面上原来长得一样。判据是工具自己记的
+    // 那一笔（`ToolContext::failed`），不是去认那句话。
+    return {200, {{"text", text},
                   {"key", key},
-                  {"episode_id", ep}}};
+                  {"episode_id", ep},
+                  {"failed", ctx.failed}}};
 }
 
 }  // namespace changji::http

@@ -70,6 +70,9 @@ ApiResult get_rail(const std::string& project);
 ///
 /// `episode_id` 不给时挑**第一章有东西的**：剧本和镜头是按章的，而人点图标
 /// 那一下并没有说是哪一章。
+///
+/// 回 `{text, key, episode_id, failed}`。`failed` 为真时 `text` 是一句报错（读
+/// 那一格的工具没做成），界面按出错的样子摆。
 ApiResult get_peek(const std::string& project, const std::string& key,
                    const std::string& episode_id);
 

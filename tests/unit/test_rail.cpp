@@ -325,3 +325,67 @@ TEST_CASE("就地看一眼：一章都没有时说人话，不漏接口报错") 
 
     fs::remove_all(tmp, ec);
 }
+
+TEST_CASE("就地看一眼：读成的说 failed=false，读砸的说 failed=true") {
+    // 面板上那段话读成了是摘要、读砸了是一句报错，两者原来长得一样（2026-09-23
+    // 起面板把后者画成出错色）。判据是这一栏，不是去认那句话。
+    const auto tmp = fs::temp_directory_path() /
+                     ("changji_peek_failed_" +
+                      std::to_string(std::chrono::steady_clock::now()
+                                         .time_since_epoch()
+                                         .count()));
+    std::error_code ec;
+    fs::remove_all(tmp, ec);
+    models::ProjectStore::create(tmp, "t_failed", "读砸", models::StyleLine::REALISTIC);
+    {
+        models::ProjectStore store(tmp);
+        models::Project p = store.load_project();
+        models::Episode ep;
+        ep.episode_id = "ep01";
+        ep.script = "曾老板：钱呢？";
+        p.episodes.push_back(ep);
+        store.save_project(p);
+    }
+    const std::string project = paths::to_utf8(tmp);
+
+    const auto good = http::get_peek(project, "script", "ep01");
+    REQUIRE(good.status == 200);
+    CHECK_FALSE(good.body.value("failed", true));
+
+    // project.json 写坏：读剧本那个工具没做成。
+    std::ofstream(tmp / "project.json") << "{\"episodes\": [";
+    const auto bad = http::get_peek(project, "script", "ep01");
+    REQUIRE(bad.status == 200);
+    CAPTURE(bad.body.dump());
+    CHECK(bad.body.value("failed", false));
+    CHECK_FALSE(bad.body.value("text", std::string()).empty());
+
+    fs::remove_all(tmp, ec);
+}
+
+TEST_CASE("就地看一眼：项目读不动时照实说，不装成「还没有剧本」") {
+    // 没指定章时要先读项目挑一章。原来读砸了就吞掉，落进「一章都没有」那句，
+    // 于是写坏的项目点开剧本看见的是「还没有剧本。先得有正文——说一句『写第一章』」。
+    const auto tmp = fs::temp_directory_path() /
+                     ("changji_peek_broken_" +
+                      std::to_string(std::chrono::steady_clock::now()
+                                         .time_since_epoch()
+                                         .count()));
+    std::error_code ec;
+    fs::remove_all(tmp, ec);
+    models::ProjectStore::create(tmp, "t_broken", "写坏", models::StyleLine::REALISTIC);
+    std::ofstream(tmp / "project.json") << "{\"episodes\": [";
+    const std::string project = paths::to_utf8(tmp);
+
+    for (const char* key : {"script", "shots"}) {
+        CAPTURE(key);
+        const auto r = http::get_peek(project, key, "");
+        REQUIRE(r.status == 200);
+        CAPTURE(r.body.dump());
+        CHECK(r.body.value("failed", false));
+        const std::string text = r.body.value("text", std::string());
+        CHECK(text.find("还没有") == std::string::npos);
+        CHECK(text.find("说一句") == std::string::npos);
+    }
+    fs::remove_all(tmp, ec);
+}
