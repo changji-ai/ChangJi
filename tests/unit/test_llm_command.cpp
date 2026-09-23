@@ -47,8 +47,10 @@ config::LLMConfig echo_cfg() {
     config::LLMConfig c;
     c.backend = "command";
 #ifdef _WIN32
-    c.command = "findstr.exe";
-    c.command_args = {"^"};  // 匹配每一行 = 原样回显
+    // **别用 `findstr "^"`**：它把 `\n` 改写成 `\r\n`，多行的 schema 就逐字
+    // 对不上了。argecho 的 `--cat` 是逐字节原样抄回来。
+    c.command = CHANGJI_ARGECHO;
+    c.command_args = {"--cat"};
 #else
     c.command = "cat";
     c.command_args = {};

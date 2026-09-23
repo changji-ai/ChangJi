@@ -141,7 +141,7 @@ TEST_CASE("run：路径里有空格也跑得起来") {
     // **拿一个真的带空格的路径去跑**，而不是去看输出里参数有没有被切开
     // ——第一版想用 where.exe 的报错文字来判断，但它不回显搜的那个名字，
     // 那条断言其实什么都没验到。能观察到的才算数。
-    const fs::path dir = fs::temp_directory_path() / "changji 带空格的目录";
+    const fs::path dir = fs::temp_directory_path() / paths::from_utf8("changji 带空格的目录");
     std::error_code ec;
     fs::remove_all(dir, ec);
     fs::create_directories(dir, ec);
@@ -325,7 +325,10 @@ TEST_CASE("喂标准输入：几十万字也要进得去，而且不会卡死") 
     big.reserve(300000);
     while (big.size() < 300000) big += "长提示词一行。\n";
 #ifdef _WIN32
-    const auto r = proc::run("findstr.exe", {"/c:长提示词一行"}, 20000, big);
+    // ⚠️ **搜索词别写中文**：findstr 把参数按 ANSI 代码页（GBK）理解，
+    // 而喂进去的是 UTF-8——一行都对不上，输出 0 字节，看着像管道没通。
+    // `/v` + 一个永远不出现的 ASCII 串 = 每一行原样吐回来，和 cat 一个意思。
+    const auto r = proc::run("findstr.exe", {"/v", "/c:changji_never_here"}, 20000, big);
 #else
     const auto r = proc::run("cat", {}, 20000, big);
 #endif
