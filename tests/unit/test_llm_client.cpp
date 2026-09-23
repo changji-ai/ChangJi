@@ -1928,3 +1928,135 @@ TEST_CASE("chat 流式：服务端不认 stream，回了一份普通 JSON") {
     CHECK(stream_calls == 1);
     CHECK(http.calls.empty());   // 不许为同一个请求再发一次
 }
+
+// ---- 「关掉思考」被拒：换 low 再发一趟 ----
+//
+// 2026-09-23 实撞：用户配着 `reasoning_effort = "off"`，glm-5.3 走
+// `…/api/paas/v4` 回 400「该模型始终思考，不支持关闭思考」，读故事那一步
+// 整个挂掉。同一个模型走 `…/api/coding/paas/v4` 却收 disabled——能不能关
+// 跟着地址变，所以只能被拒一次、记下来。
+//
+// ⚠️ 每条用例用**自己的地址**：备忘是进程里的，按「地址 + 模型」记，
+// 共用一个地址的话后跑的那条第一趟就已经是 low，测不到退档那一下。
+
+namespace {
+
+const char* kAlwaysThinks =
+    R"({"error":{"code":"1210","message":"该模型始终思考，不支持关闭思考；请使用 low、high 或 max。"}})";
+
+config::LLMConfig always_thinks_cfg(const std::string& base_url) {
+    config::LLMConfig c = test_cfg();
+    c.base_url = base_url;
+    c.model = "glm-5.3";
+    return c;
+}
+
+llm::Request off_req() {
+    llm::Request r = simple_req();
+    r.reasoning_effort = "off";
+    return r;
+}
+
+bool sent_off(const json& body) {
+    return body.contains("thinking") && body["thinking"].value("type", "") == "disabled";
+}
+
+bool sent_low(const json& body) {
+    return body.contains("thinking") && body["thinking"].value("type", "") == "enabled" &&
+           body.value("reasoning_effort", "") == "low";
+}
+
+}  // namespace
+
+TEST_CASE("关不掉思考：整段那条换 low 再发一趟，之后直接发 low") {
+    FakeHttp http;
+    http.responses = {llm::HttpResponse{400, kAlwaysThinks, std::nullopt},
+                      ok("{\"a\":1}"), ok("{\"a\":2}")};
+    llm::RemoteClient c(always_thinks_cfg("http://always-thinks-whole/v4"), http.fn());
+    pipeline::CancelToken tok;
+
+    CHECK(c.complete(off_req(), tok) == "{\"a\":1}");
+    REQUIRE(http.calls.size() == 2);
+    CHECK(sent_off(http.calls[0].body));
+    CHECK(sent_low(http.calls[1].body));
+
+    // 记住了：第二次不再先挨一个 400。
+    CHECK(c.complete(off_req(), tok) == "{\"a\":2}");
+    REQUIRE(http.calls.size() == 3);
+    CHECK(sent_low(http.calls[2].body));
+}
+
+TEST_CASE("关不掉思考：别的 400 照旧报错，不重发") {
+    // 只认「发的是 disabled、回的在说思考」。别的 400（模型名写错之类）
+    // 重发一遍也还是 400，只是白多一趟、账上多一行。
+    FakeHttp http;
+    http.responses = {llm::HttpResponse{400, R"({"error":{"code":"1211","message":"模型不存在"}})",
+                                        std::nullopt}};
+    llm::RemoteClient c(always_thinks_cfg("http://always-thinks-other400/v4"), http.fn());
+    pipeline::CancelToken tok;
+    CHECK_THROWS_AS(c.complete(off_req(), tok), llm::LlmError);
+    CHECK(http.calls.size() == 1);
+
+    // 没发 disabled 时回包里就算提到思考，也不是我们这一档的事。
+    FakeHttp h2;
+    h2.responses = {llm::HttpResponse{400, kAlwaysThinks, std::nullopt}};
+    llm::RemoteClient c2(always_thinks_cfg("http://always-thinks-notoff/v4"), h2.fn());
+    llm::Request high = simple_req();
+    high.reasoning_effort = "high";
+    CHECK_THROWS_AS(c2.complete(high, tok), llm::LlmError);
+    CHECK(h2.calls.size() == 1);
+}
+
+TEST_CASE("关不掉思考：流式那条同样换 low 再发一趟") {
+    FakeHttp http;
+    FakeStream stream;
+    stream.statuses = {400, 200};
+    stream.error_body = kAlwaysThinks;
+    stream.chunks = {{}, {sse_chunk("{\\\"t\\\": 1}"), "data: [DONE]\n\n"}};
+    llm::RemoteClient c(always_thinks_cfg("http://always-thinks-stream/v4"), http.fn(),
+                        stream.fn());
+    pipeline::CancelToken tok;
+    std::string got;
+    CHECK(c.complete(off_req(), tok, [&](const std::string& p) { got += p; }) ==
+          "{\"t\": 1}");
+    CHECK(got == "{\"t\": 1}");
+    REQUIRE(stream.calls.size() == 2);
+    CHECK(sent_off(stream.calls[0].body));
+    CHECK(sent_low(stream.calls[1].body));
+    CHECK(stream.calls[1].body.at("stream") == true);
+    CHECK(http.calls.empty());
+}
+
+TEST_CASE("关不掉思考：带工具那条（整段和流式）同样换 low") {
+    pipeline::CancelToken tok;
+    llm::Request opts;
+    opts.reasoning_effort = "off";
+    {
+        FakeHttp http;
+        http.responses = {llm::HttpResponse{400, kAlwaysThinks, std::nullopt},
+                          ok("整段回来的")};
+        llm::RemoteClient c(always_thinks_cfg("http://always-thinks-chat/v4"), http.fn());
+        CHECK(c.chat({}, json::array(), opts, tok).content == "整段回来的");
+        REQUIRE(http.calls.size() == 2);
+        CHECK(sent_off(http.calls[0].body));
+        CHECK(sent_low(http.calls[1].body));
+    }
+    {
+        FakeHttp http;
+        FakeStream stream;
+        stream.statuses = {400, 200};
+        stream.error_body = kAlwaysThinks;
+        stream.chunks = {{}, {sse_chunk("流式回来的"), "data: [DONE]\n\n"}};
+        llm::RemoteClient c(always_thinks_cfg("http://always-thinks-chat-live/v4"),
+                            http.fn(), stream.fn());
+        llm::Request live = opts;
+        std::string got;
+        live.on_token = [&](const std::string& p) { got += p; };
+        CHECK(c.chat({}, json::array(), live, tok).content == "流式回来的");
+        CHECK(got == "流式回来的");
+        REQUIRE(stream.calls.size() == 2);
+        CHECK(sent_off(stream.calls[0].body));
+        CHECK(sent_low(stream.calls[1].body));
+        CHECK(http.calls.empty());
+    }
+}

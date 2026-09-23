@@ -653,10 +653,13 @@ std::string RemoteClient::complete(const Request& req,
             std::optional<std::string> transport_error;
             bool canceled = false;
         };
-        const auto run = [&] {
-            Attempt a;
+        const auto build = [&] {
             nlohmann::ordered_json payload = build_payload(cfg, req);
             payload["stream"] = true;
+            return payload;
+        };
+        const auto run = [&](const nlohmann::ordered_json& payload) {
+            Attempt a;
             // **记的是 payload 里真有的那一份**，不是 cfg / req 里那份。
             //
             // `reasoning_effort` 尤其不能照 `req` 抄：build_payload 只在模型名
@@ -747,7 +750,16 @@ std::string RemoteClient::complete(const Request& req,
         // **只发一次。** 不支持 SSE 但直接返回普通 OpenAI JSON 的服务会在
         // run() 里就地解析同一份响应；空响应和错误响应都不会自动再发一次，
         // 避免重复生成和重复计费。
-        Attempt a = run();
+        //
+        // 唯一的例外是「关掉思考」被拒（`learn_thinking_always_on`）：那是
+        // 400，请求根本没被接下，换 low 再发一趟不算重复。
+        nlohmann::ordered_json payload = build();
+        Attempt a = run(payload);
+        if (learn_thinking_always_on(payload, a.status, a.response_body,
+                                     cfg.base_url, cfg.model)) {
+            payload = build();
+            a = run(payload);
+        }
         log.note_response(a.status, a.response_body);
         log.set_finish_reason(a.finish_reason);
         // ⚠️ **正文赶在下面那几条 throw 之前交出去。**「服务在流里报错，而
@@ -854,18 +866,27 @@ std::string RemoteClient::complete(const Request& req,
 
         // **只发一次。** 退档梯子随 response_format 一起删了，理由见
         // build_payload 里那段。
-        const nlohmann::ordered_json payload = build_payload(cfg, req);
-        // 分流之后那三样，从 payload 里取，**所以 set_model 在 build_payload
-        // 后面**，不能挪回前面去。理由见 complete_stream 里那段「记的是
-        // payload 里真有的那一份」。
-        log.set_model(payload.value("model", std::string()),
-                      payload.value("temperature", 0.0),
-                      payload.value("reasoning_effort", std::string()));
-        // 记的是**真发出去的那一份**，不是照着 cfg / req 再拼一遍。
-        // build_payload 是纯函数不假，可多跑一遍就多出一处"日志里那份和真
-        // 发出去的那份可能不一样"的风险，而这次要研究的正是那段字。
-        log.set_prompt_from_payload(payload);
-        HttpResponse r = post_(url, payload.dump(), headers, cfg.timeout_s);
+        // 例外只有「关掉思考」被拒那一种，见 complete_stream 里那段。
+        const auto send = [&](const nlohmann::ordered_json& payload) {
+            // 分流之后那三样，从 payload 里取，**所以 set_model 在
+            // build_payload 后面**，不能挪回前面去。理由见 complete_stream
+            // 里那段「记的是 payload 里真有的那一份」。
+            log.set_model(payload.value("model", std::string()),
+                          payload.value("temperature", 0.0),
+                          payload.value("reasoning_effort", std::string()));
+            // 记的是**真发出去的那一份**，不是照着 cfg / req 再拼一遍。
+            // build_payload 是纯函数不假，可多跑一遍就多出一处"日志里那份和
+            // 真发出去的那份可能不一样"的风险，而这次要研究的正是那段字。
+            log.set_prompt_from_payload(payload);
+            return post_(url, payload.dump(), headers, cfg.timeout_s);
+        };
+        nlohmann::ordered_json payload = build_payload(cfg, req);
+        HttpResponse r = send(payload);
+        if (learn_thinking_always_on(payload, r.status, r.body, cfg.base_url,
+                                     cfg.model)) {
+            payload = build_payload(cfg, req);
+            r = send(payload);
+        }
         // **拿到回包就立刻记，放在下面那句 transport_error 之前。** 连不上
         // 时 r.status 是 0、r.body 是空，记下来无害；放到后面的话 400 那一支
         // 就整个漏了，而"什么提示词换来一个 400"正是最想研究的。
@@ -1039,16 +1060,36 @@ ChatReply RemoteClient::chat(const std::vector<Message>& messages, const ordered
         // 分流之后那三样，从 payload 里取，**所以这一句在 payload 拼完之后**。
         // 认不出的模型一个 reasoning_effort 都不发（那张表管着），
         // 账上就不该写着有。
-        log.set_model(payload.value("model", std::string()),
-                      payload.value("temperature", 0.0),
-                      payload.value("reasoning_effort", std::string()));
-        // 记的是**真发出去的那一份**（下一句 dump 的就是它），整段来回渲染成
-        // `=== role ===` 那个形状；工具表另存一份。
-        log.set_prompt_from_payload(payload);
+        const auto note_payload = [&] {
+            log.set_model(payload.value("model", std::string()),
+                          payload.value("temperature", 0.0),
+                          payload.value("reasoning_effort", std::string()));
+            // 记的是**真发出去的那一份**（下一句 dump 的就是它），整段来回
+            // 渲染成 `=== role ===` 那个形状。
+            log.set_prompt_from_payload(payload);
+        };
+        note_payload();
+        // 工具表另存一份。
         log.set_tools(tools);
+        // 「关掉思考」被拒：记下来，把那一档重填一遍（这回填的是 low），
+        // 回 true 让下面再发一趟。理由见 complete_stream 里那段。
+        const auto thinking_refused = [&](const HttpResponse& r) {
+            if (!learn_thinking_always_on(payload, r.status, r.body, cfg.base_url,
+                                          cfg.model)) {
+                return false;
+            }
+            payload.erase("thinking");
+            payload.erase("reasoning_effort");
+            apply_thinking(payload, cfg.base_url, cfg.model, opts.reasoning_effort);
+            note_payload();
+            return true;
+        };
 
         if (!live) {
             HttpResponse r = post_(url, payload.dump(), headers, cfg.timeout_s);
+            if (thinking_refused(r)) {
+                r = post_(url, payload.dump(), headers, cfg.timeout_s);
+            }
             // 拿到回包就立刻记，理由同整段那条：放到下面去就把 400 那一支漏了。
             log.note_response(r.status, r.body);
             if (r.transport_error.has_value()) {
@@ -1079,28 +1120,32 @@ ChatReply RemoteClient::chat(const std::vector<Message>& messages, const ordered
         SseDeltas sse;
         std::string content;
         bool canceled = false;
-        HttpResponse r = stream_post_(
-            url, payload.dump(), headers, cfg.timeout_s,
-            [&](const char* data, std::size_t len) {
-                if (tok.cancelled()) {
-                    canceled = true;
-                    return false;   // 断掉，别让它继续生成
-                }
-                const std::string piece = sse.feed(data, len);
-                // **思考先推，正文后推**，理由同 complete_stream：反了的话
-                // 界面上会先冒出第一句正文、再冒出"它正在想"，像倒放。
-                // 落盘的规矩也一样：这个回调里一个字节都不许落盘。
-                const std::string think = sse.take_thinking();
-                if (!think.empty()) {
-                    if (opts.on_thinking) opts.on_thinking(think);
-                    log.append_thinking(think);
-                }
-                if (piece.empty()) return true;
-                log.mark_first_token();
-                content += piece;
-                if (opts.on_token) opts.on_token(piece);
-                return true;
-            });
+        const OnChunk on_chunk = [&](const char* data, std::size_t len) {
+            if (tok.cancelled()) {
+                canceled = true;
+                return false;   // 断掉，别让它继续生成
+            }
+            const std::string piece = sse.feed(data, len);
+            // **思考先推，正文后推**，理由同 complete_stream：反了的话
+            // 界面上会先冒出第一句正文、再冒出"它正在想"，像倒放。
+            // 落盘的规矩也一样：这个回调里一个字节都不许落盘。
+            const std::string think = sse.take_thinking();
+            if (!think.empty()) {
+                if (opts.on_thinking) opts.on_thinking(think);
+                log.append_thinking(think);
+            }
+            if (piece.empty()) return true;
+            log.mark_first_token();
+            content += piece;
+            if (opts.on_token) opts.on_token(piece);
+            return true;
+        };
+        HttpResponse r =
+            stream_post_(url, payload.dump(), headers, cfg.timeout_s, on_chunk);
+        // 400 时流里一个字都没来过，sse / content 还是空的，接着用就是。
+        if (thinking_refused(r)) {
+            r = stream_post_(url, payload.dump(), headers, cfg.timeout_s, on_chunk);
+        }
         log.note_response(r.status, r.body);
         if (canceled) throw LlmError(util::kCancelled);
         if (r.transport_error.has_value()) {

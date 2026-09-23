@@ -108,3 +108,52 @@ TEST_CASE("想多久：认识的那几档填什么字段") {
         CHECK(p["thinking"]["type"] == "disabled");
     }
 }
+
+TEST_CASE("想多久：「关掉」被拒过的，按地址记，之后换成 low") {
+    // 同一个模型换一条路就能关（coding/paas/v4 能、paas/v4 不能），所以
+    // 备忘的键是地址 + 模型，不是模型名。每条用例用自己的地址，见
+    // test_llm_client.cpp 里那一族上面那段。
+    const std::string refused = "http://thinking-table-refused/v4";
+    const std::string other = "http://thinking-table-other/v4";
+    const std::string body =
+        R"({"error":{"code":"1210","message":"该模型始终思考，不支持关闭思考；请使用 low、high 或 max。"}})";
+
+    nlohmann::ordered_json off = nlohmann::ordered_json::object();
+    llm::apply_thinking(off, refused, "glm-5.3", "off");
+    REQUIRE(off["thinking"]["type"] == "disabled");
+
+    // 不是 400、没发 disabled，都不记。
+    CHECK_FALSE(llm::learn_thinking_always_on(off, 500, body, refused, "glm-5.3"));
+    nlohmann::ordered_json high = nlohmann::ordered_json::object();
+    llm::apply_thinking(high, refused, "glm-5.3", "high");
+    CHECK_FALSE(llm::learn_thinking_always_on(high, 400, body, refused, "glm-5.3"));
+    // 400 但说的不是思考，也不记。
+    CHECK_FALSE(llm::learn_thinking_always_on(off, 400, R"({"error":"bad model"})",
+                                              refused, "glm-5.3"));
+
+    // 智谱国际站说英文，一样认。
+    CHECK(llm::learn_thinking_always_on(
+        off, 400, R"({"error":{"message":"This model does not support disabling Thinking"}})",
+        refused + "/", "GLM-5.3"));   // 结尾斜杠、大小写都不算另一家
+
+    nlohmann::ordered_json p = nlohmann::ordered_json::object();
+    llm::apply_thinking(p, refused, "glm-5.3", "off");
+    CHECK(p["thinking"]["type"] == "enabled");
+    CHECK(p["reasoning_effort"] == "low");
+
+    // 别的档照旧，别的地址照旧。
+    nlohmann::ordered_json m = nlohmann::ordered_json::object();
+    llm::apply_thinking(m, refused, "glm-5.3", "max");
+    CHECK(m["reasoning_effort"] == "max");
+    nlohmann::ordered_json o = nlohmann::ordered_json::object();
+    llm::apply_thinking(o, other, "glm-5.3", "off");
+    CHECK(o["thinking"]["type"] == "disabled");
+
+    // 没有 low 那一档的模型被拒过：一个字段都不发，由它按自己的默认想。
+    nlohmann::ordered_json f = nlohmann::ordered_json::object();
+    llm::apply_thinking(f, refused, "glm-4.7", "off");
+    REQUIRE(llm::learn_thinking_always_on(f, 400, body, refused, "glm-4.7"));
+    nlohmann::ordered_json g = nlohmann::ordered_json::object();
+    llm::apply_thinking(g, refused, "glm-4.7", "off");
+    CHECK(g.empty());
+}

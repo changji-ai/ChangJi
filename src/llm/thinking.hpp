@@ -57,4 +57,23 @@ ThinkSupport thinking_support(const std::string& base_url, const std::string& mo
 void apply_thinking(nlohmann::ordered_json& payload, const std::string& base_url,
                     const std::string& model, const std::string& tier);
 
+/// **「关掉思考」被服务拒了：记下来，回 true 让调用方再发一趟。**
+///
+/// 同一个模型能不能关，**跟着地址变，不跟着模型名走**——所以这件事上不了
+/// 上面那张表。2026-09-23 拿同一把密钥实测：glm-5.3 / 5.3-flash 在
+/// `…/api/coding/paas/v4` 上收 `thinking: disabled`，换到 `…/api/paas/v4`
+/// 就回 400「该模型始终思考，不支持关闭思考；请使用 low、high 或 max。」
+/// ——而用户配的 `reasoning_effort = "off"` 让读故事那一步整个挂掉。
+///
+/// 判据：发出去的 `sent` 里是 `thinking: disabled`，回的是 400，回包里说
+/// 的是思考这件事。认出来就把「这个地址上的这个模型」记进进程里那份备忘，
+/// 之后 `apply_thinking` 碰到它的 `off` 一律换成 `low`（这个模型没有
+/// `low` 那一档就什么都不发，由它按自己的默认想）。
+///
+/// **再发一趟不会重复计费**：400 是请求没被接下，一个字都还没生成。
+/// 备忘是进程内的——换一个地址、重启一次都会重新认一回，代价是一次 400。
+bool learn_thinking_always_on(const nlohmann::ordered_json& sent, int status,
+                              const std::string& body, const std::string& base_url,
+                              const std::string& model);
+
 }  // namespace changji::llm

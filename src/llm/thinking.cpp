@@ -3,6 +3,8 @@
 #include "util/say.hpp"
 
 #include <algorithm>
+#include <mutex>
+#include <set>
 
 namespace changji::llm {
 
@@ -44,6 +46,26 @@ bool at_least(std::pair<int, int> v, int major, int minor) {
     return v.first > major || (v.first == major && v.second >= minor);
 }
 
+// 「关不掉思考」的备忘，见 learn_thinking_always_on。键是地址 + 模型：
+// 同一个模型换一条路就能关（coding/paas/v4 能、paas/v4 不能）。
+std::mutex& always_on_mu() {
+    static std::mutex m;
+    return m;
+}
+std::set<std::string>& always_on() {
+    static std::set<std::string> s;
+    return s;
+}
+std::string always_on_key(const std::string& base_url, const std::string& model) {
+    std::string u = base_url;
+    while (!u.empty() && u.back() == '/') u.pop_back();
+    return u + '\n' + lower(model);
+}
+bool always_thinks(const std::string& base_url, const std::string& model) {
+    std::lock_guard<std::mutex> lk(always_on_mu());
+    return always_on().count(always_on_key(base_url, model)) > 0;
+}
+
 }  // namespace
 
 ThinkSupport thinking_support(const std::string& /*base_url*/,
@@ -73,11 +95,19 @@ ThinkSupport thinking_support(const std::string& /*base_url*/,
 }
 
 void apply_thinking(nlohmann::ordered_json& payload, const std::string& base_url,
-                    const std::string& model, const std::string& tier) {
-    if (tier.empty()) return;
+                    const std::string& model, const std::string& asked) {
+    if (asked.empty()) return;
     const auto sup = thinking_support(base_url, model);
-    if (std::find(sup.tiers.begin(), sup.tiers.end(), tier) == sup.tiers.end()) {
-        return;   // 这一家不认这一档：一个字段都不写
+    const auto has = [&](const std::string& t) {
+        return std::find(sup.tiers.begin(), sup.tiers.end(), t) != sup.tiers.end();
+    };
+    if (!has(asked)) return;   // 这一家不认这一档：一个字段都不写
+
+    // 这个地址上的这个模型关不掉（被拒过一回）：退到最少想的那一档。
+    std::string tier = asked;
+    if (tier == "off" && always_thinks(base_url, model)) {
+        if (!has("low")) return;
+        tier = "low";
     }
     if (tier == "off") {
         payload["thinking"] = nlohmann::ordered_json{{"type", "disabled"}};
@@ -85,6 +115,29 @@ void apply_thinking(nlohmann::ordered_json& payload, const std::string& base_url
     }
     payload["thinking"] = nlohmann::ordered_json{{"type", "enabled"}};
     payload["reasoning_effort"] = tier;
+}
+
+bool learn_thinking_always_on(const nlohmann::ordered_json& sent, int status,
+                              const std::string& body, const std::string& base_url,
+                              const std::string& model) {
+    if (status != 400) return false;
+    const auto t = sent.find("thinking");
+    if (t == sent.end() || !t->is_object() || t->value("type", "") != "disabled") {
+        return false;
+    }
+    // 这一趟里跟思考沾边的只有 `thinking: disabled` 那一个字段，所以 400
+    // 里提到思考，说的就是它。**不认错误码**：智谱的 1210 是笼统的"参数
+    // 有误"，别的参数错了也回它。
+    //
+    // ⚠️ 「思考」是拿去比服务商原话的，不是给人看的，翻了就对不上。
+    const std::string b = lower(body);
+    if (b.find(SAY_NEVER("思考")) == std::string::npos &&
+        b.find("thinking") == std::string::npos) {
+        return false;
+    }
+    std::lock_guard<std::mutex> lk(always_on_mu());
+    always_on().insert(always_on_key(base_url, model));
+    return true;
 }
 
 }  // namespace changji::llm
