@@ -23,6 +23,10 @@ namespace changji::http {
 ///
 /// 改了画面相关的字段就把状态退回未开工，否则下次运行会跳过它，
 /// 用户会以为改动没生效。
+///
+/// 台词两种改法：`dialogue_texts`（逐条改字，条数必须和盘上对上）和
+/// `dialogue_lines`（`[{char_id, text}]`，整镜换成这几句，条数随便，
+/// `char_id` 空是旁白）。两个只能给一个。
 ApiResult post_shot(const nlohmann::json& body);
 
 /// POST /api/character —— 改角色。

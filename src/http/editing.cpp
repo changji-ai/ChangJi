@@ -1,5 +1,6 @@
 #include "http/editing.hpp"
 
+#include <optional>
 #include <set>
 #include <string>
 #include <vector>
@@ -34,7 +35,7 @@ const std::set<std::string>& patch_allowed() {
         "first_frame_prompt", "motion_prompt", "negative_prompt", "visual_desc",
         "shot_size", "camera_angle", "camera_move", "duration_s",
         "transition_in", "transition_dur_s", "subtitle_text", "beat",
-        "needs_lipsync", "status", "dialogue_texts",
+        "needs_lipsync", "status", "dialogue_texts", "dialogue_lines",
     };
     return kAllowed;
 }
@@ -153,6 +154,41 @@ ApiResult post_shot(const json& body) {
     }
     patch.erase("dialogue_texts");
 
+    // **整镜的台词换成这几句**：`[{char_id, text}]`，条数随便，`char_id` 空 /
+    // null 是旁白。
+    //
+    // 和 `dialogue_texts` 分成两个键，因为两者说的是两件事：那个是"逐条改字"
+    // （界面上每句一个框，条数必须对上——对不上就是界面和盘上错位了，得拦），
+    // 这个是"换成这几句"。代理那头要的是后者：原来它只能走前者，于是**没台词
+    // 的镜头加不上台词**（给了 1 条、这一镜有 0 条），有两句的也改不了
+    //（2026-09-23 实测，对话里一句「台词条数对不上」）。
+    //
+    // 说话人得在这一镜的角色表里，下面 `validate()` 照旧查——**不替它把人加进
+    // 画面**：多一个人是换画面，不是改台词。
+    std::optional<std::vector<DialogueLine>> lines;
+    if (patch.contains("dialogue_lines") && !patch.at("dialogue_lines").is_null()) {
+        if (has_texts) {
+            throw ApiError(400, SAY("改动不合法：dialogue_texts 和 dialogue_lines 只能给一个"));
+        }
+        const json& arr = patch.at("dialogue_lines");
+        if (!arr.is_array()) throw ApiError(400, SAY("改动不合法：dialogue_lines 要是数组"));
+        std::vector<DialogueLine> got;
+        for (const auto& x : arr) {
+            if (!x.is_object() || !x.contains("text") || !x.at("text").is_string()) {
+                throw ApiError(400, SAY("改动不合法：台词要是字符串"));
+            }
+            DialogueLine d;
+            d.text = x.at("text").get<std::string>();
+            if (x.contains("char_id") && x.at("char_id").is_string() &&
+                !x.at("char_id").get<std::string>().empty()) {
+                d.char_id = x.at("char_id").get<std::string>();
+            }
+            got.push_back(std::move(d));
+        }
+        lines = std::move(got);
+    }
+    patch.erase("dialogue_lines");
+
     // 改了这些就得重出画面。
     //
     // ⚠️ **这是「调用方设过这个键」的语义，不是「值变了」**：下面只看键在
@@ -196,6 +232,37 @@ ApiResult post_shot(const json& body) {
             // 台词变了，配音和时长都要重做
             draft.dialogue[i].actual_duration_s = std::nullopt;
             draft.dialogue[i].audio_path = std::nullopt;
+            draft.duration_locked = false;
+            touched_visual = true;
+        }
+    }
+
+    if (lines) {
+        std::vector<DialogueLine> next;
+        bool changed = lines->size() != draft.dialogue.size();
+        for (std::size_t i = 0; i < lines->size(); ++i) {
+            const DialogueLine& want = (*lines)[i];
+            // 同一个位置上人和字都没变：**留着原来那一条**（配音、情绪、实长
+            // 都还算数），别为了"整镜换一遍"把配过的音白扔掉。
+            if (i < draft.dialogue.size() && draft.dialogue[i].char_id == want.char_id &&
+                draft.dialogue[i].text == want.text) {
+                next.push_back(draft.dialogue[i]);
+                continue;
+            }
+            changed = true;
+            DialogueLine d = want;
+            // 同一个位置还是同一个人说：**情绪和音色跟着留下**，只换字。
+            // 不留的话改一个错别字，这句就从「哽咽」变回「平静」。
+            if (i < draft.dialogue.size() && draft.dialogue[i].char_id == want.char_id) {
+                d.emotion = draft.dialogue[i].emotion;
+                d.emotion_intensity = draft.dialogue[i].emotion_intensity;
+                d.voice_id = draft.dialogue[i].voice_id;
+            }
+            next.push_back(std::move(d));
+        }
+        if (changed) {
+            draft.dialogue = std::move(next);
+            // 台词变了，配音和时长都要重做（同上面 `dialogue_texts` 那支）
             draft.duration_locked = false;
             touched_visual = true;
         }

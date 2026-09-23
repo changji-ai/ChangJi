@@ -689,6 +689,8 @@
   "改动不合法：%1 不认识这个取值 %2": "invalid change: %1 doesn’t know the value %2",
   "改动不合法：%1 要是字符串": "invalid change: %1 has to be a string",
   "改动不合法：%1 要是数字": "invalid change: %1 has to be a number",
+  "改动不合法：dialogue_lines 要是数组": "invalid change: dialogue_lines has to be an array",
+  "改动不合法：dialogue_texts 和 dialogue_lines 只能给一个": "invalid change: give either dialogue_texts or dialogue_lines, not both",
   "改动不合法：dialogue_texts 要是数组": "invalid change: dialogue_texts has to be an array",
   "改动不合法：needs_lipsync 要是真假值": "invalid change: needs_lipsync has to be a boolean",
   "改动不合法：台词要是字符串": "invalid change: a line has to be a string",

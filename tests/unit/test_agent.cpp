@@ -1238,3 +1238,108 @@ TEST_CASE("代理：认不出的工具照实报名字，空参数不挂一对花
     CHECK(agent::tool_label("some_new_tool", R"({"a":1})").find(R"("a":1)") !=
           std::string::npos);
 }
+
+// ---- 改一镜的台词（2026-09-23） ----
+//
+// 原来这个工具一律发「逐条改字」，条数必须和盘上对上：没台词的镜头加不上，
+// 有两句的也改不了，回来一句「台词条数对不上：给了 1 条，这个镜头有 0 条」。
+
+namespace {
+
+/// 一部两镜的片子：sh001 画面里有董平但没台词；sh002 两句（董平一句、旁白一句）。
+fs::path edit_project(const std::string& tag) {
+    const auto dir = temp_dir(tag);
+    json a;
+    a["characters"] = {{"c_a", {{"char_id", "c_a"}, {"name", "董平"}}},
+                       {"c_b", {{"char_id", "c_b"}, {"name", "许婷"}}}};
+    a["locations"] = json::object();
+    std::ofstream(dir / "assets.json") << a.dump(2);
+
+    json s1 = {{"shot_id", "ep01_sh001"}, {"scene_id", "ep01_s01"}, {"order", 0}, {"duration_s", 4.0},
+               {"characters", json::array({{{"char_id", "c_a"}}})}};
+    json s2 = {{"shot_id", "ep01_sh002"}, {"scene_id", "ep01_s01"}, {"order", 1}, {"duration_s", 4.0},
+               {"characters", json::array({{{"char_id", "c_a"}}, {{"char_id", "c_b"}}})},
+               {"dialogue", json::array({{{"char_id", "c_a"}, {"text", "你来了。"},
+                                          {"emotion", "哽咽"}},
+                                         {{"char_id", nullptr}, {"text", "雨停了。"}}})}};
+    json ep = {{"episode_id", "ep01"}, {"title", "发现"}, {"shots", json::array({s1, s2})}};
+    json proj = {{"schema_version", 1}, {"project_id", "p_test"}, {"title", "改台词"},
+                 {"episodes", json::array({ep})}};
+    std::ofstream(dir / "project.json") << proj.dump(2);
+    return dir;
+}
+
+json dialogue_of(const fs::path& dir, const std::string& sid) {
+    std::ifstream in(dir / "project.json");
+    const json p = json::parse(in);
+    for (const auto& s : p.at("episodes").at(0).at("shots")) {
+        if (s.at("shot_id") == sid) return s.value("dialogue", json::array());
+    }
+    return json::array();
+}
+
+std::string shot_edit(const fs::path& dir, const json& args) {
+    agent::ToolContext ctx;
+    ctx.project = paths::to_utf8(dir);
+    return agent::run_tool(ctx, "shot_edit", args.dump());
+}
+
+}  // namespace
+
+TEST_CASE("改一镜的台词：原来没台词又没说是谁，照实问，不瞎猜") {
+    const auto dir = edit_project("edit_ask");
+    const std::string out =
+        shot_edit(dir, {{"episode_id", "ep01"}, {"shot_id", "ep01_sh001"}, {"dialogue", "走吧。"}});
+    CAPTURE(out);
+    CHECK(out.find("谁说") != std::string::npos);
+    CHECK(dialogue_of(dir, "ep01_sh001").empty());
+    fs::remove_all(dir);
+}
+
+TEST_CASE("改一镜的台词：没台词的镜头按名字加一句") {
+    const auto dir = edit_project("edit_add");
+    const std::string out = shot_edit(dir, {{"episode_id", "ep01"}, {"shot_id", "ep01_sh001"},
+                                            {"dialogue", "走吧。"}, {"speaker", "董平"}});
+    CAPTURE(out);
+    CHECK(out.find("改好了") != std::string::npos);
+    const json d = dialogue_of(dir, "ep01_sh001");
+    REQUIRE(d.size() == 1);
+    CHECK(d[0].value("char_id", std::string()) == "c_a");
+    CHECK(d[0].value("text", std::string()) == "走吧。");
+    fs::remove_all(dir);
+}
+
+TEST_CASE("改一镜的台词：旁白") {
+    const auto dir = edit_project("edit_vo");
+    const std::string out = shot_edit(dir, {{"episode_id", "ep01"}, {"shot_id", "ep01_sh001"},
+                                            {"dialogue", "那年夏天。"}, {"speaker", "旁白"}});
+    CAPTURE(out);
+    const json d = dialogue_of(dir, "ep01_sh001");
+    REQUIRE(d.size() == 1);
+    CHECK(d[0].at("char_id").is_null());
+    fs::remove_all(dir);
+}
+
+TEST_CASE("改一镜的台词：两句的镜头整镜换成一句，没说换人就沿用第一句的人") {
+    const auto dir = edit_project("edit_two");
+    const std::string out = shot_edit(
+        dir, {{"episode_id", "ep01"}, {"shot_id", "ep01_sh002"}, {"dialogue", "你终于来了。"}});
+    CAPTURE(out);
+    CHECK(out.find("改好了") != std::string::npos);
+    const json d = dialogue_of(dir, "ep01_sh002");
+    REQUIRE(d.size() == 1);
+    CHECK(d[0].value("char_id", std::string()) == "c_a");
+    // 同一个人说：情绪留着（改一个错别字不该把「哽咽」变回「平静」）。
+    CHECK(d[0].value("emotion", std::string()) == "哽咽");
+    fs::remove_all(dir);
+}
+
+TEST_CASE("改一镜的台词：认不出的人不猜，也不动盘") {
+    const auto dir = edit_project("edit_who");
+    const std::string out = shot_edit(dir, {{"episode_id", "ep01"}, {"shot_id", "ep01_sh001"},
+                                            {"dialogue", "走吧。"}, {"speaker", "王五"}});
+    CAPTURE(out);
+    CHECK(out.find("认不出") != std::string::npos);
+    CHECK(dialogue_of(dir, "ep01_sh001").empty());
+    fs::remove_all(dir);
+}

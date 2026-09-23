@@ -689,6 +689,8 @@
   "改动不合法：%1 不认识这个取值 %2": "modification invalide : %1 ne connaît pas la valeur %2",
   "改动不合法：%1 要是字符串": "modification invalide : %1 doit être une chaîne",
   "改动不合法：%1 要是数字": "modification invalide : %1 doit être un nombre",
+  "改动不合法：dialogue_lines 要是数组": "modification invalide : dialogue_lines doit être un tableau",
+  "改动不合法：dialogue_texts 和 dialogue_lines 只能给一个": "modification invalide : donnez dialogue_texts ou dialogue_lines, pas les deux",
   "改动不合法：dialogue_texts 要是数组": "modification invalide : dialogue_texts doit être un tableau",
   "改动不合法：needs_lipsync 要是真假值": "modification invalide : needs_lipsync doit être un booléen",
   "改动不合法：台词要是字符串": "modification invalide : une réplique doit être une chaîne",

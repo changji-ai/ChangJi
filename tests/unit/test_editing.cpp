@@ -194,3 +194,119 @@ TEST_CASE("枚举取值非法要被拒绝，不能静默回落") {
     std::error_code ec;
     fs::remove_all(root, ec);
 }
+
+// ---- 整镜换台词（`dialogue_lines`，2026-09-23） ----
+//
+// `dialogue_texts` 是逐条改字，条数必须对上。代理原来只能走它，于是没台词
+// 的镜头加不上台词、有两句的也改不了。`dialogue_lines` 是"整镜换成这几句"。
+
+namespace {
+
+models::Shot shot_of(const fs::path& root, const std::string& sid) {
+    models::ProjectStore store(root);
+    const models::Project p = store.load_project();
+    const models::Episode* ep = p.episode_by_id("ep01");
+    REQUIRE(ep != nullptr);
+    for (const auto& s : ep->shots) {
+        if (s.shot_id == sid) return s;
+    }
+    FAIL("没有这一镜 " << sid);
+    return {};
+}
+
+http::ApiResult edit(const fs::path& root, const std::string& sid, const json& patch) {
+    const json body = {{"project", paths::to_utf8(root)}, {"episode_id", "ep01"},
+                       {"shot_id", sid}, {"patch", patch}};
+    return http::guard([&] { return http::post_shot(body); });
+}
+
+}  // namespace
+
+TEST_CASE("整镜换台词：没台词的镜头能加一句旁白") {
+    const fs::path root = fresh_copy("加台词");
+    REQUIRE(shot_of(root, "ep01_s01_sh001").dialogue.empty());
+
+    const auto r = edit(root, "ep01_s01_sh001",
+                        {{"dialogue_lines", json::array({{{"char_id", nullptr},
+                                                          {"text", "那年夏天雨特别多。"}}})}});
+    CHECK(r.status == 200);
+    const auto s = shot_of(root, "ep01_s01_sh001");
+    REQUIRE(s.dialogue.size() == 1);
+    CHECK_FALSE(s.dialogue[0].char_id.has_value());
+    CHECK(s.dialogue[0].text == "那年夏天雨特别多。");
+
+    std::error_code ec;
+    fs::remove_all(root, ec);
+}
+
+TEST_CASE("整镜换台词：说话的人不在画面里就拒，不替它把人加进去") {
+    const fs::path root = fresh_copy("加台词换人");
+    std::ifstream in(root / "project.json", std::ios::binary);
+    const std::string before((std::istreambuf_iterator<char>(in)),
+                             std::istreambuf_iterator<char>());
+    in.close();
+
+    // sh001 画面里一个人都没有。
+    const auto r = edit(root, "ep01_s01_sh001",
+                        {{"dialogue_lines", json::array({{{"char_id", "lin_yuan"},
+                                                          {"text", "你来了。"}}})}});
+    CHECK(r.status == 400);
+    std::ifstream in2(root / "project.json", std::ios::binary);
+    const std::string after((std::istreambuf_iterator<char>(in2)),
+                            std::istreambuf_iterator<char>());
+    CHECK(before == after);
+
+    std::error_code ec;
+    fs::remove_all(root, ec);
+}
+
+TEST_CASE("整镜换台词：两句换成一句，同一个人说的那句留着情绪") {
+    const fs::path root = fresh_copy("两句换一句");
+    const auto old = shot_of(root, "ep01_s03_sh007");
+    REQUIRE(old.dialogue.size() == 2);
+    REQUIRE(old.dialogue[0].char_id == std::optional<std::string>("lin_yuan"));
+
+    const auto r = edit(root, "ep01_s03_sh007",
+                        {{"dialogue_lines", json::array({{{"char_id", "lin_yuan"},
+                                                          {"text", "你来晚了。"}}})}});
+    CHECK(r.status == 200);
+    CHECK(r.body.at("reset_to_planned").get<bool>());
+    const auto s = shot_of(root, "ep01_s03_sh007");
+    REQUIRE(s.dialogue.size() == 1);
+    CHECK(s.dialogue[0].text == "你来晚了。");
+    CHECK(s.dialogue[0].emotion == old.dialogue[0].emotion);
+    // 字换了，配音作废。
+    CHECK_FALSE(s.dialogue[0].audio_path.has_value());
+
+    std::error_code ec;
+    fs::remove_all(root, ec);
+}
+
+TEST_CASE("整镜换台词：原样送回来什么都不动，配过的音不扔") {
+    const fs::path root = fresh_copy("原样");
+    const auto old = shot_of(root, "ep01_s03_sh007");
+    json lines = json::array();
+    for (const auto& d : old.dialogue) {
+        lines.push_back({{"char_id", d.char_id ? json(*d.char_id) : json(nullptr)},
+                         {"text", d.text}});
+    }
+    const auto r = edit(root, "ep01_s03_sh007", {{"dialogue_lines", lines}});
+    CHECK(r.status == 200);
+    CHECK_FALSE(r.body.at("reset_to_planned").get<bool>());
+    const auto s = shot_of(root, "ep01_s03_sh007");
+    REQUIRE(s.dialogue.size() == old.dialogue.size());
+    CHECK(s.dialogue[0].audio_path == old.dialogue[0].audio_path);
+
+    std::error_code ec;
+    fs::remove_all(root, ec);
+}
+
+TEST_CASE("整镜换台词：两种改法一起给就拒") {
+    const fs::path root = fresh_copy("两种一起");
+    const auto r = edit(root, "ep01_s03_sh007",
+                        {{"dialogue_texts", json::array({"a", "b"})},
+                         {"dialogue_lines", json::array({{{"text", "c"}}})}});
+    CHECK(r.status == 400);
+    std::error_code ec;
+    fs::remove_all(root, ec);
+}

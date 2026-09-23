@@ -5600,3 +5600,96 @@ TEST_CASE("写正文要说清少想一格：不说的话智谱按 max 来，整�
         CHECK(sent_again.at("reasoning_effort") == "low");
     }
 }
+
+// ---- 「要几章」（2026-09-23） ----
+//
+// 代理那个写大纲的工具把「几章」列在参数表里，而这个接口原来不放它进来：
+// 模型一填就是 422「Extra inputs are not permitted」，于是它照着那句话再派
+// 一次、又一次——「旧手机故事」那条对话里派了二十多次，一章都没出来。
+
+namespace {
+
+/// 记下每次发出去的提示词。**要上锁**：异步那条是在另一条线程上调的。
+class PromptCatcher : public llm::Client {
+public:
+    explicit PromptCatcher(std::string reply) : reply_(std::move(reply)) {}
+    std::string complete(const llm::Request& r, pipeline::CancelToken&) override {
+        std::lock_guard<std::mutex> lk(mu_);
+        prompts_.push_back(r.prompt);
+        return reply_;
+    }
+    std::vector<std::string> prompts() {
+        std::lock_guard<std::mutex> lk(mu_);
+        return prompts_;
+    }
+
+private:
+    std::string reply_;
+    std::mutex mu_;
+    std::vector<std::string> prompts_;
+};
+
+}  // namespace
+
+TEST_CASE("POST /api/story/outline：给了章数就写这么多章") {
+    const fs::path root = fresh_project("章数");
+    llm::ReplayClient client({good_outline().dump()});
+    pipeline::CancelToken tok;
+
+    const auto r = http::post_story_outline(
+        json{{"project", p_str(root)}, {"premise", "深夜便利店"}, {"chapters", 3}},
+        client, tok);
+    CHECK(r.status == 200);
+    REQUIRE(client.calls().size() == 1);
+    CHECK(client.calls()[0].prompt.find("写成 3 章左右") != std::string::npos);
+
+    std::error_code ec;
+    fs::remove_all(root, ec);
+}
+
+TEST_CASE("POST /api/story/outline：章数走异步那条也传得下去（代理走的就是它）") {
+    const fs::path root = fresh_project("章数异步");
+    PromptCatcher client(good_outline().dump());
+    pipeline::CancelToken tok;
+
+    const auto r = http::post_story_outline(
+        json{{"project", p_str(root)}, {"premise", "深夜便利店"}, {"chapters", 5},
+             {"async", true}, {"stream", "outline-chapters-test"}},
+        client, tok);
+    CHECK(r.status == 202);
+
+    // 等后台写完落盘。
+    bool done = false;
+    for (int i = 0; i < 400 && !done; ++i) {
+        const auto now = http::get_story(p_str(root));
+        done = now.body.value("chapters", 0) > 0 && !now.body.contains("outline_running");
+        if (!done) std::this_thread::sleep_for(std::chrono::milliseconds(25));
+    }
+    REQUIRE(done);
+    const auto sent = client.prompts();
+    REQUIRE(sent.size() == 1);
+    CHECK(sent[0].find("写成 5 章左右") != std::string::npos);
+
+    std::error_code ec;
+    fs::remove_all(root, ec);
+}
+
+TEST_CASE("POST /api/story/outline：章数不像样就 422，一个字都不发给模型") {
+    const fs::path root = fresh_project("章数坏");
+    for (const json& bad : {json("3"), json(3.5), json(-1), json(41)}) {
+        CAPTURE(bad.dump());
+        llm::ReplayClient client({good_outline().dump()});
+        pipeline::CancelToken tok;
+        try {
+            http::post_story_outline(
+                json{{"project", p_str(root)}, {"premise", "深夜便利店"}, {"chapters", bad}},
+                client, tok);
+            FAIL("应该抛");
+        } catch (const http::ApiError& e) {
+            CHECK(e.status() == 422);
+        }
+        CHECK(client.calls().empty());
+    }
+    std::error_code ec;
+    fs::remove_all(root, ec);
+}

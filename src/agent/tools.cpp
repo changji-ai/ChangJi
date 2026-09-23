@@ -226,7 +226,13 @@ ordered tool_specs() {
         props["shot_size"] = str_arg("景别：ECU/CU/MCU/MS/MLS/LS/ELS。");
         props["camera_move"] = str_arg(
             "运镜：static/pan_left/pan_right/tilt_up/tilt_down/push_in/pull_out/handheld/orbit。");
-        props["dialogue"] = str_arg("这一镜的台词，整句换掉。");
+        props["dialogue"] = str_arg(
+            "这一镜的台词。这一镜原来只有一句就换掉那一句；原来没有台词或者有好几句，"
+            "整镜的台词就换成这一句。");
+        props["speaker"] = str_arg(
+            "这句台词谁说：填设定里的角色名；旁白填「旁白」。"
+            "这一镜原来没台词、或者要换个人说时才要填，不填就沿用原来说话的人。"
+            "说话的人得在这一镜的画面里。");
         props["first_frame_prompt"] = str_arg("首帧提示词，整段换掉。");
         specs.push_back(fn("shot_edit",
                            "改一镜：时长、景别、运镜、台词、首帧提示词，改哪样填哪样。"
@@ -271,7 +277,9 @@ ordered tool_specs() {
     {
         ordered props;
         props["chapters"] = ordered{{"type", "integer"},
-                                    {"description", "要几章。不填按体量推。"}};
+                                    {"minimum", 1},
+                                    {"maximum", 40},
+                                    {"description", "要几章（1 到 40）。不填按体量推。"}};
         specs.push_back(fn("story_outline",
                            "写整个故事的大纲和章节表。**手上还没有故事时先走它**——"
                            "后面每一步都是照着它展开的。几分钟。",
@@ -378,6 +386,35 @@ std::string need_project(const ToolContext& ctx) {
 void mark_baseline(ToolContext& ctx) {
     if (ctx.baseline || ctx.project.empty()) return;
     ctx.baseline = std::make_shared<Baseline>(take_baseline(paths::from_utf8(ctx.project)));
+}
+
+/// 「谁说这句」：模型填的名字 → 设定里的 char_id。
+///
+/// 回 `true` 时 `out` 是 char_id，**空串是旁白**；认不出回 `false`，`why` 是
+/// 回给模型的那句话。**认不出不猜**：认错一个人，那句台词就用另一个人的
+/// 嗓子念出来，而画面上那个人的嘴在动——比报一句错难查得多。
+bool speaker_id(const std::string& project, const std::string& who, std::string& out,
+                std::string& why) {
+    const std::string w = text::strip_ws(who);
+    for (const char* narrator : {"旁白", "narrator", "Narrator", "narration", "voiceover", "VO"}) {
+        if (w == narrator) {
+            out.clear();
+            return true;
+        }
+    }
+    const auto r = http::get_assets(project);
+    if (r.status >= 200 && r.status < 300 && r.body.contains("characters") &&
+        r.body.at("characters").is_array()) {
+        for (const auto& c : r.body.at("characters")) {
+            const std::string id = c.value("char_id", std::string());
+            if (w == id || w == c.value("name", std::string())) {
+                out = id;
+                return true;
+            }
+        }
+    }
+    why = "认不出这个人：" + w + "。说话的人要填设定里的角色名，旁白就填「旁白」。";
+    return false;
 }
 
 /// 往这一次调用上挂附件。null（图不在盘上）和空数组都不挂。
@@ -768,8 +805,20 @@ std::string run_tool(ToolContext& ctx, const std::string& name,
                 // 对话会一直挂在那儿。
                 body["async"] = true;
                 body["stream"] = "agent";
-                if (a.contains("chapters") && a.at("chapters").is_number_integer()) {
-                    body["chapters"] = a.at("chapters");
+                // 几章。**模型填的什么都可能是**（`3.0`、`"3"`、`0`、`100`）：
+                // 是个整数就收，出了范围照实说——原样递过去的话接口回的是一段
+                // 422 的结构化校验错，模型只会原样复述给人听。
+                if (a.contains("chapters") && !a.at("chapters").is_null()) {
+                    const json& c = a.at("chapters");
+                    double n = -1;
+                    if (c.is_number()) n = c.get<double>();
+                    else if (c.is_string()) {
+                        try { n = std::stod(c.get<std::string>()); } catch (...) {}
+                    }
+                    if (n != static_cast<int>(n) || n < 1 || n > 40) {
+                        return "章数要是 1 到 40 之间的整数。不确定就别填，按体量推。";
+                    }
+                    body["chapters"] = static_cast<int>(n);
                 }
                 pipeline::CancelToken tok;
                 const auto r = http::post_story_outline(body, *ctx.client, tok);
@@ -820,14 +869,48 @@ std::string run_tool(ToolContext& ctx, const std::string& name,
             if (a.contains("duration_s") && a.at("duration_s").is_number()) {
                 patch["duration_s"] = a.at("duration_s");
             }
-            // 台词那一栏**不是普通字段**（editing.cpp 里单拎出来的那一段）：
-            // 一镜可能有好几句，接口收的是一个数组。
-            if (const std::string line = arg_str(a, "dialogue"); !line.empty()) {
-                patch["dialogue_texts"] = json::array({line});
-            }
-            if (patch.empty()) return "没说要改什么。";
             const fs::path root = paths::from_utf8(ctx.project);
             const json before = shot_json(root, ep, sid);
+
+            // 台词那一栏**不是普通字段**（editing.cpp 里单拎出来的那一段）。
+            //
+            // 原来这儿一律发 `dialogue_texts: [这一句]`——那是"逐条改字"，条数
+            // 必须和盘上对上，于是**原来没台词的镜头加不上台词、有两句的也改
+            // 不了**，回来一句「台词条数对不上」（2026-09-23 实测）。现在：
+            //
+            //   · 原来正好一句、没说换人 → 还是逐条改字（留着那一句的情绪、音色）；
+            //   · 别的情形 → `dialogue_lines`，整镜换成这一句，说话人按 `speaker`，
+            //     没填就沿用原来第一句的；原来一句都没有又没填，照实问。
+            const std::string line = arg_str(a, "dialogue");
+            const std::string who = arg_str(a, "speaker");
+            if (!line.empty()) {
+                const json old = before.is_object() && before.contains("dialogue") &&
+                                         before.at("dialogue").is_array()
+                                     ? before.at("dialogue")
+                                     : json::array();
+                if (old.size() == 1 && who.empty()) {
+                    patch["dialogue_texts"] = json::array({line});
+                } else {
+                    json speaker = nullptr;   // null = 旁白
+                    if (!who.empty()) {
+                        std::string id, why;
+                        if (!speaker_id(ctx.project, who, id, why)) return why;
+                        if (!id.empty()) speaker = id;
+                    } else if (!old.empty()) {
+                        const json& first = old.at(0);
+                        if (first.is_object() && first.contains("char_id") &&
+                            first.at("char_id").is_string()) {
+                            speaker = first.at("char_id");
+                        }
+                    } else {
+                        return "这一镜原来没有台词，得说清这句是谁说的"
+                               "（填角色名；旁白就填「旁白」）。";
+                    }
+                    patch["dialogue_lines"] =
+                        json::array({{{"char_id", speaker}, {"text", line}}});
+                }
+            }
+            if (patch.empty()) return "没说要改什么。";
 
             json body;
             body["project"] = ctx.project;

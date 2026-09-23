@@ -689,6 +689,8 @@
   "改动不合法：%1 不认识这个取值 %2": "cambio no válido: %1 no conoce el valor %2",
   "改动不合法：%1 要是字符串": "cambio no válido: %1 tiene que ser texto",
   "改动不合法：%1 要是数字": "cambio no válido: %1 tiene que ser un número",
+  "改动不合法：dialogue_lines 要是数组": "cambio no válido: dialogue_lines tiene que ser una lista",
+  "改动不合法：dialogue_texts 和 dialogue_lines 只能给一个": "cambio no válido: da dialogue_texts o dialogue_lines, no los dos",
   "改动不合法：dialogue_texts 要是数组": "cambio no válido: dialogue_texts tiene que ser una lista",
   "改动不合法：needs_lipsync 要是真假值": "cambio no válido: needs_lipsync tiene que ser un booleano",
   "改动不合法：台词要是字符串": "cambio no válido: cada línea tiene que ser texto",

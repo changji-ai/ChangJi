@@ -670,6 +670,8 @@
   "改动不合法：%1 不认识这个取值 %2": "改動不合法：%1 不認識這個取值 %2",
   "改动不合法：%1 要是字符串": "改動不合法：%1 要是字串",
   "改动不合法：%1 要是数字": "改動不合法：%1 要是數字",
+  "改动不合法：dialogue_lines 要是数组": "改動不合法：dialogue_lines 要是陣列",
+  "改动不合法：dialogue_texts 和 dialogue_lines 只能给一个": "改動不合法：dialogue_texts 和 dialogue_lines 只能給一個",
   "改动不合法：dialogue_texts 要是数组": "改動不合法：dialogue_texts 要是陣列",
   "改动不合法：needs_lipsync 要是真假值": "改動不合法：needs_lipsync 要是真假值",
   "改动不合法：台词要是字符串": "改動不合法：台詞要是字串",

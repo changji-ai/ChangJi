@@ -549,7 +549,7 @@ ApiResult post_story_outline(const json& body_in, llm::Client& client,
     const bool peek = take_peek(body);
     const std::string pasted = take_paste(body);
     forbid_extra(body, {"project", "premise", "scale", "keywords", "stream",
-                        "async", "variation", "overwrite"});
+                        "async", "variation", "overwrite", "chapters"});
     ProjectStore store = open_project(body);
     const Project project = load_or_400(store);
     const Story existing = load_story_or_400(store);
@@ -587,6 +587,25 @@ ApiResult post_story_outline(const json& body_in, llm::Client& client,
                   num_in_range(body, "variation", 0.0, -1.0, 4294967295.0))
             : stages::random_shape();
 
+    // 要几章。**不给（或 0）就按体量推**，给了就写这么多章——`write_outline`
+    // 早就认这个数（一键成片要 1 章就是这么走的），只是这个接口原来不放它
+    // 进来：代理那个写大纲的工具把「几章」列在参数表里，模型一填，回来的是
+    // 一段 422「Extra inputs are not permitted」，而它照着那句话再派一次、
+    // 又一次。2026-09-23 翻「旧手机故事」那条对话，写大纲派了二十多次，
+    // 一章都没出来。
+    //
+    // 上限 40：长篇体量按 16 章推，给到两倍半还不够的，多半是把"集"当成了
+    // "章"，照写会是一份几万字的大纲——拦下来比白等十几分钟好。
+    int chapters = 0;
+    if (body.is_object() && body.contains("chapters") && !body.at("chapters").is_null()) {
+        const json& c = body.at("chapters");
+        if (!c.is_number_integer()) {
+            throw unprocessable_top("chapters", "Input should be a valid integer", c,
+                                    "int_type");
+        }
+        chapters = static_cast<int>(num_in_range(body, "chapters", 0.0, -1.0, 40.0));
+    }
+
     // 自己挪到后台的那一条。理由和别的长活一样（那一整段在 server.cpp 的
     // `start_async` 头上）：这个 handler 占着 Crow 的一条 I/O 线程，而出一份
     // 大纲要三四十秒，落在同一条线程上的连接会跟着冻住——顶栏那块表首当
@@ -611,7 +630,7 @@ ApiResult post_story_outline(const json& body_in, llm::Client& client,
         // 还没跑到 write_outline。擦账和记错都在 write_outline 里，这儿不管。
         OutlineRegistry::instance().started(project_path, stream_id);
         Offload::instance().post([project_path, premise, scale, keywords,
-                                  stream_id, variation, &client] {
+                                  stream_id, variation, chapters, &client] {
             try {
                 ProjectStore st = open_project(project_path);
                 const Project pj = load_or_400(st);
@@ -620,7 +639,8 @@ ApiResult post_story_outline(const json& body_in, llm::Client& client,
                 job_done(stream_id, write_outline(st, pj, ex, premise, scale,
                                                   keywords, stream_id, variation,
                                                   client, own, /*peek=*/false,
-                                                  /*pasted=*/std::string()));
+                                                  /*pasted=*/std::string(),
+                                                  chapters));
             } catch (const ApiError& e) {
                 job_error(stream_id, e.what());
             } catch (const std::exception& e) {
@@ -632,7 +652,7 @@ ApiResult post_story_outline(const json& body_in, llm::Client& client,
 
     return {200, write_outline(store, project, existing, premise, scale,
                                keywords, stream_id, variation, client, tok, peek,
-                               pasted)};
+                               pasted, chapters)};
 }
 
 ApiResult post_story_chapter_delete(const json& body) {
