@@ -1604,8 +1604,17 @@ if(CHANGJI_BUILD_TESTS)
     target_compile_definitions(changji_tests PRIVATE
         CHANGJI_DESKTOP_QML_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../desktop/qml")
 
+    # ⚠️ **核心上那几条 Windows 定义和 `/bigobj` 传不过来**：这个目标不链
+    # changji_core，自己把源文件编一遍（见上面「测试目标不链它」那段），
+    # 所以 core 那头 PUBLIC 的东西这儿一样都没有。2026-09-23 头一回在
+    # Windows 上编它就撞了两处：`util/say.cpp` 报 C1128（节数超限），
+    # `std::min` 被 windows.h 的宏吃掉。
+    if(WIN32)
+        target_compile_definitions(changji_tests PRIVATE
+            _WIN32_WINNT=0x0A00 NOMINMAX WIN32_LEAN_AND_MEAN UNICODE _UNICODE)
+    endif()
     if(MSVC)
-        target_compile_options(changji_tests PRIVATE /utf-8 /Zc:__cplusplus /W4)
+        target_compile_options(changji_tests PRIVATE /utf-8 /Zc:__cplusplus /W4 /bigobj)
     else()
         target_compile_options(changji_tests PRIVATE -Wall -Wextra)
     endif()
