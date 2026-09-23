@@ -220,16 +220,15 @@ void watch_and_react(const std::string& project, const std::string& chat,
                      std::function<RunDeps()> run_deps, std::shared_ptr<Session> s,
                      const std::string& here, std::shared_ptr<agent::Baseline> base);
 
-/// 跑一轮对话。`kickoff` 非空时先把它当引擎说的话落一条（做完了、出错了），
-/// `kickoff_media` 是挂在那一条上的东西（这一回做出来的图、片、字）。
+/// 跑一轮对话。`kickoff` 的正文非空时先把它当引擎说的话落一条（做完了、
+/// 出错了），带着它身上的东西（这一回做出来的图、片、字，几件成几件没成）。
 ///
 /// `here` 是人这会儿把话说在哪一章上，**一路带下去**：活跑完之后那几轮自动
 /// 接续说的还是同一件事，他的眼睛也还落在同一章上。
 void run_round(const std::string& project, const std::string& chat,
                std::shared_ptr<llm::Client> client,
                std::function<RunDeps()> run_deps, std::shared_ptr<Session> s,
-               const std::string& kickoff, const std::string& here,
-               const json& kickoff_media) {
+               const agent::Turn& kickoff, const std::string& here) {
     pipeline::Activity act("llm", project, "", SAY("在想"));
 
     agent::ToolContext ctx;
@@ -250,11 +249,9 @@ void run_round(const std::string& project, const std::string& chat,
         push({{"event", "project"}, {"project", root}});
     };
 
-    if (!kickoff.empty()) {
-        agent::Turn t;
+    if (!kickoff.text.empty()) {
+        agent::Turn t = kickoff;
         t.role = "system";
-        t.text = kickoff;
-        t.media = kickoff_media;
         t.at = agent::now_ms();
         agent::append_turn(dir_for(project), t, chat);
         push_turn(project, chat, t);
@@ -348,6 +345,7 @@ void run_round(const std::string& project, const std::string& chat,
         agent::Turn t;
         t.role = "assistant";
         t.text = SAYF("出错了：%1", e.what());
+        t.level = "error";
         t.at = agent::now_ms();
         agent::append_turn(dir_for(moved_to.empty() ? project : moved_to), t, chat);
         push_turn(moved_to.empty() ? project : moved_to, chat, t);
@@ -415,17 +413,21 @@ void watch_and_react(const std::string& project, const std::string& chat,
     // 这一句——没成也是它：「旧手机故事」写大纲派了二十多次，每一次做完都是
     //「跑完了」，而故事一章都没有，人和模型都看不出来。没成的那几件带着原话
     // 接在后面（`work_report`），做出来的图、片、字挂在这一条上（`changed_media`）。
-    std::string said = SAY("刚才派出去的活跑完了。");
-    json media = json::array();
+    agent::Turn said;
+    said.text = SAY("刚才派出去的活跑完了。");
     if (base) {
-        said += agent::work_report(project, base->task_floor);
+        const agent::WorkReport rep = agent::work_report(project, base->task_floor);
+        said.text += rep.text;
+        said.report = rep.report;
+        // 有没成的：这一条标成「做了但没做完」，界面画得出来。
+        if (rep.failed) said.level = "warn";
         try {
-            media = agent::changed_media(paths::from_utf8(project), *base);
+            said.media = agent::changed_media(paths::from_utf8(project), *base);
         } catch (const std::exception&) {
             // 比不出来就不挂：这一条照样要落，模型照样要接着往下做。
         }
     }
-    run_round(project, chat, client, run_deps, s, said, here, media);
+    run_round(project, chat, client, run_deps, s, said, here);
 }
 
 ApiResult post_chat(const json& body, std::shared_ptr<llm::Client> client,
@@ -477,8 +479,7 @@ ApiResult post_chat(const json& body, std::shared_ptr<llm::Client> client,
     // `auto` 那一档给得多——那正是"放手跑"的意思。
     s->auto_left = body.value("mode", std::string()) == "auto" ? 30 : 4;
 
-    std::thread(run_round, project, chat, client, run_deps, s, std::string(), here,
-                json::array())
+    std::thread(run_round, project, chat, client, run_deps, s, agent::Turn{}, here)
         .detach();
 
     return {202, {{"started", true}, {"project", project}}};

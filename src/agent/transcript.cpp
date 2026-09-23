@@ -30,6 +30,8 @@ json to_json(const Turn& t) {
     if (!t.thinking.empty()) j["thinking"] = t.thinking;
     if (!t.tool_calls.is_null() && !t.tool_calls.empty()) j["tool_calls"] = t.tool_calls;
     if (t.media.is_array() && !t.media.empty()) j["media"] = t.media;
+    if (!t.level.empty()) j["level"] = t.level;
+    if (t.report.is_object() && !t.report.empty()) j["report"] = t.report;
     return j;
 }
 
@@ -46,6 +48,8 @@ Turn turn_from_json(const json& j) {
     // **不是数组就当没有**：这一栏是给界面画的，一行手改坏了的不该让界面
     // 拿到一个它不认得的形状。
     if (j.contains("media") && j.at("media").is_array()) t.media = j.at("media");
+    t.level = j.value("level", "");
+    if (j.contains("report") && j.at("report").is_object()) t.report = j.at("report");
     return t;
 }
 

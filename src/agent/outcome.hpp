@@ -111,12 +111,26 @@ nlohmann::json shot_change_media(const std::filesystem::path& root,
 nlohmann::json changed_media(const std::filesystem::path& root,
                              const Baseline& before);
 
-/// 这一回派出去的活，几件成、几件没成——**说给人听，也说给模型听**。
-///
-/// 回的是接在「刚才派出去的活跑完了。」后面那几行；账本上找不到这一回的活
-/// 就回空。没成的那几件**一件一行，带着原话**：模型要靠它决定下一步是重试
-/// 还是去问人，而原来它只收到一句「跑完了」，于是同一件派了二十多次。
-std::string work_report(const std::string& project, std::uint64_t task_floor);
+/// 这一回派出去的活，几件成、几件没成。
+struct WorkReport {
+    /// 接在「刚才派出去的活跑完了。」后面那几行——**说给模型听**（也落在
+    /// `Turn::text` 里）。账本上找不到这一回的活就是空的。没成的那几件**一件
+    /// 一行，带着原话**：模型要靠它决定下一步是重试还是去问人，而原来它只
+    /// 收到一句「跑完了」，于是同一件派了二十多次。
+    std::string text;
+    /// 同一件事拆开的那一份，**给界面画**（落在 `Turn::report` 上）：
+    ///
+    ///     {"sections": [{"kind": "failed" | "stopped" | "done",
+    ///                    "rows": [{"title": …, "why": …}], "more": bool}]}
+    ///
+    /// 节的顺序和 `text` 里一样（没成的在前）。每节最多八行，`more` 说后面
+    /// 还有没有。
+    nlohmann::json report;
+    /// 有没有没成的。有就把那一条标成 `warn`（见 `Turn::level`）。
+    bool failed = false;
+};
+
+WorkReport work_report(const std::string& project, std::uint64_t task_floor);
 
 /// 账本上此刻最大的 id（见 `Baseline::task_floor`）。
 std::uint64_t task_floor_now();

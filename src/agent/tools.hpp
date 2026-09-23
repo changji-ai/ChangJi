@@ -88,6 +88,14 @@ struct ToolContext {
     /// 该是"这一轮之前"）。活干完之后 `http/chat_api.cpp` 拿它比出这一回
     /// 做出了什么，挂到「跑完了」那一条上。
     std::shared_ptr<Baseline> baseline;
+
+    /// 刚跑完的那个工具**没做成**（接口回了错、跑出异常）。`loop.cpp` 读完
+    /// 就清掉，挂到那条 tool 的 `Turn::level` 上。
+    ///
+    /// 只管"真砸了"那一档。「要说是哪一章」「没说要改什么」这种是在跟模型
+    /// 要参数，它补上就过了，不算砸——全标红的话一轮对话里一半是红的，
+    /// 红就不再有意思。
+    bool failed = false;
 };
 
 /// 给模型的工具表（OpenAI 那套 function 格式）。
@@ -123,6 +131,10 @@ std::string run_tool(ToolContext& ctx, const std::string& name,
 /// 而调用方要能分出"这一轮该停下来等人"和"接着往下做"。不挂记号的话，
 /// 模型收到工具结果会接着自己往下猜——而它本来就是因为猜不准才问的。
 inline constexpr const char* kAskUserMark = "\x01ASK\x01";
+
+/// 接口报错的那一段说成人话：422 那种 `[{loc, msg, …}]` 说成「哪一栏：出了什么事」，
+/// 字符串照原样。**给人看也给模型看**——原来原样 dump 出去，两边读到的都是一段 JSON。
+std::string readable_detail(const nlohmann::json& body);
 
 /// 「这部片子现在什么样」：几章、每章到哪一步、有没有在跑的活。
 ///

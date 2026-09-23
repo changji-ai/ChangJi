@@ -362,15 +362,49 @@ namespace {
 /// `ApiError`，而那些话是包了 `SAY()` 的、按进程的全局语言查表。也就是说
 /// **模型在出错这条路上本来就会收到德语**——那是另一条口子，不是这儿开的，
 /// 记在方案里了。这儿管的只是外面这层壳别再和里面那半说两种话。
+/// 工具没做成时回话前面挂这个记号。`run_tool` 出口那儿摘掉、记进
+/// `ToolContext::failed`——**回话本身一个字不变**（模型读的、界面摆的都是原话），
+/// 变的只是这一条被标成"没做成"。做法同 `kAskUserMark`。
+// ⚠️ **拆成三段写**：`"\x01FAIL"` 里的十六进制转义会把后面的 `FA` 也吃进去
+// （MSVC 当场报 C7744 超出范围）。
+constexpr const char* kFailMark = "\x01" "FAIL" "\x01";
+
+}  // namespace
+
+/// 接口报错的那一段说成人话。
+///
+/// 422 那种回的是 FastAPI 形状的一串 `[{loc, msg, type, input}]`。原来原样
+/// `dump()` 出去，于是对话里摆着、模型也读着一整段 JSON（2026-09-23 截到的：
+/// `跑不动：{"detail":[{"input":3,"loc":["body","chapters"],…}]}`）。
+/// 要紧的只有两样：**哪一栏**（loc 最后一段）和**出了什么事**（msg）。
+std::string readable_detail(const json& body) {
+    const json* d = &body;
+    if (body.is_object() && body.contains("detail")) d = &body.at("detail");
+    if (d->is_string()) return d->get<std::string>();
+    if (!d->is_array()) return d->is_null() ? std::string() : d->dump();
+    std::string out;
+    for (const auto& e : *d) {
+        if (!e.is_object()) continue;
+        std::string where;
+        if (e.contains("loc") && e.at("loc").is_array() && !e.at("loc").empty()) {
+            const json& last = e.at("loc").back();
+            where = last.is_string() ? last.get<std::string>() : last.dump();
+        }
+        const std::string msg = e.value("msg", std::string());
+        if (!out.empty()) out += "；";
+        out += where.empty() ? msg : where + "：" + msg;
+    }
+    return out.empty() ? d->dump() : out;
+}
+
+namespace {
+
 std::string body_or_error(const http::ApiResult& r, const std::string& what,
                           i18n::Audience to = i18n::Audience::model()) {
     if (r.status >= 200 && r.status < 300) return {};
-    std::string detail;
-    if (r.body.is_object() && r.body.contains("detail")) {
-        const auto& d = r.body.at("detail");
-        detail = d.is_string() ? d.get<std::string>() : d.dump();
-    }
-    return SAYF_TO(to, "%1没成：%2", SAY_TO(to, what),
+    const std::string detail = readable_detail(r.body);
+    return std::string(kFailMark) +
+           SAYF_TO(to, "%1没成：%2", SAY_TO(to, what),
                    detail.empty() ? std::to_string(r.status) : detail);
 }
 
@@ -441,8 +475,25 @@ std::string dispatch_label(const std::string& tool) {
     return tool;
 }
 
+namespace {
+std::string run_tool_raw(ToolContext& ctx, const std::string& name,
+                         const std::string& arguments_json, i18n::Audience to);
+}  // namespace
+
 std::string run_tool(ToolContext& ctx, const std::string& name,
                      const std::string& arguments_json, i18n::Audience to) {
+    std::string out = run_tool_raw(ctx, name, arguments_json, to);
+    // 没做成的那几句前面挂着记号（见 `kFailMark`）：摘掉，记一笔。
+    const std::string mark(kFailMark);
+    ctx.failed = out.rfind(mark, 0) == 0;
+    if (ctx.failed) out.erase(0, mark.size());
+    return out;
+}
+
+namespace {
+
+std::string run_tool_raw(ToolContext& ctx, const std::string& name,
+                         const std::string& arguments_json, i18n::Audience to) {
     const json a = parse_args(arguments_json);
 
     try {
@@ -487,7 +538,7 @@ std::string run_tool(ToolContext& ctx, const std::string& name,
             const auto r = http::post_new_project(body, ctx.settings);
             if (const auto e = body_or_error(r, "建项目"); !e.empty()) return e;
             const std::string root = r.body.value("root", r.body.value("path", std::string()));
-            if (root.empty()) return "建好了，但没拿到目录——这不该发生，先别继续。";
+            if (root.empty()) return std::string(kFailMark) + "建好了，但没拿到目录——这不该发生，先别继续。";
             ctx.project = root;
             if (ctx.on_project_created) ctx.on_project_created(root);
 
@@ -692,11 +743,11 @@ std::string run_tool(ToolContext& ctx, const std::string& name,
             // **图是在引擎这台机器上读的。** 引擎在别的机器上时，桌面端拖进
             // 来的那个路径在对面根本不存在——那时候照实说，别装作传上去了。
             std::ifstream in(paths::from_utf8(path), std::ios::binary);
-            if (!in) return "这个文件读不到：" + path + "（引擎在别的机器上时，"
+            if (!in) return std::string(kFailMark) + "这个文件读不到：" + path + "（引擎在别的机器上时，"
                             "得把图放到那台机器上）";
             const std::string data{std::istreambuf_iterator<char>(in),
                                    std::istreambuf_iterator<char>()};
-            if (data.empty()) return "这个文件是空的：" + path;
+            if (data.empty()) return std::string(kFailMark) + "这个文件是空的：" + path;
 
             // 内容类型按扩展名猜。猜不出的交给接口去拒——那头认得的格式
             // 只有它自己说了算，在这儿再判一遍就是第二份实现。
@@ -793,7 +844,7 @@ std::string run_tool(ToolContext& ctx, const std::string& name,
             name == "assets_understand" || name == "script_write_all" ||
             name == "storyboard_plan_all") {
             if (const auto s = need_project(ctx); !s.empty()) return s;
-            if (!ctx.client) return "这台机器上现在派不了活（没有大模型客户端）。";
+            if (!ctx.client) return std::string(kFailMark) + "这台机器上现在派不了活（没有大模型客户端）。";
             mark_baseline(ctx);
 
             json body;
@@ -936,7 +987,7 @@ std::string run_tool(ToolContext& ctx, const std::string& name,
 
         if (name == "render_run") {
             if (const auto s = need_project(ctx); !s.empty()) return s;
-            if (!ctx.run_deps) return "这台机器上现在出不了片（后端没装配好）。";
+            if (!ctx.run_deps) return std::string(kFailMark) + "这台机器上现在出不了片（后端没装配好）。";
             const std::string ep = arg_str(a, "episode_id");
             if (ep.empty()) return "要说是哪一章（episode_id）。";
 
@@ -1007,18 +1058,25 @@ std::string run_tool(ToolContext& ctx, const std::string& name,
             return std::string(kAskUserMark) + q;
         }
 
-        return "没有这个工具：" + name;
+        // 以下几处挂 `kFailMark` 的都是**真没做成**，不是在跟模型要参数。
+        return std::string(kFailMark) + "没有这个工具：" + name;
     } catch (const http::ApiError& e) {
         // ⚠️ **壳和瓤要说同一种话。** `e.what()` 那一半是包过 `SAY()` 的，
         // 也就是当前界面语言；外面这层壳原来是写死的中文，于是德语下摆出来
         // 的是「跑不动：Diese Asset-Bibliothek wurde nicht geladen…」。
         // 2026-09-22 在设定那一格上实地撞见——这已经是同一种坏法的第三次了
         //（ref_gen.cpp、local_client.cpp 各一次）。
-        return SAYF_TO(to, "跑不动：%1", e.what());
+        //
+        // 带结构的那种（422）说成人话，见 `readable_detail`。
+        const std::string why =
+            e.detail().is_string() ? std::string(e.what()) : readable_detail(e.detail());
+        return std::string(kFailMark) + SAYF_TO(to, "跑不动：%1", why);
     } catch (const std::exception& e) {
         // **不抛。** 抛出去整轮对话就断了，而模型完全可以换个工具再试。
-        return SAYF_TO(to, "跑不动：%1", e.what());
+        return std::string(kFailMark) + SAYF_TO(to, "跑不动：%1", e.what());
     }
 }
+
+}  // namespace
 
 }  // namespace changji::agent

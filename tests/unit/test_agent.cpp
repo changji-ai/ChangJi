@@ -1343,3 +1343,102 @@ TEST_CASE("改一镜的台词：认不出的人不猜，也不动盘") {
     CHECK(dialogue_of(dir, "ep01_sh001").empty());
     fs::remove_all(dir);
 }
+
+// ---- 出了岔子要标出来（2026-09-23） ----
+//
+// 原来「跑不动：…」和「改好了：…」在对话里同一个颜色，扫一眼分不出哪一步砸了。
+// 标记挂在 `Turn::level` 上，**判据是结构不是那句话**。
+
+TEST_CASE("出岔子：工具没做成就标 error，回话里不带记号") {
+    const auto dir = edit_project("fail_mark");
+    agent::ToolContext ctx;
+    ctx.project = paths::to_utf8(dir);
+
+    // 说话的人不在画面里：接口当场拒（校验不过），这是真没做成。
+    const std::string bad = agent::run_tool(
+        ctx, "shot_edit",
+        R"({"episode_id":"ep01","shot_id":"ep01_sh001","dialogue":"走吧。","speaker":"许婷"})");
+    CAPTURE(bad);
+    CHECK(ctx.failed);
+    // 记号只是内部的：模型读的、界面摆的都不能带着它。
+    CHECK(bad.find('\x01') == std::string::npos);
+    CHECK(bad.find("FAIL") == std::string::npos);
+
+    // 成了的那一次把它清回去。
+    const std::string ok = agent::run_tool(
+        ctx, "shot_edit",
+        R"({"episode_id":"ep01","shot_id":"ep01_sh001","dialogue":"走吧。","speaker":"董平"})");
+    CAPTURE(ok);
+    CHECK_FALSE(ctx.failed);
+
+    // 跟模型要参数的那种不算砸（它补上就过了）。
+    agent::run_tool(ctx, "shot_edit", R"({"episode_id":"ep01"})");
+    CHECK_FALSE(ctx.failed);
+    fs::remove_all(dir);
+}
+
+TEST_CASE("出岔子：422 说成「哪一栏：什么事」，不是一整段 JSON") {
+    const json body = {{"detail", json::array({
+        {{"type", "extra_forbidden"}, {"loc", json::array({"body", "chapters"})},
+         {"msg", "Extra inputs are not permitted"}, {"input", 3}},
+        {{"type", "missing"}, {"loc", json::array({"body", "project"})},
+         {"msg", "Field required"}, {"input", nullptr}},
+    })}};
+    const std::string s = agent::readable_detail(body);
+    CAPTURE(s);
+    CHECK(s == "chapters：Extra inputs are not permitted；project：Field required");
+    CHECK(s.find('{') == std::string::npos);
+    // 本来就是一句话的，原样。
+    CHECK(agent::readable_detail(json{{"detail", "没有章节 ep09"}}) == "没有章节 ep09");
+}
+
+TEST_CASE("出岔子：一轮里没做成的那条工具记录落库时带着 error") {
+    const auto dir = edit_project("fail_turn");
+    auto client = std::make_shared<llm::ReplayClient>(std::vector<std::string>{
+        call("c1", "shot_edit",
+             R"({"episode_id":"ep01","shot_id":"ep01_sh001","dialogue":"走吧。","speaker":"许婷"})"),
+        call("c2", "shot_edit",
+             R"({"episode_id":"ep01","shot_id":"ep01_sh001","dialogue":"走吧。","speaker":"董平"})"),
+        "改好了。",
+    });
+    agent::ToolContext ctx;
+    ctx.project = paths::to_utf8(dir);
+    std::vector<agent::Turn> history(1);
+    history[0].role = "user";
+    history[0].text = "给第一镜加一句。";
+    std::vector<agent::Turn> landed;
+    agent::LoopHooks hooks;
+    hooks.on_turn = [&](const agent::Turn& t) { landed.push_back(t); };
+    pipeline::CancelToken tok;
+    agent::run_turn(*client, ctx, history, tok, hooks);
+
+    std::vector<std::string> levels;
+    for (const auto& t : landed) {
+        if (t.role == "tool") levels.push_back(t.level);
+    }
+    REQUIRE(levels.size() == 2);
+    CHECK(levels[0] == "error");
+    CHECK(levels[1].empty());
+    // 落库读回来还在。
+    CHECK(agent::turn_from_json(agent::to_json(landed[1])).level ==
+          landed[1].level);
+    fs::remove_all(dir);
+}
+
+TEST_CASE("出岔子：转满轮数停下的那句标 warn") {
+    std::vector<std::string> canned;
+    for (int i = 0; i < 3; ++i) canned.push_back(call("c" + std::to_string(i), "project_state"));
+    auto client = std::make_shared<llm::ReplayClient>(canned);
+    agent::ToolContext ctx;
+    std::vector<agent::Turn> history(1);
+    history[0].role = "user";
+    history[0].text = "看看";
+    std::vector<agent::Turn> landed;
+    agent::LoopHooks hooks;
+    hooks.on_turn = [&](const agent::Turn& t) { landed.push_back(t); };
+    pipeline::CancelToken tok;
+    agent::run_turn(*client, ctx, history, tok, hooks, 3);
+    REQUIRE_FALSE(landed.empty());
+    CHECK(landed.back().role == "assistant");
+    CHECK(landed.back().level == "warn");
+}

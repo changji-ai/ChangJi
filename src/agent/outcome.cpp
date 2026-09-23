@@ -600,9 +600,13 @@ bool same_project(const std::string& a, const std::string& b) {
 
 }  // namespace
 
-std::string work_report(const std::string& project, std::uint64_t task_floor) {
+WorkReport work_report(const std::string& project, std::uint64_t task_floor) {
     const json b = pipeline::task_board();
-    std::vector<std::string> ok, bad, stopped;
+    struct Row {
+        std::string title;
+        std::string why;
+    };
+    std::vector<Row> ok, bad, stopped;
     if (b.contains("done") && b.at("done").is_array()) {
         // 账本上"做完的"是倒着排的（刚干完的在最上面）；报的时候按先后。
         for (auto it = b.at("done").rbegin(); it != b.at("done").rend(); ++it) {
@@ -616,32 +620,41 @@ std::string work_report(const std::string& project, std::uint64_t task_floor) {
                 // 一段 ffmpeg 的报错能有几千字。
                 std::string why = text::strip_ws(t.value("error", std::string()));
                 why = text::truncate_utf8(why, 200);
-                bad.push_back(why.empty() ? title : SAYF("%1：%2", title, why));
+                bad.push_back({title, why});
             } else if (state == "cancelled") {
-                stopped.push_back(title);
+                stopped.push_back({title, {}});
             } else {
-                ok.push_back(title);
+                ok.push_back({title, {}});
             }
         }
     }
-    if (ok.empty() && bad.empty() && stopped.empty()) return {};
+    WorkReport out;
+    if (ok.empty() && bad.empty() && stopped.empty()) return out;
+    out.failed = !bad.empty();
 
-    std::string out;
-    const auto section = [&out](const std::string& head,
-                                const std::vector<std::string>& rows) {
+    json sections = json::array();
+    const auto section = [&out, &sections](const char* kind, const std::string& head,
+                                           const std::vector<Row>& rows) {
         if (rows.empty()) return;
         // **一节最多八行。** 一章出片底下是几十件（每镜配音、首帧、片子），
         // 全列出来这一条就是一整屏，而人要看的是没成的那几行。
         constexpr std::size_t kRows = 8;
-        out += "\n" + head;
+        json list = json::array();
+        out.text += "\n" + head;
         for (std::size_t i = 0; i < rows.size() && i < kRows; ++i) {
-            out += "\n· " + rows[i];
+            const Row& r = rows[i];
+            out.text += "\n· " + (r.why.empty() ? r.title : SAYF("%1：%2", r.title, r.why));
+            json one = {{"title", r.title}};
+            if (!r.why.empty()) one["why"] = r.why;
+            list.push_back(std::move(one));
         }
-        if (rows.size() > kRows) out += "\n· …";
+        if (rows.size() > kRows) out.text += "\n· …";
+        sections.push_back({{"kind", kind}, {"rows", list}, {"more", rows.size() > kRows}});
     };
-    section(SAY("没成的："), bad);
-    section(SAY("停下的："), stopped);
-    section(SAY("做完的："), ok);
+    section("failed", SAY("没成的："), bad);
+    section("stopped", SAY("停下的："), stopped);
+    section("done", SAY("做完的："), ok);
+    out.report = {{"sections", sections}};
     return out;
 }
 

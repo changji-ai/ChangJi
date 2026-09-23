@@ -268,8 +268,18 @@ TEST_CASE("跑完了的账：只报这一回派出去的，没成的带着原话
         bad.fail("显存不够");
     }
 
-    const std::string report = agent::work_report(project, floor);
+    const agent::WorkReport rep = agent::work_report(project, floor);
+    const std::string& report = rep.text;
     CAPTURE(report);
+    CHECK(rep.failed);
+    // 拆开的那一份：没成的一节在最前，带着原话。
+    CAPTURE(rep.report.dump(2));
+    REQUIRE(rep.report.at("sections").size() == 2);
+    const json& first = rep.report.at("sections").at(0);
+    CHECK(first.at("kind") == "failed");
+    CHECK(first.at("rows").at(0).at("title") == "出首帧 · 第 1 章 sh003");
+    CHECK(first.at("rows").at(0).at("why") == "显存不够");
+    CHECK(rep.report.at("sections").at(1).at("kind") == "done");
     CHECK(report.find("没成的：") != std::string::npos);
     CHECK(report.find("出首帧 · 第 1 章 sh003：显存不够") != std::string::npos);
     CHECK(report.find("做完的：") != std::string::npos);
@@ -279,7 +289,7 @@ TEST_CASE("跑完了的账：只报这一回派出去的，没成的带着原话
     CHECK(report.find("没成的：") < report.find("做完的："));
 
     // 这一回什么都没派：一个字都不说（「跑完了」后面不挂空的节头）。
-    CHECK(agent::work_report(project, agent::task_floor_now()).empty());
+    CHECK(agent::work_report(project, agent::task_floor_now()).text.empty());
 
     fs::remove_all(dir);
 }

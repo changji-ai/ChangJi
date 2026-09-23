@@ -21,10 +21,13 @@ namespace {
 /// 做成一个出口是有理由的。原来四个 return 里只有两个落了 Turn，于是"模型
 /// 调不通"那条路回了话却一条都没落——界面上停在「在想」，账本上那件活却已经
 /// 结了，而日志里一个字都没有。2026-09-21 真连一次就撞上了。
-std::string say(const LoopHooks& hooks, std::string text) {
+/// 场记开口说一句，这一轮到此为止。`level` 见 `Turn::level`：出错收场的那几句
+/// 要标出来，界面才画得出"这一轮砸了"。
+std::string say(const LoopHooks& hooks, std::string text, std::string level = {}) {
     Turn t;
     t.role = "assistant";
     t.text = text;
+    t.level = std::move(level);
     t.at = now_ms();
     if (hooks.on_turn) hooks.on_turn(t);
     return text;
@@ -188,7 +191,7 @@ std::string run_turn(llm::Client& client, ToolContext& ctx,
                 return say(hooks, util::kCancelled);
             // **不抛。** 模型调不通是这条对话里的一件事，界面上该看得见这句
             // 话；抛出去的话它变成一个红框，而红框里说不清刚才做到哪儿了。
-            return say(hooks, SAYF("大模型那头出错了：%1", e.what()));
+            return say(hooks, SAYF("大模型那头出错了：%1", e.what()), "error");
         }
 
         if (r.tool_calls.empty()) {
@@ -266,6 +269,8 @@ std::string run_turn(llm::Client& client, ToolContext& ctx,
             // 这一次带回来的图、片、改动（见 `ToolContext::media`）。**收走**，
             // 不收的话下一个工具会把这一份也扛上。
             t.media = std::exchange(ctx.media, json::array());
+            // 没做成就标出来（见 `ToolContext::failed`）。
+            t.level = std::exchange(ctx.failed, false) ? "error" : "";
             t.at = now_ms();
             if (hooks.on_turn) hooks.on_turn(t);
 
@@ -280,7 +285,8 @@ std::string run_turn(llm::Client& client, ToolContext& ctx,
     // 转满了还在调工具。**照实说**，别装作做完了。
     return say(hooks, SAYF("我连着查了 %1 轮还没想清楚，先停在这儿。"
                            "你说得再具体一点？",
-                           std::to_string(max_rounds)));
+                           std::to_string(max_rounds)),
+               "warn");
 }
 
 }  // namespace changji::agent
