@@ -1211,3 +1211,30 @@ TEST_CASE("分叉：编号已经有人用了就别盖——盖掉的是一整条
                     http::ApiError);
     CHECK(agent::load_transcript(dir, "c2")[0].text == "别动我");
 }
+
+TEST_CASE("代理：每个工具在界面上都有一句人话，不报英文名") {
+    // 2026-09-23 实撞：派活那几个工具没有标签，任务行上挂着
+    // 「在跑 assets_understand（{}）」；模型调 tasks_read 读到这一行，
+    // 转头就把 `assets_understand` 原样说给了人。
+    //
+    // 加一个工具忘了配这一句的话，这儿先红。
+    const auto specs = agent::tool_specs();
+    REQUIRE(specs.is_array());
+    REQUIRE_FALSE(specs.empty());
+    for (const auto& s : specs) {
+        const std::string name = s.at("function").at("name").get<std::string>();
+        CAPTURE(name);
+        const std::string label = agent::tool_label(name, "{}");
+        CHECK_FALSE(label.empty());
+        CHECK(label.find(name) == std::string::npos);
+        CHECK(label.find("{}") == std::string::npos);
+    }
+}
+
+TEST_CASE("代理：认不出的工具照实报名字，空参数不挂一对花括号") {
+    CHECK(agent::tool_label("some_new_tool", "{}").find("{}") == std::string::npos);
+    CHECK(agent::tool_label("some_new_tool", "").find("some_new_tool") != std::string::npos);
+    // 真有参数的照旧挂上：认不出的工具，参数是唯一能看出它在干什么的东西。
+    CHECK(agent::tool_label("some_new_tool", R"({"a":1})").find(R"("a":1)") !=
+          std::string::npos);
+}

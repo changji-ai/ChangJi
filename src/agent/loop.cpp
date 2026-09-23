@@ -15,29 +15,6 @@ namespace changji::agent {
 
 namespace {
 
-/// 工具名 → 界面上那一行在干什么。
-///
-/// **说清干什么**（CLAUDE.md 第十条）：一行「在跑工具」和二十行一模一样的
-/// 「在跑工具」，那一栏等于没有。
-///
-/// ⚠️ **这一族是给人看的，所以翻。** 同一个文件里 `current_state()` 和
-/// `to_messages()` 那几句是**给模型看的**——一个字都不许动，翻了就是让界面
-/// 语言决定模型收到什么（`util/say.hpp` 头上那张表）。
-std::string tool_label(const std::string& name, const std::string& args) {
-    if (name == "project_state") return SAY("在看这部片子现在什么样");
-    if (name == "list_projects") return SAY("在看有哪些片子");
-    if (name == "create_project") return SAY("在建项目");
-    if (name == "story_read") return SAY("在读故事");
-    if (name == "script_read") return SAY("在读剧本");
-    if (name == "shots_read") return SAY("在读分镜");
-    if (name == "assets_read") return SAY("在看设定");
-    if (name == "outputs_read") return SAY("在看出了哪些片");
-    if (name == "tasks_read") return SAY("在看引擎在忙什么");
-    // 认不出的照实报名字，别编一句好听的。
-    return args.empty() ? SAYF("在跑 %1", name)
-                        : SAYF("在跑 %1（%2）", name, args);
-}
-
 /// 说一句话：**落一条 + 回那句话**。
 ///
 /// 做成一个出口是有理由的。原来四个 return 里只有两个落了 Turn，于是"模型
@@ -53,6 +30,47 @@ std::string say(const LoopHooks& hooks, std::string text) {
 }
 
 }  // namespace
+
+/// 工具名 → 界面上那一行在干什么。
+///
+/// **说清干什么**（CLAUDE.md 第十条）：一行「在跑工具」和二十行一模一样的
+/// 「在跑工具」，那一栏等于没有。
+///
+/// ⚠️ **每一个工具都要有一句。** 2026-09-23 之前这儿只认九个「读」的，派活
+/// 那几个全落到兜底，任务行上挂着「在跑 assets_understand（{}）」——而模型
+/// 调 tasks_read 读到的正是这一行，转头就把 `assets_understand` 原样说给了人。
+/// `test_agent.cpp` 里有一条拿 `tool_specs()` 挨个查的守卫。
+///
+/// ⚠️ **这一族是给人看的，所以翻。** 同一个文件里 `current_state()` 和
+/// `to_messages()` 那几句是**给模型看的**——一个字都不许动，翻了就是让界面
+/// 语言决定模型收到什么（`util/say.hpp` 头上那张表）。
+std::string tool_label(const std::string& name, const std::string& args) {
+    if (name == "project_state") return SAY("在看这部片子现在什么样");
+    if (name == "list_projects") return SAY("在看有哪些片子");
+    if (name == "create_project") return SAY("在建项目");
+    if (name == "story_read") return SAY("在读故事");
+    if (name == "script_read") return SAY("在读剧本");
+    if (name == "shots_read") return SAY("在读分镜");
+    if (name == "assets_read") return SAY("在看设定");
+    if (name == "outputs_read") return SAY("在看出了哪些片");
+    if (name == "tasks_read") return SAY("在看引擎在忙什么");
+    if (name == "shot_edit") return SAY("在改一镜");
+    if (name == "assets_set_reference") return SAY("在换参考图");
+    if (name == "story_outline") return SAY("在写大纲");
+    if (name == "story_write_chapters") return SAY("在写正文");
+    if (name == "assets_understand") return SAY("在读故事、提人物和场景");
+    if (name == "refs_make") return SAY("在画参考图");
+    if (name == "script_write_all") return SAY("在写剧本");
+    if (name == "storyboard_plan_all") return SAY("在拆镜头");
+    if (name == "render_run") return SAY("在出片");
+    if (name == "film_join") return SAY("在接成一部");
+    if (name == "task_cancel") return SAY("在停一件活");
+    if (name == "ask_user") return SAY("在问你");
+    // 认不出的照实报名字，别编一句好听的。参数是空的（`{}`）就不挂那对括号：
+    // 挂上也只是一对花括号，什么都没说。
+    const bool no_args = args.find_first_not_of(" \t\r\n{}") == std::string::npos;
+    return no_args ? SAYF("在跑 %1", name) : SAYF("在跑 %1（%2）", name, args);
+}
 
 /// ⚠️ **这一族是给模型看的，一个字都不许包进 `SAY()`。** 这几句话原样进
 /// 提示词，翻了就是让界面语言决定模型收到什么——而这个项目里「改一句描述」

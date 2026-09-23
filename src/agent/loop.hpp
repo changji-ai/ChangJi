@@ -47,6 +47,10 @@ struct LoopHooks {
         on_tool;
 };
 
+/// 要调这个工具时，界面上（和任务账本上）那一行说什么。**给人看的，翻。**
+/// 每个工具都得有一句，见实现上那段。
+std::string tool_label(const std::string& name, const std::string& args);
+
 /// 「这部片子现在什么样」，几百字。**每轮重算**。
 std::string current_state(const ToolContext& ctx);
 
