@@ -766,6 +766,9 @@ bool spared(const std::string& lit) {
         // `setApplicationDisplayName("changji")`。翻了等于把所有人的设置
         // 搬了家——而且是一声不响地搬。
         "场记",
+        // installer/core/Install.cpp `writeShortcut` 的 `what`：只拼进
+        // `util::log` 那几行（「桌面快捷方式已创建: …」），界面上不画。
+        "桌面快捷方式", "开始菜单快捷方式",
     };
     return kOk.count(lit) > 0;
 }
@@ -799,9 +802,22 @@ std::vector<std::pair<std::size_t, std::size_t>> wrapped_spans(
 }
 
 bool is_log_line(const std::string& l) {
-    for (const char* c : {"qWarning(", "qInfo(", "qDebug(", "qCritical(", "qFatal("})
+    for (const char* c : {"qWarning(", "qInfo(", "qDebug(", "qCritical(", "qFatal(",
+                          // 安装器那一套（desktop/installer/core/Util.h）：写的是
+                          // %TEMP%\changji-setup.log，给查问题的人看，不上界面。
+                          "util::log("})
         if (l.find(c) != std::string::npos) return true;
-    return false;
+    // 同一个文件里（core/Util.cpp）不带命名空间直接调的那种：只认打头的。
+    const std::size_t head = l.find_first_not_of(" \t");
+    return head != std::string::npos && l.compare(head, 4, "log(") == 0;
+}
+
+/// 不是界面、是构建机上跑的命令行小工具：打包工具、打包前跑的回归门禁。
+/// 它们的中文印在构建日志里，给的是做发布的人。
+bool is_build_tool(const fs::path& p) {
+    const std::string g = p.generic_string();
+    return g.find("/installer/mkpkg/") != std::string::npos
+        || g.find("/installer/tools/") != std::string::npos;
 }
 
 }  // namespace
@@ -814,8 +830,11 @@ TEST_CASE("多语言 · 界面上不许有没包起来的中文") {
         if (!e.is_regular_file()) continue;
         const std::string ext = e.path().extension().string();
         if (ext != ".qml" && ext != ".cpp" && ext != ".hpp") continue;
+        if (is_build_tool(e.path())) continue;
         const std::string t = no_comments(slurp(e.path()));
-        const auto spans = wrapped_spans(t, {"qsTr(", "tr("});
+        // `say8(` / `sayw(`：安装器里不走 Qt 的那几句（installer/core/Words.h），
+        // 查的是 words.inc 那张表——表齐不齐由下一条用例管。
+        const auto spans = wrapped_spans(t, {"qsTr(", "tr(", "say8(", "sayw("});
         const auto inside = [&spans](std::size_t p) {
             for (const auto& [a, b] : spans) if (p >= a && p <= b) return true;
             return false;
@@ -858,6 +877,115 @@ TEST_CASE("多语言 · 界面上不许有没包起来的中文") {
         }
     }
     CHECK(bad == 0);
+}
+
+// ---------------------------------------------------------------------------
+// 安装器里不走 Qt 的那几句（installer/core/Words.h + words.inc）
+//
+// stub 和 uninstall.exe 不链 Qt，启动图亮起来的时候 .qm 还没解出来，所以它们
+// 自己带一张表。上一条用例只认「包没包起来」，这一条管**表齐不齐**：少一句
+// 就是那一国人在报错框里看见一句中文，而且不报错。
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// words.inc 里一行一句：`CJ_WORD("原话", "en", "zh_TW", …)`。
+std::vector<std::vector<std::string>> words_rows(const std::string& inc) {
+    std::vector<std::vector<std::string>> rows;
+    std::size_t at = 0;
+    while ((at = inc.find("CJ_WORD(", at)) != std::string::npos) {
+        std::size_t i = at + 8;
+        std::vector<std::string> lits;
+        // 读到这一句自己的右括号为止。字面量整段吃掉，里面的「（%1）」不算。
+        while (i < inc.size() && inc[i] != ')') {
+            if (inc[i] == '"') {
+                std::string lit;
+                for (++i; i < inc.size() && inc[i] != '"'; ++i) {
+                    if (inc[i] == '\\' && i + 1 < inc.size()) { lit += inc[i]; lit += inc[i + 1]; ++i; continue; }
+                    lit += inc[i];
+                }
+                lits.push_back(unescape(lit));
+            }
+            ++i;
+        }
+        rows.push_back(std::move(lits));
+        at = i;
+    }
+    return rows;
+}
+
+int count_of(const std::string& s, const std::string& what) {
+    int n = 0;
+    for (std::size_t at = s.find(what); at != std::string::npos; at = s.find(what, at + 1)) ++n;
+    return n;
+}
+
+}  // namespace
+
+TEST_CASE("多语言 · 安装器不走 Qt 的那张表：用到的每一句都在，十一格都填了") {
+    if (!changji_test::desktop_sources()) return;
+    const fs::path inst = desk_dir() / "installer";
+
+    // 源码里用到的原话。
+    std::set<std::string> used;
+    for (const auto& e : fs::recursive_directory_iterator(inst)) {
+        if (!e.is_regular_file()) continue;
+        const std::string ext = e.path().extension().string();
+        if (ext != ".cpp" && ext != ".h" && ext != ".hpp") continue;
+        harvest(no_comments(slurp(e.path())), used, {"say8(", "sayw("});
+    }
+    CHECK(used.size() > 20);   // 抠空了的话下面全会"通过"
+
+    // 表里的语言顺序就是 i18n.sh 的 LANGS——Words.cpp 那个数组要和它一模一样，
+    // 不然每一格都错位一国（德国人看见的是法语），而且不报错。
+    const auto langs = langs_from_script();
+    {
+        const std::string cpp = slurp(inst / "core" / "Words.cpp");
+        const std::size_t a = cpp.find("kLangs[] = {");
+        REQUIRE(a != std::string::npos);
+        std::vector<std::string> order;
+        for (std::size_t i = a, end = cpp.find("};", a); i < end; ++i) {
+            if (cpp[i] != '"') continue;
+            const std::size_t close = cpp.find('"', i + 1);
+            order.push_back(cpp.substr(i + 1, close - i - 1));
+            i = close;
+        }
+        CHECK(order == langs);
+    }
+
+    std::map<std::string, std::vector<std::string>> table;
+    for (const auto& row : words_rows(no_comments(slurp(inst / "core" / "words.inc")))) {
+        REQUIRE_FALSE(row.empty());
+        const std::string& zh = row.front();
+        CAPTURE(zh);
+        REQUIRE(row.size() == langs.size() + 1);
+        CHECK_MESSAGE(table.emplace(zh, std::vector<std::string>(row.begin() + 1, row.end())).second,
+                      "同一句在表里出现了两次，查的时候只认头一行");
+        for (std::size_t k = 0; k < langs.size(); ++k) {
+            const std::string& tr = row[k + 1];
+            CAPTURE(langs[k]);
+            CAPTURE(tr);
+            CHECK_FALSE(tr.empty());
+            // 占位一个都不能丢：丢了 %1 的那一国，报错框里就没有那个路径。
+            for (const char* ph : {"%1", "%2", "%3"})
+                CHECK(count_of(tr, ph) == count_of(zh, ph));
+            // 除了繁体和日语（本来就写汉字）那两格，译文里不该有汉字——有就是
+            // 把原话粘过去了。
+            if (langs[k] != "zh_TW" && langs[k] != "ja") CHECK_FALSE(has_han(tr));
+        }
+    }
+    CHECK(table.size() > 20);
+
+    for (const std::string& one : used) {
+        if (table.count(one)) continue;
+        CAPTURE(one);
+        FAIL_CHECK("源码里 say8 / sayw 了这一句，words.inc 里没有——别的语言下它显示中文");
+    }
+    for (const auto& [zh, _] : table) {
+        if (used.count(zh)) continue;
+        CAPTURE(zh);
+        FAIL_CHECK("words.inc 里有这一句，源码里已经没人说了");
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1026,7 +1154,9 @@ TEST_CASE("多语言 · 同一件东西不许有两个叫法") {
         std::string when;
     };
     const std::vector<Rule> rules = {
-        {"ja", "カット", {"ハードカット"}, "ショット", ""},
+        // 「ショートカット」是快捷方式（安装器那一页的「创建桌面快捷方式」），
+        // 和镜头无关，同 ハードカット 一样是另一个词。
+        {"ja", "カット", {"ハードカット", "ショートカット"}, "ショット", ""},
         {"ko", "숏", {}, "컷", ""},
         {"ru", "план", {}, "кадр", "镜"},
     };
