@@ -593,7 +593,7 @@ TEST_CASE("下到一半的模型不能算齐——aria2c 会把文件先按最�
         CHECK(http::download_in_progress(model));
     }
     SUBCASE("文件压根不存在也不算在下载") {
-        CHECK_FALSE(http::download_in_progress(tmp / "根本没有这个.gguf"));
+        CHECK_FALSE(http::download_in_progress(tmp / paths::from_utf8("根本没有这个.gguf")));
     }
     fs::remove_all(tmp, ec);
 }
@@ -644,7 +644,7 @@ TEST_CASE("下全了没改名的 .part 启动时收编") {
                 if (f.bytes > 0 && (!pick || f.bytes < pick->bytes)) pick = &f;
     REQUIRE(pick != nullptr);
 
-    const fs::path dir = fs::temp_directory_path() / "changji_收编part";
+    const fs::path dir = fs::temp_directory_path() / paths::from_utf8("changji_收编part");
     fs::remove_all(dir);
     fs::create_directories(dir);
     const fs::path dest = dir / pick->name;
@@ -707,7 +707,7 @@ TEST_CASE("H3 要有 16 GB 卡上挑得动的那几档") {
 TEST_CASE("开机自启：写出去的那个文件按平台是对的形状") {
     // ⚠️ **三套模板各自的语法错了不会报错**，只是开机不起来——而那要重启
     // 一次才发现。所以逐平台钉住形状。
-    const auto body = setup::autostart_file_body("/tmp/有空格 的/changji", 8123);
+    const auto body = setup::autostart_file_body(paths::from_utf8("/tmp/有空格 的/changji"), 8123);
     const auto path = setup::autostart_file_path().generic_string();
     CAPTURE(path);
 
@@ -722,6 +722,11 @@ TEST_CASE("开机自启：写出去的那个文件按平台是对的形状") {
     CHECK(body.find("start \"\"") != std::string::npos);
     // 路径有空格，必须带引号
     CHECK(body.find("\"/tmp/有空格 的/changji\"") != std::string::npos);
+    // **文件是 UTF-8，cmd 按 GBK 读**：不先换代码页，路径里的中文就是乱码，
+    // 开机起不来。换代码页那一行要在路径**之前**（cmd 读一行跑一行）。
+    const auto chcp = body.find("chcp 65001");
+    REQUIRE(chcp != std::string::npos);
+    CHECK(chcp < body.find("有空格"));
 #elif defined(__APPLE__)
     CHECK(path.find("LaunchAgents") != std::string::npos);
     CHECK(path.find("com.changji.server.plist") != std::string::npos);

@@ -53,8 +53,15 @@ std::string autostart_file_body(const fs::path& exe, int port) {
 #if defined(_WIN32)
     // **`start ""` 那个空标题不能省**：`start "C:\path\changji.exe"` 会把
     // 第一个带引号的参数当成窗口标题，于是什么都没起来，而且不报错。
-    return "@echo off\r\nstart \"\" /min " + quoted(exe) + " --port " + p +
-           "\r\n";
+    //
+    // **`chcp 65001` 也不能省**：这份文件是按 UTF-8 写的，而 cmd 按 OEM 代码页
+    // （中文系统上是 GBK）读批处理。路径里带一个中文字（装在中文用户名底下
+    // 就是），cmd 当场「系统找不到指定的路径」，开机起不来而且没人看得见。
+    // 2026-09-23 拿一个中文目录里的 exe 实测过：不加这行找不到，加了跑起来。
+    // 它得在第一行之后、路径之前——cmd 是读一行跑一行的，换完代码页之后的
+    // 那几行才按 UTF-8 解。
+    return "@echo off\r\nchcp 65001 >nul\r\nstart \"\" /min " + quoted(exe) +
+           " --port " + p + "\r\n";
 #elif defined(__APPLE__)
     return
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
