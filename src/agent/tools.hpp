@@ -26,6 +26,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "agent/outcome.hpp"
 #include "config/settings.hpp"
 #include "http/run.hpp"
 #include "llm/client.hpp"
@@ -72,6 +73,21 @@ struct ToolContext {
     /// **做成回调不是直接调 `default_run_deps()`**：造它的那个文件
     /// （`http/run_deps.cpp`）链着 httplib 和体检，进不了测试目标。
     std::function<http::RunDeps()> run_deps;
+
+    /// 这一次调用**带回来的东西**（图、片、改动前后的字），形状见
+    /// `agent/outcome.hpp` 的 `media_item`。
+    ///
+    /// 工具往这儿放，`loop.cpp` 跑完一个工具就整份收走、挂到那条 tool 的
+    /// `Turn::media` 上——**不进工具的回话**：回话是给模型读的，一张图的
+    /// 路径对它没用，而对人来说那张图本身才是"刚才做了什么"。
+    nlohmann::json media = nlohmann::json::array();
+
+    /// 这一轮派出去第一件活**之前**那一刻的盘面。没派过活就是空的。
+    ///
+    /// 派活的几个工具在真派之前拍一张（只拍第一次：一轮里连派两件，比的
+    /// 该是"这一轮之前"）。活干完之后 `http/chat_api.cpp` 拿它比出这一回
+    /// 做出了什么，挂到「跑完了」那一条上。
+    std::shared_ptr<Baseline> baseline;
 };
 
 /// 给模型的工具表（OpenAI 那套 function 格式）。

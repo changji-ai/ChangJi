@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cctype>
 #include <exception>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <string>
@@ -29,6 +30,7 @@
 
 using json = nlohmann::json;
 using ordered = nlohmann::ordered_json;
+namespace fs = std::filesystem;
 
 namespace changji::agent {
 
@@ -371,6 +373,22 @@ std::string need_project(const ToolContext& ctx) {
     return {};
 }
 
+/// 派活之前拍一张盘面（见 `ToolContext::baseline`）。**一轮里只拍第一次**：
+/// 连派两件时，比的该是"这一轮之前"，不是"第二件之前"。
+void mark_baseline(ToolContext& ctx) {
+    if (ctx.baseline || ctx.project.empty()) return;
+    ctx.baseline = std::make_shared<Baseline>(take_baseline(paths::from_utf8(ctx.project)));
+}
+
+/// 往这一次调用上挂附件。null（图不在盘上）和空数组都不挂。
+void attach(ToolContext& ctx, const json& m) {
+    if (m.is_array()) {
+        for (const auto& one : m) ctx.media.push_back(one);
+    } else if (m.is_object()) {
+        ctx.media.push_back(m);
+    }
+}
+
 }  // namespace
 
 std::string dispatch_label(const std::string& tool) {
@@ -587,6 +605,8 @@ std::string run_tool(ToolContext& ctx, const std::string& name,
                 if (!d.empty()) out += SAYF_TO(to, " 「%1」", d);
                 out += "\n";
             }
+            // 读的时候一起摆那几张首帧：人跟着看的是画面，不是那张表。
+            attach(ctx, frames_media(paths::from_utf8(ctx.project), ep));
             return out;
         }
 
@@ -621,6 +641,7 @@ std::string run_tool(ToolContext& ctx, const std::string& name,
             // ——这儿翻的话，`label` 是 `const char*`，接不上。
             list("characters", SAY_NOOP("角色"));
             list("locations", SAY_NOOP("场景"));
+            attach(ctx, references_media(paths::from_utf8(ctx.project)));
             return out.empty() ? SAY_TO(to, "还没有设定。") : out;
         }
 
@@ -664,6 +685,12 @@ std::string run_tool(ToolContext& ctx, const std::string& name,
                                      arg_str(a, "slot").empty() ? "front" : arg_str(a, "slot"),
                                      ctype, data);
             if (const auto e = body_or_error(r, "存参考图"); !e.empty()) return e;
+            // 存进去的那一张，当场摆出来：人拖进来的图和"它认成了谁"对不对，
+            // 看一眼就知道。
+            attach(ctx, reference_media(paths::from_utf8(ctx.project), id,
+                                        kind == "location" ? std::string("empty")
+                                        : arg_str(a, "slot").empty() ? std::string("front")
+                                                                     : arg_str(a, "slot")));
             // ⚠️ **工具的回话里不写 Markdown。** 它会原样摆到对话里当一行
             // 小字（那一行是纯文本，不是 Markdown），`**` 就是两个星号。
             // 底下那条守卫钉着这件事。
@@ -677,6 +704,7 @@ std::string run_tool(ToolContext& ctx, const std::string& name,
             if (const auto e = body_or_error(r, SAY_NOOP("读成片目录"), to); !e.empty()) return e;
             const auto& files = r.body.contains("files") ? r.body.at("files") : r.body;
             if (!files.is_array() || files.empty()) return SAY_TO(to, "还没有出片。");
+            attach(ctx, outputs_media(paths::from_utf8(ctx.project)));
             std::string out =
                 SAYF_TO(to, "出了 %1 个文件：\n", std::to_string(files.size()));
             for (const auto& f : files) {
@@ -729,6 +757,7 @@ std::string run_tool(ToolContext& ctx, const std::string& name,
             name == "storyboard_plan_all") {
             if (const auto s = need_project(ctx); !s.empty()) return s;
             if (!ctx.client) return "这台机器上现在派不了活（没有大模型客户端）。";
+            mark_baseline(ctx);
 
             json body;
             body["project"] = ctx.project;
@@ -768,6 +797,7 @@ std::string run_tool(ToolContext& ctx, const std::string& name,
 
         if (name == "refs_make") {
             if (const auto s = need_project(ctx); !s.empty()) return s;
+            mark_baseline(ctx);
             json body;
             body["project"] = ctx.project;
             if (a.value("overwrite", false)) body["overwrite"] = true;
@@ -796,6 +826,8 @@ std::string run_tool(ToolContext& ctx, const std::string& name,
                 patch["dialogue_texts"] = json::array({line});
             }
             if (patch.empty()) return "没说要改什么。";
+            const fs::path root = paths::from_utf8(ctx.project);
+            const json before = shot_json(root, ep, sid);
 
             json body;
             body["project"] = ctx.project;
@@ -804,6 +836,8 @@ std::string run_tool(ToolContext& ctx, const std::string& name,
             body["patch"] = patch;
             const auto r = http::post_shot(body);
             if (const auto e = body_or_error(r, "改这一镜"); !e.empty()) return e;
+            // 改了哪几栏、从什么改成什么，摆在这条上。
+            attach(ctx, shot_change_media(root, ep, sid, before, shot_json(root, ep, sid)));
             // **说清"还要重出才看得见"**：改了画面相关的字段，引擎会把这一镜
             // 的状态退回未开工（editing.hpp 上那句），但盘上那一版还是旧的。
             // **不写工具名和参数名。** 这句话人也在看，`render_run 填上
@@ -842,6 +876,7 @@ std::string run_tool(ToolContext& ctx, const std::string& name,
             if (a.contains("preview_s") && a.at("preview_s").is_number_integer()) {
                 body["preview_s"] = a.at("preview_s");
             }
+            mark_baseline(ctx);
             const auto r = http::post_run(body, ctx.run_deps());
             if (const auto e = body_or_error(r, "出片"); !e.empty()) return e;
             // **报清楚动了几镜**：人问的是"你要重做多少"，而"开始出片了"
@@ -853,6 +888,7 @@ std::string run_tool(ToolContext& ctx, const std::string& name,
 
         if (name == "film_join") {
             if (const auto s = need_project(ctx); !s.empty()) return s;
+            mark_baseline(ctx);
             json body;
             body["project"] = ctx.project;
             const auto r = http::post_film_join(body);

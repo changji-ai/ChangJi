@@ -3,6 +3,7 @@
 #include "util/tool_slot.hpp"
 
 #include <exception>
+#include <utility>
 
 #include "http/readonly.hpp"
 #include "http/story_api.hpp"
@@ -262,6 +263,9 @@ std::string run_turn(llm::Client& client, ToolContext& ctx,
             // 章的分镜，而人眼前那面墙还停在第 1 章。args 是模型填的，
             // 抠不出来就是空的（`episode_of_args` 不抛，理由在它头上）。
             t.episode = util::episode_of_args(c.arguments);
+            // 这一次带回来的图、片、改动（见 `ToolContext::media`）。**收走**，
+            // 不收的话下一个工具会把这一份也扛上。
+            t.media = std::exchange(ctx.media, json::array());
             t.at = now_ms();
             if (hooks.on_turn) hooks.on_turn(t);
 

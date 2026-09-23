@@ -820,6 +820,7 @@ add_library(changji_core STATIC
     src/agent/transcript.cpp
     src/agent/tools.cpp
     src/agent/loop.cpp
+    src/agent/outcome.cpp
     src/http/chat_api.cpp
     src/http/rail.cpp
     src/http/enums.cpp
@@ -1288,6 +1289,7 @@ if(CHANGJI_BUILD_TESTS)
     add_executable(changji_tests
         tests/unit/main.cpp
         tests/unit/test_agent.cpp
+        tests/unit/test_outcome.cpp
         tests/unit/test_rail.cpp
         tests/unit/test_enums.cpp
         tests/unit/test_half_written.cpp
@@ -1437,6 +1439,7 @@ if(CHANGJI_BUILD_TESTS)
         src/agent/transcript.cpp
         src/agent/tools.cpp
         src/agent/loop.cpp
+        src/agent/outcome.cpp
         src/http/chat_api.cpp
         src/http/rail.cpp
         src/http/enums.cpp

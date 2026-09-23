@@ -218,16 +218,18 @@ ApiResult post_chat_stop(const json& body) {
 void watch_and_react(const std::string& project, const std::string& chat,
                      std::shared_ptr<llm::Client> client,
                      std::function<RunDeps()> run_deps, std::shared_ptr<Session> s,
-                     const std::string& here);
+                     const std::string& here, std::shared_ptr<agent::Baseline> base);
 
-/// 跑一轮对话。`kickoff` 非空时先把它当引擎说的话落一条（做完了、出错了）。
+/// 跑一轮对话。`kickoff` 非空时先把它当引擎说的话落一条（做完了、出错了），
+/// `kickoff_media` 是挂在那一条上的东西（这一回做出来的图、片、字）。
 ///
 /// `here` 是人这会儿把话说在哪一章上，**一路带下去**：活跑完之后那几轮自动
 /// 接续说的还是同一件事，他的眼睛也还落在同一章上。
 void run_round(const std::string& project, const std::string& chat,
                std::shared_ptr<llm::Client> client,
                std::function<RunDeps()> run_deps, std::shared_ptr<Session> s,
-               const std::string& kickoff, const std::string& here) {
+               const std::string& kickoff, const std::string& here,
+               const json& kickoff_media) {
     pipeline::Activity act("llm", project, "", SAY("在想"));
 
     agent::ToolContext ctx;
@@ -252,6 +254,7 @@ void run_round(const std::string& project, const std::string& chat,
         agent::Turn t;
         t.role = "system";
         t.text = kickoff;
+        t.media = kickoff_media;
         t.at = agent::now_ms();
         agent::append_turn(dir_for(project), t, chat);
         push_turn(project, chat, t);
@@ -356,14 +359,15 @@ void run_round(const std::string& project, const std::string& chat,
 
     // 这一轮真派出去了活 → 守着它。
     if (!ctx.dispatched.empty() && s->auto_left.load() > 0) {
-        std::thread(watch_and_react, where, chat, client, run_deps, s, here).detach();
+        std::thread(watch_and_react, where, chat, client, run_deps, s, here,
+                    ctx.baseline).detach();
     }
 }
 
 void watch_and_react(const std::string& project, const std::string& chat,
                      std::shared_ptr<llm::Client> client,
                      std::function<RunDeps()> run_deps, std::shared_ptr<Session> s,
-                     const std::string& here) {
+                     const std::string& here, std::shared_ptr<agent::Baseline> base) {
     using namespace std::chrono_literals;
 
     int quiet = 0;
@@ -406,8 +410,22 @@ void watch_and_react(const std::string& project, const std::string& chat,
     // 翻了它，德语用户的对话里就不会突兀地冒出一句中文；模型这边不挑语言，
     // 而人这会儿多半正用德语跟它说话。和 `stages/` 那些**只**给模型看的
     // 提示词不是一回事。
-    run_round(project, chat, client, run_deps, s,
-              SAY("刚才派出去的活跑完了。"), here);
+    //
+    // ⚠️ **做成了什么、没成什么，跟着这一句一起说**（2026-09-23）。原来只有
+    // 这一句——没成也是它：「旧手机故事」写大纲派了二十多次，每一次做完都是
+    //「跑完了」，而故事一章都没有，人和模型都看不出来。没成的那几件带着原话
+    // 接在后面（`work_report`），做出来的图、片、字挂在这一条上（`changed_media`）。
+    std::string said = SAY("刚才派出去的活跑完了。");
+    json media = json::array();
+    if (base) {
+        said += agent::work_report(project, base->task_floor);
+        try {
+            media = agent::changed_media(paths::from_utf8(project), *base);
+        } catch (const std::exception&) {
+            // 比不出来就不挂：这一条照样要落，模型照样要接着往下做。
+        }
+    }
+    run_round(project, chat, client, run_deps, s, said, here, media);
 }
 
 ApiResult post_chat(const json& body, std::shared_ptr<llm::Client> client,
@@ -459,7 +477,8 @@ ApiResult post_chat(const json& body, std::shared_ptr<llm::Client> client,
     // `auto` 那一档给得多——那正是"放手跑"的意思。
     s->auto_left = body.value("mode", std::string()) == "auto" ? 30 : 4;
 
-    std::thread(run_round, project, chat, client, run_deps, s, std::string(), here)
+    std::thread(run_round, project, chat, client, run_deps, s, std::string(), here,
+                json::array())
         .detach();
 
     return {202, {{"started", true}, {"project", project}}};
