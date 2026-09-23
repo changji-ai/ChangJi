@@ -31,6 +31,7 @@ json to_json(const Turn& t) {
     if (!t.tool_calls.is_null() && !t.tool_calls.empty()) j["tool_calls"] = t.tool_calls;
     if (t.media.is_array() && !t.media.empty()) j["media"] = t.media;
     if (!t.level.empty()) j["level"] = t.level;
+    if (!t.for_model.empty()) j["for_model"] = t.for_model;
     if (t.report.is_object() && !t.report.empty()) j["report"] = t.report;
     return j;
 }
@@ -49,6 +50,7 @@ Turn turn_from_json(const json& j) {
     // 拿到一个它不认得的形状。
     if (j.contains("media") && j.at("media").is_array()) t.media = j.at("media");
     t.level = j.value("level", "");
+    t.for_model = j.value("for_model", "");
     if (j.contains("report") && j.at("report").is_object()) t.report = j.at("report");
     return t;
 }

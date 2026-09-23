@@ -27,6 +27,9 @@
 #include <sstream>
 #include <thread>
 
+#include <zlib.h>
+
+#include "agent/attachments.hpp"
 #include "agent/loop.hpp"
 #include "agent/tools.hpp"
 #include "agent/transcript.hpp"
@@ -38,6 +41,7 @@
 #include "pipeline/task_board.hpp"
 #include "util/cancel_words.hpp"
 #include "util/paths.hpp"
+#include "util/tool_slot.hpp"
 
 using json = nlohmann::json;
 namespace fs = std::filesystem;
@@ -1239,6 +1243,30 @@ TEST_CASE("代理：认不出的工具照实报名字，空参数不挂一对花
           std::string::npos);
 }
 
+TEST_CASE("代理：「每步问我」问的是要做什么、对哪一件") {
+    // 2026-09-23 截到的：卡片上写「场记要做：在改一镜」——进度的说法，不说是
+    // 哪一镜。问人之前要说清楚。
+    const std::string edit = agent::tool_ask(
+        "shot_edit", R"({"shot_id":"ep01_sh004","dialogue":"走。","camera_move":"pan_left"})");
+    CHECK(edit.find("ep01_sh004") != std::string::npos);
+    CHECK(edit.find("在") != 0);
+    // 栏按固定顺序说（运镜在台词前面），不按参数里出现的顺序。
+    CHECK(edit.find("运镜") < edit.find("台词"));
+    CHECK(agent::tool_ask("render_run", R"({"episode_id":"ep02"})").find("ep02") !=
+          std::string::npos);
+    CHECK(agent::tool_ask("story_outline", R"({"chapters":3})").find("3") != std::string::npos);
+    // 参数读不动：只说动作，不抛。
+    CHECK_FALSE(agent::tool_ask("shot_edit", "not json").empty());
+    // 每一个工具都有一句，且不是把名字原样报出来。
+    for (const auto& s : agent::tool_specs()) {
+        const std::string name = s.at("function").at("name").get<std::string>();
+        CAPTURE(name);
+        const std::string ask = agent::tool_ask(name, "{}");
+        CHECK_FALSE(ask.empty());
+        CHECK(ask.find(name) == std::string::npos);
+    }
+}
+
 // ---- 改一镜的台词（2026-09-23） ----
 //
 // 原来这个工具一律发「逐条改字」，条数必须和盘上对上：没台词的镜头加不上，
@@ -1441,4 +1469,291 @@ TEST_CASE("出岔子：转满轮数停下的那句标 warn") {
     REQUIRE_FALSE(landed.empty());
     CHECK(landed.back().role == "assistant");
     CHECK(landed.back().level == "warn");
+}
+
+// ---- 带附件说一句（2026-09-23） ----
+
+namespace {
+
+/// 手搓一个只装一个文件的 zip（Word 稿就是这个）。`deflated` 为真时按 Word
+/// 自己写的那样压（raw deflate），假时原样存。
+std::string make_zip(const std::string& name, const std::string& body, bool deflated) {
+    std::string data = body;
+    std::uint16_t method = 0;
+    if (deflated) {
+        z_stream zs{};
+        REQUIRE(deflateInit2(&zs, Z_BEST_COMPRESSION, Z_DEFLATED, -MAX_WBITS, 8,
+                             Z_DEFAULT_STRATEGY) == Z_OK);
+        std::string out(deflateBound(&zs, static_cast<uLong>(body.size())), '\0');
+        zs.next_in = reinterpret_cast<Bytef*>(const_cast<char*>(body.data()));
+        zs.avail_in = static_cast<uInt>(body.size());
+        zs.next_out = reinterpret_cast<Bytef*>(out.data());
+        zs.avail_out = static_cast<uInt>(out.size());
+        REQUIRE(deflate(&zs, Z_FINISH) == Z_STREAM_END);
+        out.resize(zs.total_out);
+        deflateEnd(&zs);
+        data = out;
+        method = 8;
+    }
+    auto le16 = [](std::string& s, std::uint16_t v) { s += char(v & 0xFF); s += char(v >> 8); };
+    auto le32 = [](std::string& s, std::uint32_t v) {
+        for (int i = 0; i < 4; ++i) s += char((v >> (8 * i)) & 0xFF);
+    };
+    const std::uint32_t crc = crc32(0, reinterpret_cast<const Bytef*>(body.data()),
+                                    static_cast<uInt>(body.size()));
+    std::string z;
+    // 本地头
+    le32(z, 0x04034b50); le16(z, 20); le16(z, 0); le16(z, method); le16(z, 0); le16(z, 0);
+    le32(z, crc); le32(z, static_cast<std::uint32_t>(data.size()));
+    le32(z, static_cast<std::uint32_t>(body.size()));
+    le16(z, static_cast<std::uint16_t>(name.size())); le16(z, 0);
+    z += name;
+    z += data;
+    const auto cd_at = static_cast<std::uint32_t>(z.size());
+    // 中央目录
+    le32(z, 0x02014b50); le16(z, 20); le16(z, 20); le16(z, 0); le16(z, method); le16(z, 0);
+    le16(z, 0); le32(z, crc); le32(z, static_cast<std::uint32_t>(data.size()));
+    le32(z, static_cast<std::uint32_t>(body.size()));
+    le16(z, static_cast<std::uint16_t>(name.size())); le16(z, 0); le16(z, 0); le16(z, 0);
+    le16(z, 0); le32(z, 0); le32(z, 0);
+    z += name;
+    const auto cd_size = static_cast<std::uint32_t>(z.size()) - cd_at;
+    // 尾巴
+    le32(z, 0x06054b50); le16(z, 0); le16(z, 0); le16(z, 1); le16(z, 1);
+    le32(z, cd_size); le32(z, cd_at); le16(z, 0);
+    return z;
+}
+
+const char* kDocXml =
+    "<?xml version=\"1.0\"?><w:document><w:body>"
+    "<w:p><w:r><w:t>第一章 旧手机</w:t></w:r></w:p>"
+    "<w:p><w:r><w:t xml:space=\"preserve\">他说：&quot;你来了&quot; &amp; </w:t></w:r>"
+    "<w:r><w:t>转身走了。</w:t></w:r></w:p>"
+    "</w:body></w:document>";
+
+}  // namespace
+
+TEST_CASE("附件：读得懂的几类按扩展名认，读不懂的回空") {
+    CHECK(agent::attachment_kind("D:/图/董平.PNG") == "image");
+    CHECK(agent::attachment_kind("/tmp/a.mp4") == "video");
+    CHECK(agent::attachment_kind("/tmp/a.wav") == "audio");
+    CHECK(agent::attachment_kind("/tmp/小说.txt") == "text");
+    CHECK(agent::attachment_kind("/tmp/小说.docx") == "doc");
+    CHECK(agent::attachment_kind("/tmp/合同.pdf").empty());
+    CHECK(agent::attachment_kind("/tmp/没有扩展名").empty());
+    // 选文件框用的那张表和认的是同一张。
+    for (const auto& e : agent::attachment_extensions()) {
+        CAPTURE(e);
+        CHECK(!agent::attachment_kind("x." + e).empty());
+    }
+}
+
+TEST_CASE("附件：Word 稿读得出正文（原样存的、压过的都行）") {
+    const auto dir = temp_dir("docx");
+    for (bool deflated : {false, true}) {
+        CAPTURE(deflated);
+        const auto p = dir / paths::from_utf8(deflated ? "压过.docx" : "原样.docx");
+        std::ofstream(p, std::ios::binary) << make_zip("word/document.xml", kDocXml, deflated);
+        const std::string t = agent::docx_text(paths::to_utf8(p));
+        CAPTURE(t);
+        CHECK(t.find("第一章 旧手机\n") != std::string::npos);
+        // 实体换回来、一段里的几截接起来。
+        CHECK(t.find("他说：\"你来了\" & 转身走了。") != std::string::npos);
+    }
+    // 不是 zip 的 docx：读不出来就回空，不抛。
+    std::ofstream(dir / paths::from_utf8("坏的.docx")) << "not a zip";
+    CHECK(agent::docx_text(paths::to_utf8(dir / paths::from_utf8("坏的.docx"))).empty());
+    fs::remove_all(dir);
+}
+
+TEST_CASE("附件：给模型看的那段带正文，给人看的那张卡只带开头") {
+    const auto dir = temp_dir("attach_text");
+    const auto p = dir / paths::from_utf8("大纲.txt");
+    std::string body;
+    for (int i = 0; i < 3000; ++i) body += "字";
+    std::ofstream(p, std::ios::binary) << body;
+    const std::string path = paths::to_utf8(p);
+
+    const std::string m = agent::attachment_for_model(path);
+    CHECK(m.find("大纲.txt") != std::string::npos);
+    CHECK(m.find("3000") != std::string::npos);     // 字数
+    CHECK(text::utf8_len(m) > 3000);                 // 正文整段都在
+
+    const json card = agent::attachment_media(path);
+    CHECK(card.value("kind", std::string()) == "text");
+    CHECK(card.value("path", std::string()) == path);
+    CHECK(text::utf8_len(card.value("text", std::string())) < 1600);
+
+    // 读不到的（引擎在别的机器上）照实说。
+    const std::string gone = agent::attachment_for_model(paths::to_utf8(dir / paths::from_utf8("不在.txt")));
+    CHECK(gone.find("读不到") != std::string::npos);
+    fs::remove_all(dir);
+}
+
+#ifdef _WIN32
+TEST_CASE("附件：GBK 的中文字稿转成 UTF-8 再给模型") {
+    const auto dir = temp_dir("gbk");
+    // 「你好」的 GBK 码。
+    std::ofstream(dir / "gbk.txt", std::ios::binary) << "\xC4\xE3\xBA\xC3";
+    const std::string m = agent::attachment_for_model(paths::to_utf8(dir / "gbk.txt"));
+    CAPTURE(m);
+    CHECK(m.find("你好") != std::string::npos);
+    fs::remove_all(dir);
+}
+#endif
+
+namespace {
+
+/// 等这条对话里出现一条满足 `pred` 的记录。
+template <typename Pred>
+bool wait_turn(const fs::path& dir, Pred pred) {
+    for (int i = 0; i < 300; ++i) {
+        for (const auto& t : agent::load_transcript(dir)) {
+            if (pred(t)) return true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    return false;
+}
+
+}  // namespace
+
+TEST_CASE("附件：跟着一句话进对话，界面上是缩略图，模型读得到那一段") {
+    const auto dir = edit_project("attach_chat");
+    const auto file = dir / paths::from_utf8("要点.txt");
+    std::ofstream(file, std::ios::binary) << "主角叫董平";
+    const std::string project = paths::to_utf8(dir);
+    auto client = std::make_shared<llm::ReplayClient>(std::vector<std::string>{"收到。"});
+
+    const auto r = http::post_chat({{"project", project},
+                                    {"text", ""},
+                                    {"attachments", json::array({paths::to_utf8(file)})}},
+                                   client, [] { return http::RunDeps{}; });
+    CHECK(r.status == 202);   // 只带文件、不说话也行
+    REQUIRE(wait_turn(dir, [](const agent::Turn& t) { return t.role == "assistant"; }));
+
+    const auto turns = agent::load_transcript(dir);
+    REQUIRE(!turns.empty());
+    const agent::Turn& u = turns.front();
+    CHECK(u.role == "user");
+    REQUIRE(u.media.is_array());
+    REQUIRE(u.media.size() == 1);
+    CHECK(u.media[0].value("kind", std::string()) == "text");
+    CHECK(u.for_model.find("主角叫董平") != std::string::npos);
+    // 发给模型的那一串里真有这一段。
+    bool seen = false;
+    for (const auto& m : client->last_messages()) {
+        if (m.role == "user" && m.content.find("主角叫董平") != std::string::npos) seen = true;
+    }
+    CHECK(seen);
+    fs::remove_all(dir);
+}
+
+TEST_CASE("附件：读不懂的文件当场拒") {
+    const auto dir = temp_dir("attach_bad");
+    auto client = std::make_shared<llm::ReplayClient>(std::vector<std::string>{"收到。"});
+    try {
+        http::post_chat({{"project", paths::to_utf8(dir)},
+                         {"text", "看看"},
+                         {"attachments", json::array({"D:/合同.pdf"})}},
+                        client, [] { return http::RunDeps{}; });
+        FAIL("应该拒");
+    } catch (const http::ApiError& e) {
+        CHECK(e.status() == 400);
+    }
+    fs::remove_all(dir);
+}
+
+// ---- 权限那一档（2026-09-23） ----
+
+TEST_CASE("权限：只看的工具都是真工具，会动东西的一个都不在里头") {
+    const std::set<std::string> read_only = {"project_state", "list_projects", "story_read",
+                                             "script_read", "shots_read", "assets_read",
+                                             "outputs_read", "tasks_read", "ask_user"};
+    for (const auto& spec : agent::tool_specs()) {
+        const std::string n = spec.at("function").at("name").get<std::string>();
+        CAPTURE(n);
+        CHECK(util::tool_is_read_only(n) == (read_only.count(n) == 1));
+        if (util::tool_rewrites(n)) CHECK_FALSE(util::tool_is_read_only(n));
+    }
+    // 认不出来的算"会动东西"：宁可多问一句。
+    CHECK_FALSE(util::tool_is_read_only("新来的工具"));
+}
+
+TEST_CASE("权限：只看那一档不动手，照实告诉模型") {
+    const auto dir = edit_project("perm_read");
+    const std::string project = paths::to_utf8(dir);
+    auto client = std::make_shared<llm::ReplayClient>(std::vector<std::string>{
+        call("c1", "shot_edit",
+             R"({"episode_id":"ep01","shot_id":"ep01_sh001","dialogue":"走吧。","speaker":"董平"})"),
+        "好的，眼下只看，没改。",
+    });
+    http::post_chat({{"project", project}, {"text", "给第一镜加一句"}, {"permission", "read"}},
+                    client, [] { return http::RunDeps{}; });
+    REQUIRE(wait_turn(dir, [](const agent::Turn& t) { return t.role == "tool"; }));
+    for (const auto& t : agent::load_transcript(dir)) {
+        if (t.role != "tool") continue;
+        CAPTURE(t.text);
+        CHECK(t.level == "warn");
+        CHECK(t.text.find("只看") != std::string::npos);
+    }
+    CHECK(dialogue_of(dir, "ep01_sh001").empty());   // 盘上一个字没动
+    fs::remove_all(dir);
+}
+
+TEST_CASE("权限：每步问我——允许了才做，不允许就不做") {
+    for (bool allow : {true, false}) {
+        CAPTURE(allow);
+        const auto dir = edit_project(allow ? "perm_ask_yes" : "perm_ask_no");
+        const std::string project = paths::to_utf8(dir);
+        auto client = std::make_shared<llm::ReplayClient>(std::vector<std::string>{
+            call("c1", "shot_edit",
+                 R"({"episode_id":"ep01","shot_id":"ep01_sh001","dialogue":"走吧。","speaker":"董平"})"),
+            "好。",
+        });
+        http::post_chat({{"project", project}, {"text", "给第一镜加一句"}, {"permission", "ask"}},
+                        client, [] { return http::RunDeps{}; });
+
+        // 等它停下来问（问的号从 1 起）。晚到、早到的一下都是 409。
+        bool answered = false;
+        for (int i = 0; i < 300 && !answered; ++i) {
+            try {
+                http::post_chat_permit({{"project", project}, {"id", 1}, {"allow", allow}});
+                answered = true;
+            } catch (const http::ApiError& e) {
+                CHECK(e.status() == 409);
+                std::this_thread::sleep_for(std::chrono::milliseconds(20));
+            }
+        }
+        REQUIRE(answered);
+        REQUIRE(wait_turn(dir, [](const agent::Turn& t) { return t.role == "tool"; }));
+        REQUIRE(wait_turn(dir, [](const agent::Turn& t) {
+            return t.role == "assistant" && !t.text.empty();
+        }));
+
+        const json d = dialogue_of(dir, "ep01_sh001");
+        if (allow) {
+            CHECK(d.size() == 1);
+        } else {
+            CHECK(d.empty());
+            bool said = false;
+            for (const auto& t : agent::load_transcript(dir)) {
+                if (t.role == "tool" && t.text.find("没同意") != std::string::npos) {
+                    said = true;
+                    CHECK(t.level == "warn");
+                    // 说的是哪一镜、哪几栏，不是「在改一镜」。
+                    CHECK(t.text.find("ep01_sh001") != std::string::npos);
+                }
+            }
+            CHECK(said);
+        }
+        // 这一问过去之后再答：409，不能算到下一问头上。
+        try {
+            http::post_chat_permit({{"project", project}, {"id", 1}, {"allow", true}});
+            FAIL("应该 409");
+        } catch (const http::ApiError& e) {
+            CHECK(e.status() == 409);
+        }
+        fs::remove_all(dir);
+    }
 }

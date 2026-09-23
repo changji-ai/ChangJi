@@ -821,6 +821,7 @@ add_library(changji_core STATIC
     src/agent/tools.cpp
     src/agent/loop.cpp
     src/agent/outcome.cpp
+    src/agent/attachments.cpp
     src/http/chat_api.cpp
     src/http/rail.cpp
     src/http/enums.cpp
@@ -1440,6 +1441,7 @@ if(CHANGJI_BUILD_TESTS)
         src/agent/tools.cpp
         src/agent/loop.cpp
         src/agent/outcome.cpp
+        src/agent/attachments.cpp
         src/http/chat_api.cpp
         src/http/rail.cpp
         src/http/enums.cpp
@@ -1569,7 +1571,9 @@ if(CHANGJI_BUILD_TESTS)
     add_dependencies(changji_tests changji_prompts)
     target_link_libraries(changji_tests PRIVATE
         nlohmann_json::nlohmann_json
-        tomlplusplus::tomlplusplus)
+        tomlplusplus::tomlplusplus
+        # 附件那一层读 Word 稿（agent/attachments.cpp）要 inflate。
+        changji_z)
     # jobs.cpp 起线程。MinGW/Linux 上不显式链 pthread 会在运行期崩，
     # 而不是链接期报错——症状是 std::thread 构造时抛 system_error。
     if(NOT MSVC)

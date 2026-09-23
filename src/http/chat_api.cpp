@@ -7,6 +7,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <filesystem>
 #include <map>
 #include <mutex>
@@ -14,6 +15,7 @@
 #include <utility>
 #include <vector>
 
+#include "agent/attachments.hpp"
 #include "agent/loop.hpp"
 #include "agent/tools.hpp"
 #include "agent/transcript.hpp"
@@ -60,6 +62,22 @@ struct Session {
     ///
     /// 人一说话就把它填满：人在旁边盯着的时候，接着往下做是他要的。
     std::atomic<int> auto_left{0};
+
+    /// **权限那一档**：`auto`（放手做）/ `ask`（动东西之前先问）/ `read`（只看）。
+    ///
+    /// 跟着人说的那一句一起来（桌面端输入框右下角那颗），**记在这儿**是因为活
+    /// 干完之后自动接续的那几轮（`watch_and_react`）也得照这一档办——那会儿
+    /// 没有人说话，拿不到新的一档。
+    std::mutex mu;
+    std::string permission = "auto";
+
+    /// 「每步问我」那一档：正在等人点头的那一问。0 = 没在等。
+    std::uint64_t asking = 0;
+    /// 人点了没有、点的是什么。
+    bool answered = false;
+    bool allowed = false;
+    std::condition_variable answer_cv;
+    std::uint64_t next_ask = 1;
 };
 
 std::mutex g_mu;
@@ -209,6 +227,25 @@ ApiResult post_chat_stop(const json& body) {
     return {200, {{"ok", true}}};
 }
 
+ApiResult post_chat_permit(const json& body) {
+    const std::string project = body.value("project", std::string());
+    const std::uint64_t id = body.value("id", std::uint64_t{0});
+    const bool allow = body.value("allow", false);
+    auto s = session_for(project);
+    {
+        std::lock_guard<std::mutex> lk(s->mu);
+        // **只认正在等的那一问。** 晚到的一下（上一问早过去了）照实回 409，
+        // 别把它算到下一问头上——那等于替人允许了一件他没看见的事。
+        if (id == 0 || s->asking != id) {
+            throw ApiError(409, SAY("这一问已经过去了"));
+        }
+        s->answered = true;
+        s->allowed = allow;
+    }
+    s->answer_cv.notify_all();
+    return {200, {{"ok", true}}};
+}
+
 /// 守着刚派出去的那几件活，干完了往对话里追一条，再让代理跑一轮。
 ///
 /// **判据挂在账本上**（`pipeline::running_work()`），不挂在"我派了什么"上：
@@ -219,6 +256,68 @@ void watch_and_react(const std::string& project, const std::string& chat,
                      std::shared_ptr<llm::Client> client,
                      std::function<RunDeps()> run_deps, std::shared_ptr<Session> s,
                      const std::string& here, std::shared_ptr<agent::Baseline> base);
+
+/// 这一下让不让做（`LoopHooks::on_permit`）。回空串放行，回一句话就是不让。
+///
+/// 三档（`Session::permission`）：
+///
+///   · `auto`  都放行。**默认这一档**：人说"做吧"的时候要的就是它做。
+///   · `read`  只放「只看」的那几个（`util::tool_is_read_only`）。别的回一句
+///             话告诉模型眼下是只看——它会照实跟人说，而不是假装做了。
+///   · `ask`   「只看」的放行；别的**停下来问人**：推一条 `permit` 给界面，
+///             在这儿等人点「允许」或「不」（`post_chat_permit`）。人按了停
+///             就算不允许，这一轮照常收尾。
+///
+/// ⚠️ **等的时候这一轮还算"在跑"**（`busy` 还是真的）。不这样的话人在问的
+/// 那几秒里又说一句，两轮并着跑——那正是 409 那条规矩要挡的事。
+std::string permit(const std::string& project, const std::string& chat,
+                   const std::shared_ptr<Session>& s, const std::string& name,
+                   const std::string& args) {
+    if (util::tool_is_read_only(name)) return {};
+    std::string mode;
+    {
+        std::lock_guard<std::mutex> lk(s->mu);
+        mode = s->permission;
+    }
+    const std::string what = agent::tool_ask(name, args);
+    if (mode == "read") {
+        return SAYF("眼下是「只看」：不改东西、不派活。这一步（%1）没做——"
+                    "要做的话，把输入框右下角的权限换成「自动」或「每步问我」。",
+                    what);
+    }
+    if (mode != "ask") return {};
+
+    std::uint64_t id = 0;
+    {
+        std::lock_guard<std::mutex> lk(s->mu);
+        id = s->next_ask++;
+        s->asking = id;
+        s->answered = false;
+        s->allowed = false;
+    }
+    push({{"event", "permit"},
+          {"project", project},
+          {"chat", chat},
+          {"id", id},
+          {"what", what},
+          {"tool", name},
+          {"args", args}});
+
+    bool allowed = false;
+    {
+        std::unique_lock<std::mutex> lk(s->mu);
+        // 醒一醒看看人是不是按了停：停是另一个令牌，不走这个条件变量。
+        while (!s->answered) {
+            s->answer_cv.wait_for(lk, std::chrono::milliseconds(200));
+            if (s->tok && s->tok->cancelled()) break;
+        }
+        allowed = s->answered && s->allowed;
+        s->asking = 0;
+    }
+    push({{"event", "permit_done"}, {"project", project}, {"chat", chat}, {"id", id}});
+    if (allowed) return {};
+    return SAYF("人没同意这一步（%1），没做。", what);
+}
 
 /// 跑一轮对话。`kickoff` 的正文非空时先把它当引擎说的话落一条（做完了、
 /// 出错了），带着它身上的东西（这一回做出来的图、片、字，几件成几件没成）。
@@ -287,6 +386,10 @@ void run_round(const std::string& project, const std::string& chat,
         }
         agent::append_turn(dir_for(where), t, chat);
         push_turn(where, chat, t);
+    };
+    // 权限那一关。**对话挪了家（建出项目）之后按新家推**，界面按项目认消息。
+    hooks.on_permit = [&](const std::string& name, const std::string& args) {
+        return permit(moved_to.empty() ? project : moved_to, chat, s, name, args);
     };
     hooks.on_delta = [&](const std::string& piece) {
         // **第一个字出来就改口。** 在这之前那一行写着「在想」，而人已经看见
@@ -433,7 +536,28 @@ void watch_and_react(const std::string& project, const std::string& chat,
 ApiResult post_chat(const json& body, std::shared_ptr<llm::Client> client,
                     std::function<RunDeps()> run_deps) {
     const std::string text = body.value("text", std::string());
-    if (text.empty()) throw ApiError(400, SAY("没有要说的话"));
+
+    // 带进来的文件（`agent/attachments.hpp`）：一件一个路径。**读不懂的当场拒**，
+    // 别等模型拿到一个它什么都做不了的路径再来问。
+    std::vector<std::string> files;
+    if (body.contains("attachments") && body.at("attachments").is_array()) {
+        for (const auto& a : body.at("attachments")) {
+            const std::string p = a.is_string() ? a.get<std::string>()
+                                : a.is_object() ? a.value("path", std::string())
+                                                : std::string();
+            if (p.empty()) continue;
+            if (agent::attachment_kind(p).empty()) {
+                throw ApiError(400, SAYF("这种文件还读不了：%1", p));
+            }
+            files.push_back(p);
+        }
+    }
+    // **只带文件不说话也行**：人丢一份稿子进来，这就是那一句。
+    if (text.empty() && files.empty()) throw ApiError(400, SAY("没有要说的话"));
+
+    // 权限那一档。认不出的按默认（自动）——别因为一个拼错的词把人挡在门外。
+    std::string permission = body.value("permission", std::string("auto"));
+    if (permission != "ask" && permission != "read") permission = "auto";
 
     const std::string project = body.value("project", std::string());
     // 说给哪一条对话听。**空的就是一直以来那一条**（`<项目目录>/chat.jsonl`）。
@@ -468,11 +592,21 @@ ApiResult post_chat(const json& body, std::shared_ptr<llm::Client> client,
     agent::Turn user;
     user.role = "user";
     user.text = text;
+    // 界面上那几张缩略图，和模型读的那一段（见 `Turn::for_model`）。
+    for (const auto& p : files) {
+        user.media.push_back(agent::attachment_media(p));
+        if (!user.for_model.empty()) user.for_model += "\n\n";
+        user.for_model += agent::attachment_for_model(p);
+    }
     user.at = agent::now_ms();
     agent::append_turn(dir_for(project), user, chat);
     push_turn(project, chat, user);
 
     s->tok = std::make_shared<pipeline::CancelToken>();
+    {
+        std::lock_guard<std::mutex> lk(s->mu);
+        s->permission = permission;
+    }
 
     // **人一说话就把预算填满。** 人在旁边盯着的时候，活干完了接着往下做
     // 是他要的；而他走开之后那几轮自动接续用完就停下来等。

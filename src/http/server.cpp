@@ -2800,6 +2800,12 @@ void run(const config::Settings& settings, const Options& opts) {
         return json_response(r.body, r.status);
     });
 
+    // 「每步问我」那一档：人点了允许 / 不（见 chat_api.hpp）。
+    CROW_ROUTE(app, "/api/chat/permit").methods("POST"_method)([](const crow::request& req) {
+        auto r = guard([&] { return post_chat_permit(parse_body(req.body)); });
+        return json_response(r.body, r.status);
+    });
+
     // 从某一条回话上分出一条新对话（见 chat_api.hpp）。
     CROW_ROUTE(app, "/api/chat/fork").methods("POST"_method)([](const crow::request& req) {
         auto r = guard([&] { return post_chat_fork(parse_body(req.body)); });

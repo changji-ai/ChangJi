@@ -45,11 +45,23 @@ struct LoopHooks {
     std::function<void(const std::string& what, const std::string& name,
                        const std::string& args)>
         on_tool;
+    /// **这一下让不让做。** 跑一个工具之前问一声：回空串就是放行；回一句话就
+    /// 是不让——那句话当成这个工具的回话交给模型（它据此改主意或者去问人），
+    /// 工具本身不跑。
+    ///
+    /// 不挂就是全放行（用例、老路径）。权限那一档的判法在 `http/chat_api.cpp`。
+    std::function<std::string(const std::string& name, const std::string& args)>
+        on_permit;
 };
 
 /// 要调这个工具时，界面上（和任务账本上）那一行说什么。**给人看的，翻。**
 /// 每个工具都得有一句，见实现上那段。
 std::string tool_label(const std::string& name, const std::string& args);
+
+/// 「每步问我」那一问里说的：要做什么、对哪一件（「改 ep01_sh004：运镜、台词」）。
+/// `tool_label` 是进度的说法（「在改一镜」），摆进「场记要做：」读着别扭，也不说
+/// 是哪一件。**给人看的，翻。**
+std::string tool_ask(const std::string& name, const std::string& args);
 
 /// 「这部片子现在什么样」，几百字。**每轮重算**。
 std::string current_state(const ToolContext& ctx);

@@ -32,7 +32,11 @@
 
 namespace changji::http {
 
-/// POST /api/chat —— body: `{project?, text}`
+/// POST /api/chat —— body: `{project?, text, attachments?, permission?}`
+///
+/// `attachments`：带进来的文件（路径数组，见 `agent/attachments.hpp`）；有附件
+/// 时 `text` 可以是空的。`permission`：`auto`（默认）/ `ask` / `read`，见
+/// `http/chat_api.cpp` 里 `permit`。
 ///
 /// **`project` 可以是空的**：第一句话之前还没有项目，代理自己会去建。那之前
 /// 这条对话落在用户数据目录，建出来之后整条搬进项目目录。
@@ -74,6 +78,13 @@ ApiResult delete_chat(const std::string& project, const std::string& chat);
 
 /// POST /api/chat/stop —— body: `{project?}`。没在跑就什么都不做，照样 200。
 ApiResult post_chat_stop(const nlohmann::json& body);
+
+/// POST /api/chat/permit —— body: `{project, id, allow}`。
+///
+/// 「每步问我」那一档：场记要动东西之前推一条 `{event: "permit", id, what}`，
+/// 然后停在那儿等；人点「允许」或「不」走这儿。`id` 不是正在等的那一问就回
+/// 409——晚到的一下不能算到下一问头上。
+ApiResult post_chat_permit(const nlohmann::json& body);
 
 /// POST /api/chat/fork —— 从某一条回话上**分出一条新对话**。
 ///

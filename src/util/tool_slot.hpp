@@ -83,6 +83,21 @@ inline bool tool_rewrites(std::string_view name) {
            name == "render_run" || name == "film_join";
 }
 
+/// 这个工具**只看不动**：不改盘上任何东西、不派活、不停活。
+///
+/// 权限那一档（桌面端输入框右下角，2026-09-23）靠它分：「只看」只放这几个
+/// 过去；「每步问我」这几个不问，别的每一个都先停下来等人点头。
+///
+/// ⚠️ **认不出来的算"会动东西"**——新加的工具没来得及登记时，宁可多问一句，
+/// 也别在「只看」那一档里悄悄把它放过去。`test_tool_slot.cpp` 钉着每一个工具
+/// 都被分过类。
+inline bool tool_is_read_only(std::string_view name) {
+    return name == "project_state" || name == "list_projects" ||
+           name == "story_read" || name == "script_read" || name == "shots_read" ||
+           name == "assets_read" || name == "outputs_read" || name == "tasks_read" ||
+           name == "ask_user";
+}
+
 /// 这个工具**本来就没有可看的产出物**（不是"忘了分类"）。
 ///
 /// 和上面那张表分开写，是为了让守卫分得清"没有"和"漏了"——合成一个函数的话

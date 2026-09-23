@@ -76,6 +76,74 @@ std::string tool_label(const std::string& name, const std::string& args) {
     return no_args ? SAYF("在跑 %1", name) : SAYF("在跑 %1（%2）", name, args);
 }
 
+/// 「每步问我」那一问里说的：**要做什么、对哪一件**。
+///
+/// 不拿 `tool_label` 凑：那一族是进度的说法（「在改一镜」），摆进「场记要做：」
+/// 就成了「场记要做：在改一镜」——读着别扭，而且不说是哪一镜、改哪几栏，人
+/// 点「允许」时等于闭着眼。2026-09-23 实测截到的就是这一句。
+///
+/// 细节只从参数里取**认得出的那几个键**；参数读不动就只说动作，不瞎猜。
+/// 不在这张表里的（只看的那几个根本不会问）回落到 `tool_label`。
+std::string tool_ask(const std::string& name, const std::string& args) {
+    json a = json::object();
+    try {
+        a = json::parse(args);
+        if (!a.is_object()) a = json::object();
+    } catch (...) {
+    }
+    const auto str = [&](const char* k) {
+        const auto it = a.find(k);
+        return it != a.end() && it->is_string() ? it->get<std::string>() : std::string();
+    };
+    const auto with = [](std::string head, const std::string& detail) {
+        // 用「 · 」接，不用冒号：这一句要摆进「场记要做：」后面，再来一个
+        // 冒号就成了「场记要做：改 ep01_sh004：运镜」（2026-09-23 截到的）。
+        return detail.empty() ? head : SAYF("%1 · %2", head, detail);
+    };
+
+    if (name == "shot_edit") {
+        // 改的是哪几栏。**按这张表的顺序说**，不按参数里出现的顺序——同一种
+        // 改法每次说得一样，人扫一眼就认得。
+        static const std::pair<const char*, const char*> kFields[] = {
+            {"duration_s", SAY_NOOP("时长")},       {"shot_size", SAY_NOOP("景别")},
+            {"camera_move", SAY_NOOP("运镜")},      {"dialogue", SAY_NOOP("台词")},
+            {"speaker", SAY_NOOP("说话的人")},      {"first_frame_prompt", SAY_NOOP("首帧提示词")},
+        };
+        std::string fields;
+        for (const auto& [key, word] : kFields) {
+            if (!a.contains(key)) continue;
+            if (!fields.empty()) fields += SAY("、");
+            fields += SAY(word);
+        }
+        const std::string shot = str("shot_id");
+        const std::string head = shot.empty() ? SAY("改一镜") : SAYF("改 %1", shot);
+        return with(head, fields);
+    }
+    if (name == "create_project") return with(SAY("建一部新片子"), str("name"));
+    if (name == "assets_set_reference") {
+        const std::string id = str("id");
+        return id.empty() ? SAY("换参考图") : SAYF("换 %1 的参考图", id);
+    }
+    if (name == "story_outline") {
+        const auto it = a.find("chapters");
+        if (it != a.end() && it->is_number_integer())
+            return SAYF("写大纲（%1 章）", std::to_string(it->get<int>()));
+        return SAY("写大纲");
+    }
+    if (name == "story_write_chapters") return SAY("写正文");
+    if (name == "assets_understand") return SAY("读故事、提人物和场景");
+    if (name == "refs_make") return SAY("画参考图");
+    if (name == "script_write_all") return SAY("写各章剧本");
+    if (name == "storyboard_plan_all") return SAY("拆镜头");
+    if (name == "render_run") {
+        const bool frames = a.value("only_frames", false);
+        return with(frames ? SAY("画首帧") : SAY("做成片"), str("episode_id"));
+    }
+    if (name == "film_join") return SAY("把出了片的章接成一部");
+    if (name == "task_cancel") return SAY("停一件活");
+    return tool_label(name, args);
+}
+
 /// ⚠️ **这一族是给模型看的，一个字都不许包进 `SAY()`。** 这几句话原样进
 /// 提示词，翻了就是让界面语言决定模型收到什么——而这个项目里「改一句描述」
 /// 和「改约束本身」的区别是有血的教训的（CLAUDE.md 第二条、第五条）。
@@ -132,6 +200,10 @@ std::vector<llm::Message> build_messages(const std::string& state,
         if (t.role == "user") {
             m.role = "user";
             m.content = t.text;
+            // 附件那一段（见 `Turn::for_model`）：界面上不摆，模型要读。
+            if (!t.for_model.empty()) {
+                m.content += m.content.empty() ? t.for_model : "\n\n" + t.for_model;
+            }
         } else if (t.role == "assistant") {
             m.role = "assistant";
             m.content = t.text;
@@ -222,6 +294,29 @@ std::string run_turn(llm::Client& client, ToolContext& ctx,
             if (tok.cancelled()) return say(hooks, util::kCancelled);
             if (hooks.on_tool) {
                 hooks.on_tool(tool_label(c.name, c.arguments), c.name, c.arguments);
+            }
+
+            // 权限那一关（见 `LoopHooks::on_permit`）。不让做就不跑，那句话
+            // 当回话交给模型；这一条标成 `warn`——没做成，但不是出错。
+            const std::string refused =
+                hooks.on_permit ? hooks.on_permit(c.name, c.arguments) : std::string();
+            if (tok.cancelled()) return say(hooks, util::kCancelled);
+            if (!refused.empty()) {
+                Turn t;
+                t.role = "tool";
+                t.tool_name = c.name;
+                t.tool_id = c.id;
+                t.text = refused;
+                t.level = "warn";
+                t.episode = util::episode_of_args(c.arguments);
+                t.at = now_ms();
+                if (hooks.on_turn) hooks.on_turn(t);
+                llm::Message m;
+                m.role = "tool";
+                m.tool_call_id = c.id;
+                m.content = refused;
+                msgs.push_back(std::move(m));
+                continue;
             }
 
             std::string out = run_tool(ctx, c.name, c.arguments);
