@@ -809,18 +809,27 @@ if(_agent_dir)
     set(CHANGJI_AGENT_OUTER 1)
     set(CHANGJI_AGENT_DIR "${_agent_dir}")
     get_filename_component(CHANGJI_AGENT_INCLUDE "${_agent_dir}" DIRECTORY)
-    set(CHANGJI_AGENT_SOURCES
-        "${_agent_dir}/transcript.cpp" "${_agent_dir}/tools.cpp" "${_agent_dir}/loop.cpp"
-        "${_agent_dir}/outcome.cpp" "${_agent_dir}/attachments.cpp" "${_agent_dir}/chat_api.cpp")
-    set(CHANGJI_AGENT_TESTS
-        "${_agent_dir}/tests/test_agent.cpp" "${_agent_dir}/tests/test_outcome.cpp")
+    # **外层 agent/ 下有什么 .cpp 就编什么**（2026-09-23 加记忆时改的）：代理在
+    # 外层长新文件（memory.cpp、以后的 skill、MCP）不该每次都回这个对外仓库改
+    # 一行清单。CONFIGURE_DEPENDS：新加一个文件，下次构建自己重新配置，不用
+    # 记得手跑 cmake。
+    file(GLOB CHANGJI_AGENT_SOURCES CONFIGURE_DEPENDS "${_agent_dir}/*.cpp")
+    file(GLOB CHANGJI_AGENT_TESTS CONFIGURE_DEPENDS "${_agent_dir}/tests/*.cpp")
+    # 外层这一版还没有记忆那三条接口的实现（拿新引擎编一版更早的外层时）：补上
+    # 空壳，不然 server.cpp 链不上——CI 按分支配对，两边不一定同时有它。
+    if(NOT EXISTS "${_agent_dir}/memory_api.cpp")
+        list(APPEND CHANGJI_AGENT_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/http/memory_api_absent.cpp")
+    endif()
 else()
     set(CHANGJI_AGENT_OUTER 0)
     set(CHANGJI_AGENT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/agent")
     set(CHANGJI_AGENT_INCLUDE "")
+    # memory_api_absent.cpp：记忆那三条接口的空壳（记忆是外层代理的东西，
+    # 见 http/memory_api.hpp）。带着外层编时实现在 agent/memory_api.cpp。
     set(CHANGJI_AGENT_SOURCES
         src/agent/transcript.cpp src/agent/tools.cpp src/agent/loop.cpp
-        src/agent/outcome.cpp src/agent/attachments.cpp src/http/chat_api.cpp)
+        src/agent/outcome.cpp src/agent/attachments.cpp src/http/chat_api.cpp
+        src/http/memory_api_absent.cpp)
     set(CHANGJI_AGENT_TESTS tests/unit/test_agent.cpp tests/unit/test_outcome.cpp)
     set(_agent_from "引擎仓库自带的旧版——外层没有 agent/")
     if(DEFINED ENV{GITHUB_ACTIONS})

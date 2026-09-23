@@ -99,7 +99,10 @@ inline bool tool_is_read_only(std::string_view name) {
            // 上网那三个（`stages/web_tools.hpp`）：只读网上的，盘上一个字不动。
            // 不算进这儿的话，「只看」那一档连热榜都看不了，「每步问我」搜一次
            // 问一次。
-           name == "hot_topics" || name == "web_search" || name == "fetch_page";
+           name == "hot_topics" || name == "web_search" || name == "fetch_page" ||
+           // 翻记忆：只读那几个文件。记、忘、挪**会动盘**，不在这儿——「只看」
+           // 那一档不让记，「每步问我」记之前问一声（人看得见要记下什么）。
+           name == "memory_read";
 }
 
 /// 这个工具**本来就没有可看的产出物**（不是"忘了分类"）。
@@ -111,7 +114,10 @@ inline bool tool_shows_nothing(std::string_view name) {
            name == "create_project" || name == "tasks_read" ||
            name == "task_cancel" || name == "ask_user" ||
            // 上网查的东西在对话里（那一行工具回话），不在哪一格面板上。
-           name == "hot_topics" || name == "web_search" || name == "fetch_page";
+           name == "hot_topics" || name == "web_search" || name == "fetch_page" ||
+           // 记忆也是：记了什么在那一行回话上，全部的在设置里那一页。
+           name == "memory_write" || name == "memory_read" || name == "memory_forget" ||
+           name == "memory_move";
 }
 
 }  // namespace changji::util

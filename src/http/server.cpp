@@ -28,6 +28,7 @@
 #include "util/text.hpp"
 #include "http/batch.hpp"
 #include "http/chat_api.hpp"
+#include "http/memory_api.hpp"
 #include "http/enums.hpp"
 #include "http/rail.hpp"
 #include "http/config_api.hpp"
@@ -2792,6 +2793,21 @@ void run(const config::Settings& settings, const Options& opts) {
         const char* p = req.url_params.get("path");
         const char* c = req.url_params.get("chat");
         auto r = guard([&] { return delete_chat(p ? p : "", c ? c : ""); });
+        return json_response(r.body, r.status);
+    });
+
+    // ---- 记忆：设置里「记忆」那一类（http/memory_api.hpp） ----
+    CROW_ROUTE(app, "/api/memory")([](const crow::request& req) {
+        const char* p = req.url_params.get("path");
+        auto r = guard([&] { return get_memory(p ? p : ""); });
+        return json_response(r.body, r.status);
+    });
+    CROW_ROUTE(app, "/api/memory/forget").methods("POST"_method)([](const crow::request& req) {
+        auto r = guard([&] { return post_memory_forget(parse_body(req.body)); });
+        return json_response(r.body, r.status);
+    });
+    CROW_ROUTE(app, "/api/memory/move").methods("POST"_method)([](const crow::request& req) {
+        auto r = guard([&] { return post_memory_move(parse_body(req.body)); });
         return json_response(r.body, r.status);
     });
 
