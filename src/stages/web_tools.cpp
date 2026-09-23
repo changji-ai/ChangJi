@@ -6,6 +6,7 @@
 #include <regex>
 #include <set>
 
+#include "util/say.hpp"
 #include "util/text.hpp"
 
 namespace changji::stages {
@@ -255,6 +256,20 @@ std::string run_web_tool(const WebTools& web, const std::string& name,
     if (name == "web_search") return tool_web_search(web, args.value("query", std::string()));
     if (name == "fetch_page") return tool_fetch_page(web, args.value("url", std::string()));
     return "没有叫 " + name + " 的工具。有的是 hot_topics、web_search、fetch_page。";
+}
+
+std::string web_tool_label(const std::string& name, const std::string& arguments_json) {
+    if (name == "hot_topics") return SAY("在看网上什么热");
+    if (name == "fetch_page") return SAY("在读网页");
+    if (name != "web_search") return {};
+    // 搜的是什么要说出来：一轮里连搜三次，三行都是「在网上搜」等于没说。
+    // 参数读不动就只说动作，不瞎猜（同 `agent::tool_ask`）。
+    std::string q;
+    const json a = json::parse(arguments_json, nullptr, /*allow_exceptions=*/false);
+    if (a.is_object() && a.contains("query") && a.at("query").is_string()) {
+        q = text::strip_ws(a.at("query").get<std::string>());
+    }
+    return q.empty() ? SAY("在网上搜") : SAYF("在网上搜「%1」", q);
 }
 
 std::vector<HotItem> parse_baidu_hot(const std::string& body) {

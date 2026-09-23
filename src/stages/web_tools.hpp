@@ -45,6 +45,13 @@ nlohmann::ordered_json web_tool_specs();
 std::string run_web_tool(const WebTools& web, const std::string& name,
                          const std::string& arguments_json);
 
+/// 场记调这三个工具时，界面上（和任务账本上）那一行说什么：「在看网上什么热」
+/// 「在网上搜「…」」「在读网页」。**给人看的，翻。** 不是这三个就回空串。
+///
+/// 摆在这儿、不摆在代理那头：代理的源码在外层产品仓库里（2026-09-23 起），
+/// 而多语言那张表在这个仓库；句子和它的工具放在一起，两边才对得上。
+std::string web_tool_label(const std::string& name, const std::string& arguments_json);
+
 // ---- 可测的纯解析 ----
 std::vector<HotItem> parse_baidu_hot(const std::string& body);
 std::vector<HotItem> parse_toutiao_hot(const std::string& body);

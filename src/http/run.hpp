@@ -16,6 +16,7 @@
 #include "infer/worker_server.hpp"
 #include "config/settings.hpp"
 #include "http/readonly.hpp"
+#include "llm/client.hpp"   // RunDeps::web_get
 #include "models/hardware.hpp"
 #include "models/project.hpp"
 #include "pipeline/episode.hpp"
@@ -44,6 +45,14 @@ struct RunDeps {
     /// 模型但机器表里有能干的，算能开工）。是回调不是直接调 doctor，
     /// 因为体检那一层链 httplib，进不了测试目标；测试里留空 = 不拦。
     std::function<std::string()> blocked;
+    /// 上网那一层（热榜、搜索、读网页，`stages/web_tools.hpp`）。场记要「去网上
+    /// 找热门」时用它（2026-09-23 之前场记手上一个上网的工具都没有，只能凭
+    /// 记忆编一个"热门"）。
+    ///
+    /// 放在这一包里，理由同 `blocked`：真的那个（`llm::default_http_get()`）
+    /// 链 httplib，进不了测试目标。**空 = 这台上不了网**，工具照实说，不假装
+    /// 查过。
+    llm::HttpGet web_get;
 };
 
 /// 默认的那套：配置从 runtime 取，后端是 sd.cpp。

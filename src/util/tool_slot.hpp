@@ -95,7 +95,11 @@ inline bool tool_is_read_only(std::string_view name) {
     return name == "project_state" || name == "list_projects" ||
            name == "story_read" || name == "script_read" || name == "shots_read" ||
            name == "assets_read" || name == "outputs_read" || name == "tasks_read" ||
-           name == "ask_user";
+           name == "ask_user" ||
+           // 上网那三个（`stages/web_tools.hpp`）：只读网上的，盘上一个字不动。
+           // 不算进这儿的话，「只看」那一档连热榜都看不了，「每步问我」搜一次
+           // 问一次。
+           name == "hot_topics" || name == "web_search" || name == "fetch_page";
 }
 
 /// 这个工具**本来就没有可看的产出物**（不是"忘了分类"）。
@@ -105,7 +109,9 @@ inline bool tool_is_read_only(std::string_view name) {
 inline bool tool_shows_nothing(std::string_view name) {
     return name == "project_state" || name == "list_projects" ||
            name == "create_project" || name == "tasks_read" ||
-           name == "task_cancel" || name == "ask_user";
+           name == "task_cancel" || name == "ask_user" ||
+           // 上网查的东西在对话里（那一行工具回话），不在哪一格面板上。
+           name == "hot_topics" || name == "web_search" || name == "fetch_page";
 }
 
 }  // namespace changji::util

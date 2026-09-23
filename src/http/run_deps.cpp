@@ -142,6 +142,8 @@ FarmRunner local_farm_runner(const config::Settings& settings) {
 RunDeps default_run_deps() {
     RunDeps d;
     d.settings = [] { return config::runtime().snapshot(); };
+    // 场记上网那几个工具用的（RunDeps::web_get）。
+    d.web_get = llm::default_http_get();
     d.profile = [] { return config::runtime().profile(); };
     // 开工前那道闸，见 RunDeps::blocked。
     d.blocked = [] {
