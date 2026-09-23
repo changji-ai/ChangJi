@@ -928,7 +928,7 @@
   "盘上那份比应有的还大（多半是上一轮有两个下载同时写它），续传接不回来，这一次从头下。": "la copie sur le disque est plus grosse que prévu (deux téléchargements l’ont sans doute écrite au tour précédent), la reprise ne se raccroche pas, on repart de zéro cette fois.",
   "目标尺寸，形如 1088x1920": "une taille cible, par exemple 1088x1920",
   "真峰值 %1 dBTP 偏高，可能削波": "le vrai crête %1 dBTP est élevé et risque d’écrêter",
-  "眼下是「只看」：不改东西、不派活。这一步（%1）没做——要做的话，把输入框右下角的权限换成「自动」或「每步问我」。": "Mode lecture seule : rien n’est modifié ni lancé. Cette étape (%1) n’a pas été faite — pour l’autoriser, passez la permission en bas à droite de la zone de saisie sur « Automatique » ou « Demander à chaque étape ».",
+  "眼下是「只看」：不改东西、不派活。这一步（%1）没做——要做的话，把输入框底下的「权限」换成「自动」或「每步问我」。": "Mode lecture seule : rien n’est modifié ni lancé. Cette étape (%1) n’a pas été faite — pour l’autoriser, passez la permission sous la zone de saisie sur « Automatique » ou « Demander à chaque étape ».",
   "硅基流动 SiliconFlow": "SiliconFlow",
   "硬切的转场时长必须为 0": "Une coupe franche doit avoir une transition de 0",
   "确实写错了的话：去项目页那个模型窗口里改，或者 export CHANGJI_LLM_MODEL=%1": "Si c’est vraiment une faute de frappe : corrige-la dans cette fenêtre de modèles sur la page du projet, ou export CHANGJI_LLM_MODEL=%1",

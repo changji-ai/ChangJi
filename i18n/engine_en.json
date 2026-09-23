@@ -928,7 +928,7 @@
   "盘上那份比应有的还大（多半是上一轮有两个下载同时写它），续传接不回来，这一次从头下。": "the copy on disk is larger than it should be (most likely two downloads wrote it last round), so resuming can’t pick up; this time it starts over.",
   "目标尺寸，形如 1088x1920": "a target size, like 1088x1920",
   "真峰值 %1 dBTP 偏高，可能削波": "true peak %1 dBTP is high and may clip",
-  "眼下是「只看」：不改东西、不派活。这一步（%1）没做——要做的话，把输入框右下角的权限换成「自动」或「每步问我」。": "Read-only mode is on: nothing gets changed or started. This step (%1) was skipped — to allow it, switch the permission at the bottom right of the input box to “Auto” or “Ask each step”.",
+  "眼下是「只看」：不改东西、不派活。这一步（%1）没做——要做的话，把输入框底下的「权限」换成「自动」或「每步问我」。": "Read-only mode is on: nothing gets changed or started. This step (%1) was skipped — to allow it, switch the permission under the input box to “Auto” or “Ask each step”.",
   "硅基流动 SiliconFlow": "SiliconFlow",
   "硬切的转场时长必须为 0": "A hard cut must have a transition length of 0",
   "确实写错了的话：去项目页那个模型窗口里改，或者 export CHANGJI_LLM_MODEL=%1": "If it really is a typo: change it in that model window on the project page, or export CHANGJI_LLM_MODEL=%1",

@@ -1252,6 +1252,12 @@ ChatReply ReplayClient::chat(const std::vector<Message>& messages, const ordered
                 if (a != item.end()) c.arguments = a->is_string() ? a->get<std::string>() : a->dump();
                 r.tool_calls.push_back(std::move(c));
             }
+            // 真模型可以在同一条回话里先说一段、再调工具（OpenAI 那套的
+            // `content` + `tool_calls`）。录的时候带着 `content` 就照样给，
+            // 「先说再做」那道关（agent/loop.cpp）才验得着。
+            if (const auto c = j.find("content"); c != j.end() && c->is_string()) {
+                r.content = c->get<std::string>();
+            }
             r.finish_reason = "tool_calls";
             return r;
         }

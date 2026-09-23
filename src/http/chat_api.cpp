@@ -65,7 +65,7 @@ struct Session {
 
     /// **权限那一档**：`auto`（放手做）/ `ask`（动东西之前先问）/ `read`（只看）。
     ///
-    /// 跟着人说的那一句一起来（桌面端输入框右下角那颗），**记在这儿**是因为活
+    /// 跟着人说的那一句一起来（桌面端输入框底下那一格），**记在这儿**是因为活
     /// 干完之后自动接续的那几轮（`watch_and_react`）也得照这一档办——那会儿
     /// 没有人说话，拿不到新的一档。
     std::mutex mu;
@@ -305,7 +305,7 @@ std::string permit(const std::string& project, const std::string& chat,
     const std::string what = agent::tool_ask(name, args);
     if (mode == "read") {
         return SAYF("眼下是「只看」：不改东西、不派活。这一步（%1）没做——"
-                    "要做的话，把输入框右下角的权限换成「自动」或「每步问我」。",
+                    "要做的话，把输入框底下的「权限」换成「自动」或「每步问我」。",
                     what);
     }
     if (mode != "ask") return {};

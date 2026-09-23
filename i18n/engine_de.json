@@ -928,7 +928,7 @@
   "盘上那份比应有的还大（多半是上一轮有两个下载同时写它），续传接不回来，这一次从头下。": "die Kopie auf der Platte ist größer als sie sein sollte (höchstwahrscheinlich haben letzte Runde zwei Downloads hineingeschrieben), das Fortsetzen greift nicht, diesmal wird von vorn geladen.",
   "目标尺寸，形如 1088x1920": "eine Zielgröße, etwa 1088x1920",
   "真峰值 %1 dBTP 偏高，可能削波": "der True Peak %1 dBTP ist hoch und könnte clippen",
-  "眼下是「只看」：不改东西、不派活。这一步（%1）没做——要做的话，把输入框右下角的权限换成「自动」或「每步问我」。": "Nur-Lesen ist aktiv: Es wird nichts geändert oder gestartet. Dieser Schritt (%1) wurde übersprungen – um ihn zu erlauben, stelle die Berechtigung unten rechts im Eingabefeld auf „Automatisch“ oder „Jedes Mal fragen“.",
+  "眼下是「只看」：不改东西、不派活。这一步（%1）没做——要做的话，把输入框底下的「权限」换成「自动」或「每步问我」。": "Nur-Lesen ist aktiv: Es wird nichts geändert oder gestartet. Dieser Schritt (%1) wurde übersprungen – um ihn zu erlauben, stelle die Berechtigung unter dem Eingabefeld auf „Automatisch“ oder „Jedes Mal fragen“.",
   "硅基流动 SiliconFlow": "SiliconFlow",
   "硬切的转场时长必须为 0": "Ein harter Schnitt muss eine Übergangslänge von 0 haben",
   "确实写错了的话：去项目页那个模型窗口里改，或者 export CHANGJI_LLM_MODEL=%1": "Wenn es wirklich ein Tippfehler ist: änder ihn in diesem Modellfenster auf der Projektseite, oder export CHANGJI_LLM_MODEL=%1",
