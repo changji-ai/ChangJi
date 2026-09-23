@@ -91,6 +91,9 @@ inline bool tool_rewrites(std::string_view name) {
 /// ⚠️ **认不出来的算"会动东西"**——新加的工具没来得及登记时，宁可多问一句，
 /// 也别在「只看」那一档里悄悄把它放过去。`test_tool_slot.cpp` 钉着每一个工具
 /// 都被分过类。
+///
+/// 扩展（MCP）的工具不在这张表上：它们是跑起来才知道的，只不只读看扩展自己
+/// 报的 `readOnlyHint`——判在外层代理那头（`agent::tool_reads_only`）。
 inline bool tool_is_read_only(std::string_view name) {
     return name == "project_state" || name == "list_projects" ||
            name == "story_read" || name == "script_read" || name == "shots_read" ||
@@ -102,7 +105,9 @@ inline bool tool_is_read_only(std::string_view name) {
            name == "hot_topics" || name == "web_search" || name == "fetch_page" ||
            // 翻记忆：只读那几个文件。记、忘、挪**会动盘**，不在这儿——「只看」
            // 那一档不让记，「每步问我」记之前问一声（人看得见要记下什么）。
-           name == "memory_read";
+           name == "memory_read" ||
+           // 读技能的说明：同上，只读。装、删、挪会动盘。
+           name == "skill_read";
 }
 
 /// 这个工具**本来就没有可看的产出物**（不是"忘了分类"）。
@@ -117,7 +122,11 @@ inline bool tool_shows_nothing(std::string_view name) {
            name == "hot_topics" || name == "web_search" || name == "fetch_page" ||
            // 记忆也是：记了什么在那一行回话上，全部的在设置里那一页。
            name == "memory_write" || name == "memory_read" || name == "memory_forget" ||
-           name == "memory_move";
+           name == "memory_move" ||
+           // 技能、扩展同理：装了什么、接上了什么在回话上，全部的在设置里。
+           name == "skill_read" || name == "skill_install" || name == "skill_forget" ||
+           name == "skill_move" || name == "mcp_add" || name == "mcp_remove" ||
+           name == "mcp_move";
 }
 
 }  // namespace changji::util

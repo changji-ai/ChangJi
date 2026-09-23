@@ -53,6 +53,9 @@ struct RunDeps {
     /// 链 httplib，进不了测试目标。**空 = 这台上不了网**，工具照实说，不假装
     /// 查过。
     llm::HttpGet web_get;
+    /// 发 POST（带回响应头）。远程 MCP 扩展用它（2026-09-24）；同 `web_get`，
+    /// 真的那个链 httplib，进不了测试目标。**空 = 发不了**，那几个扩展照实说连不上。
+    llm::HttpPost http_post;
 };
 
 /// 默认的那套：配置从 runtime 取，后端是 sd.cpp。

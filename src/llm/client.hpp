@@ -124,12 +124,16 @@ struct Request {
 };
 
 
-/// HTTP 响应。刻意只留用得上的三样。
+/// HTTP 响应。刻意只留用得上的这几样。
 struct HttpResponse {
     int status = 0;
     std::string body;
     /// 传输层就失败了（连不上、超时），这时 status 是 0。
     std::optional<std::string> transport_error;
+    /// 响应头，**键一律小写**（HTTP 头不分大小写，各家服务写法不一）。
+    /// 2026-09-24 为远程 MCP 加的：会话号 `mcp-session-id` 在响应头里，
+    /// 拿不到就续不上那一次会话。
+    std::map<std::string, std::string> headers;
 };
 
 /// 发一次 POST。由调用方注入。
@@ -385,7 +389,11 @@ HttpPostStream default_http_post_stream();
 
 /// 真上网的 GET（httplib，跟着跳转，带 UA）。只在主程序里有（测试目标不链
 /// 这一层）；工具那头收一个 HttpGet，测试塞假的。
+///
+/// **正文超过 `kGetBodyMax` 当场断开**，回 `transport_error`：网址是模型、网页、人
+/// 贴进来的，一个回无底正文的地址不该能吃光引擎的内存。
 HttpGet default_http_get();
+inline constexpr std::size_t kGetBodyMax = 32 * 1024 * 1024;
 
 /// 造一个大模型客户端。
 ///

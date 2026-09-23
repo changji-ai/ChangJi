@@ -144,6 +144,8 @@ RunDeps default_run_deps() {
     d.settings = [] { return config::runtime().snapshot(); };
     // 场记上网那几个工具用的（RunDeps::web_get）。
     d.web_get = llm::default_http_get();
+    // 远程 MCP 扩展用的（RunDeps::http_post）。
+    d.http_post = llm::default_http_post();
     d.profile = [] { return config::runtime().profile(); };
     // 开工前那道闸，见 RunDeps::blocked。
     d.blocked = [] {

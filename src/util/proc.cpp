@@ -103,14 +103,22 @@ std::string quote(const std::string& s) {
 
 }  // namespace
 
+std::string quote_arg(const std::string& s) { return quote(s); }
+
 std::optional<std::string> which(const std::string& name) {
-    // 已经是个能直接用的路径就不用找了
+    return which_in(name, paths::env("PATH"), paths::env("PATHEXT"));
+}
+
+std::optional<std::string> which_in(const std::string& name, const std::string& path_env,
+                                    const std::string& pathext_in) {
+    // 已经是个能直接用的路径就不用找了。
+    // from_utf8：`fs::exists(std::string)` 在 MSVC 上按 ANSI 代码页转，
+    // 路径里有中文（用户名、片子目录）就当场抛。
     std::error_code ec;
     if (name.find('/') != std::string::npos || name.find('\\') != std::string::npos) {
-        if (fs::exists(name, ec)) return name;
+        if (fs::exists(paths::from_utf8(name), ec)) return name;
     }
 
-    std::string path_env = paths::env("PATH");
     if (path_env.empty()) return std::nullopt;
 
 #ifdef _WIN32
@@ -118,7 +126,7 @@ std::optional<std::string> which(const std::string& name) {
     // PATHEXT 决定哪些后缀算可执行。写死 .exe 会漏掉 .bat 包装的工具，
     // ffmpeg 的某些安装方式就是这样。
     std::vector<std::string> exts;
-    std::string pathext = paths::env("PATHEXT");
+    std::string pathext = pathext_in;
     if (pathext.empty()) pathext = ".COM;.EXE;.BAT;.CMD";
     {
         size_t start = 0;
@@ -132,6 +140,7 @@ std::optional<std::string> which(const std::string& name) {
     }
     exts.push_back("");  // 名字里已经带后缀的情况
 #else
+    (void)pathext_in;
     const char sep = ':';
     const std::vector<std::string> exts{""};
 #endif
@@ -153,6 +162,87 @@ std::optional<std::string> which(const std::string& name) {
     }
     return std::nullopt;
 }
+
+#ifdef _WIN32
+unsigned long create_process_std(const wchar_t* app, wchar_t* cmdline, unsigned long flags,
+                                 void* env, const wchar_t* cwd, void* std_in, void* std_out,
+                                 void* std_err, void** process, void** thread,
+                                 unsigned long* pid) {
+    const HANDLE self = ::GetCurrentProcess();
+    const HANDLE src[3] = {std_in, std_out, std_err};
+    const bool use_std = std_in != nullptr || std_out != nullptr || std_err != nullptr;
+
+    // 每一路复制一份**可继承**的给子进程。调用方自己那份一直不可继承，
+    // 别的线程上同时在起的子进程（哪怕它不点名）也拿不到它。
+    // 同一个句柄给了两路（run 的 stdout 和 stderr 是同一条管道）就共用一份：
+    // HANDLE_LIST 里不许有重复。
+    HANDLE dup[3] = {nullptr, nullptr, nullptr};
+    std::vector<HANDLE> inherit;
+    for (int i = 0; i < 3; ++i) {
+        if (src[i] == nullptr || src[i] == INVALID_HANDLE_VALUE) continue;
+        for (int j = 0; j < i; ++j) {
+            if (src[j] == src[i]) dup[i] = dup[j];
+        }
+        if (dup[i] != nullptr) continue;
+        // 复制不了（比如这个进程根本没有控制台，GetStdHandle 给的是个空壳）
+        // 就那一路不接，子进程照起——跟以前"继承到一个无效句柄"是一个结果。
+        if (::DuplicateHandle(self, src[i], self, &dup[i], 0, TRUE, DUPLICATE_SAME_ACCESS)) {
+            inherit.push_back(dup[i]);
+        } else {
+            dup[i] = nullptr;
+        }
+    }
+    auto close_dups = [&] {
+        for (HANDLE h : inherit) ::CloseHandle(h);
+    };
+
+    STARTUPINFOEXW si{};
+    si.StartupInfo.cb = sizeof(STARTUPINFOW);
+    if (use_std) {
+        si.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+        si.StartupInfo.hStdInput = dup[0];
+        si.StartupInfo.hStdOutput = dup[1];
+        si.StartupInfo.hStdError = dup[2];
+    }
+    std::vector<unsigned char> attr_buf;
+    LPPROC_THREAD_ATTRIBUTE_LIST attrs = nullptr;
+    if (!inherit.empty()) {
+        SIZE_T size = 0;
+        ::InitializeProcThreadAttributeList(nullptr, 1, 0, &size);
+        attr_buf.resize(size);
+        attrs = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(attr_buf.data());
+        // `inherit` 的内存要活到 CreateProcessW 返回：这里存的是指针，不是拷贝。
+        if (!::InitializeProcThreadAttributeList(attrs, 1, 0, &size)) {
+            const DWORD e = ::GetLastError();
+            close_dups();
+            return e != 0 ? e : ERROR_GEN_FAILURE;
+        }
+        if (!::UpdateProcThreadAttribute(attrs, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+                                         inherit.data(), inherit.size() * sizeof(HANDLE),
+                                         nullptr, nullptr)) {
+            const DWORD e = ::GetLastError();
+            ::DeleteProcThreadAttributeList(attrs);
+            close_dups();
+            return e != 0 ? e : ERROR_GEN_FAILURE;
+        }
+        si.StartupInfo.cb = sizeof(STARTUPINFOEXW);
+        si.lpAttributeList = attrs;
+        flags |= EXTENDED_STARTUPINFO_PRESENT;
+    }
+
+    PROCESS_INFORMATION pi{};
+    const BOOL ok = ::CreateProcessW(app, cmdline, nullptr, nullptr, inherit.empty() ? FALSE : TRUE,
+                                     flags, env, cwd, &si.StartupInfo, &pi);
+    const DWORD e = ok ? 0 : ::GetLastError();
+    if (attrs != nullptr) ::DeleteProcThreadAttributeList(attrs);
+    close_dups();  // 子进程已经拿到自己那份了
+    if (!ok) return e != 0 ? e : ERROR_GEN_FAILURE;
+    *process = pi.hProcess;
+    *thread = pi.hThread;
+    if (pid != nullptr) *pid = pi.dwProcessId;
+    return 0;
+}
+#endif
 
 Result run(const std::string& exe, const std::vector<std::string>& args, int timeout_ms,
            const std::string& stdin_data) {
@@ -181,15 +271,16 @@ Result run(const std::string& exe, const std::vector<std::string>& args, int tim
         cmdline += paths::from_utf8(quote(a)).wstring();
     }
 
+    // 管道两头都**不可继承**：给子进程的那几个由 create_process_std 复制一份
+    // 可继承的、点名交过去（见它的注释）。不这么做的话，别的线程上同时起的
+    // 子进程会把这里的写端也继承走，读端要等那个不相干的进程退了才有 EOF。
     SECURITY_ATTRIBUTES sa{};
     sa.nLength = sizeof(sa);
-    sa.bInheritHandle = TRUE;
+    sa.bInheritHandle = FALSE;
 
     HANDLE rd = nullptr;
     HANDLE wr = nullptr;
     if (!::CreatePipe(&rd, &wr, &sa, 0)) return r;
-    // 读端不给子进程继承，否则子进程退出后管道不会关，读到天荒地老。
-    ::SetHandleInformation(rd, HANDLE_FLAG_INHERIT, 0);
 
     // 要喂标准输入就再开一条。不喂就把父进程那个原样给它（老行为）。
     HANDLE in_rd = nullptr;
@@ -201,26 +292,19 @@ Result run(const std::string& exe, const std::vector<std::string>& args, int tim
             ::CloseHandle(wr);
             return r;
         }
-        // 同上：写端不给子进程继承。
-        ::SetHandleInformation(in_wr, HANDLE_FLAG_INHERIT, 0);
     }
-
-    STARTUPINFOW si{};
-    si.cb = sizeof(si);
-    si.dwFlags = STARTF_USESTDHANDLES;
-    si.hStdOutput = wr;
-    // stderr 并进 stdout：ffmpeg -version 和 nvidia-smi 的正经输出都在 stderr。
-    si.hStdError = wr;
-    si.hStdInput = feed_stdin ? in_rd : ::GetStdHandle(STD_INPUT_HANDLE);
 
     PROCESS_INFORMATION pi{};
     // lpCommandLine 必须可写，CreateProcessW 会就地改它。
     std::vector<wchar_t> mutable_cmd(cmdline.begin(), cmdline.end());
     mutable_cmd.push_back(L'\0');
 
-    const BOOL ok = ::CreateProcessW(nullptr, mutable_cmd.data(), nullptr, nullptr,
-                                     TRUE, CREATE_NO_WINDOW, nullptr, nullptr,
-                                     &si, &pi);
+    // stderr 并进 stdout：ffmpeg -version 和 nvidia-smi 的正经输出都在 stderr。
+    const DWORD create_err = create_process_std(
+        nullptr, mutable_cmd.data(), CREATE_NO_WINDOW, nullptr, nullptr,
+        feed_stdin ? in_rd : ::GetStdHandle(STD_INPUT_HANDLE), wr, wr, &pi.hProcess, &pi.hThread,
+        nullptr);
+    const bool ok = create_err == 0;
     ::CloseHandle(wr);  // 父进程这一份写端要立刻关，否则读端永远等不到 EOF
     if (feed_stdin) ::CloseHandle(in_rd);  // 同理，父进程不留读端
     if (!ok) {
@@ -429,27 +513,20 @@ ProcHandle spawn(const std::string& exe, const std::vector<std::string>& args,
     std::vector<wchar_t> mutable_cmd(cmd.begin(), cmd.end());
     mutable_cmd.push_back(L'\0');
 
-    SECURITY_ATTRIBUTES sa{};
-    sa.nLength = sizeof(sa);
-    sa.bInheritHandle = TRUE;
+    // 日志句柄不可继承，点名交给子进程（理由见 create_process_std）。
+    // 没有日志就三路都不接、什么都不继承，跟以前一样。
     HANDLE out = INVALID_HANDLE_VALUE;
     if (!log.empty()) {
         out = ::CreateFileW(log.wstring().c_str(), FILE_APPEND_DATA,
-                            FILE_SHARE_READ | FILE_SHARE_WRITE, &sa,
+                            FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
                             OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     }
-    STARTUPINFOW si{};
-    si.cb = sizeof(si);
-    if (out != INVALID_HANDLE_VALUE) {
-        si.dwFlags = STARTF_USESTDHANDLES;
-        si.hStdOutput = out;
-        si.hStdError = out;
-    }
+    const HANDLE log_h = out != INVALID_HANDLE_VALUE ? out : nullptr;
     PROCESS_INFORMATION pi{};
-    const BOOL ok = ::CreateProcessW(
-        nullptr, mutable_cmd.data(), nullptr, nullptr,
-        out != INVALID_HANDLE_VALUE, CREATE_NEW_PROCESS_GROUP, nullptr,
-        nullptr, &si, &pi);
+    const bool ok =
+        create_process_std(nullptr, mutable_cmd.data(), CREATE_NEW_PROCESS_GROUP, nullptr,
+                           nullptr, nullptr, log_h, log_h, &pi.hProcess, &pi.hThread,
+                           &pi.dwProcessId) == 0;
     if (out != INVALID_HANDLE_VALUE) ::CloseHandle(out);
     if (!ok) return 0;
     ::CloseHandle(pi.hThread);

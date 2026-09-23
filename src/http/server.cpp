@@ -29,6 +29,8 @@
 #include "http/batch.hpp"
 #include "http/chat_api.hpp"
 #include "http/memory_api.hpp"
+#include "http/mcp_api.hpp"
+#include "http/skills_api.hpp"
 #include "http/enums.hpp"
 #include "http/rail.hpp"
 #include "http/config_api.hpp"
@@ -139,6 +141,48 @@ bool take_async(json& body) {
     const bool want = body.at("async").is_boolean() && body.at("async").get<bool>();
     body.erase("async");
     return want;
+}
+
+/// 主机名那一段（小写，不带端口）：`http://127.0.0.1:8080` → `127.0.0.1`，
+/// `[::1]:9000` → `[::1]`。
+std::string host_part(std::string s) {
+    for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    if (const auto at = s.find("://"); at != std::string::npos) s.erase(0, at + 3);
+    if (const auto slash = s.find('/'); slash != std::string::npos) s.erase(slash);
+    if (!s.empty() && s.front() == '[') {
+        const auto close = s.find(']');
+        return close == std::string::npos ? s : s.substr(0, close + 1);
+    }
+    if (const auto colon = s.find(':'); colon != std::string::npos) s.erase(colon);
+    return s;
+}
+
+/// 会在这台电脑上跑程序（加扩展、点信任）、往场记以后每一轮的提示词里放东西（装技能）、
+/// 替人答「允许不允许」的那几条接口：**只认自己人**（2026-09-24 审查撞到的）。
+///
+/// 引擎是一个本机 HTTP 服务，浏览器里随便哪个网页都能往 127.0.0.1 发请求——`fetch`
+/// 带 `mode: "no-cors"`、`text/plain` 就是一个不用预检的「简单请求」：网页看不见回包，
+/// 可请求照样到了。加扩展那一条到了，就是在这台电脑上跑一条命令。两道：
+///
+///   · 请求体得声明是 `application/json`。网页要这么发就得先预检，而这儿不回 CORS 的
+///     许可，浏览器自己就拦下了。桌面端（`api_client.cpp`、QML 里的 XHR）发的都带着它。
+///   · 带了 Origin 的，得是本机（127.0.0.1 / localhost / ::1）或者就是这台服务自己
+///     （和 Host 同一个主机名：远端那台上开网页端）。浏览器跨站发 POST 一定带 Origin；
+///     `null`（本地文件、沙盒 iframe）也不认。
+void ours_only(const crow::request& req) {
+    std::string type = req.get_header_value("Content-Type");
+    for (char& c : type) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    if (type.find("application/json") == std::string::npos) {
+        throw ApiError(415, SAY("这条接口只收 JSON"));
+    }
+    const std::string origin = req.get_header_value("Origin");
+    if (origin.empty()) return;
+    const std::string from = host_part(origin);
+    const std::string self = host_part(req.get_header_value("Host"));
+    if (from == "127.0.0.1" || from == "localhost" || from == "[::1]" || (!self.empty() && from == self)) {
+        return;
+    }
+    throw ApiError(403, SAY("这条接口不收别的网站发来的请求"));
 }
 
 std::string stream_of(const json& body) {
@@ -2743,8 +2787,11 @@ void run(const config::Settings& settings, const Options& opts) {
     // POST 立刻回 202：一轮里模型可能连着调几次工具，占住 Crow 这条线程的
     // 后果见本文件开头 concurrency 那段（一写字界面就卡住）。
     CROW_ROUTE(app, "/api/chat").methods("POST"_method)([](const crow::request& req) {
-        auto r = guard([&] { return post_chat(parse_body(req.body), batch_client,
-                             [] { return default_run_deps(); }); });
+        // 替人说话（还能带着「自动」那一档）：别的网站发来的一律不认（`ours_only`）。
+        auto r = guard([&] {
+            ours_only(req);
+            return post_chat(parse_body(req.body), batch_client, [] { return default_run_deps(); });
+        });
         return json_response(r.body, r.status);
     });
 
@@ -2803,11 +2850,94 @@ void run(const config::Settings& settings, const Options& opts) {
         return json_response(r.body, r.status);
     });
     CROW_ROUTE(app, "/api/memory/forget").methods("POST"_method)([](const crow::request& req) {
-        auto r = guard([&] { return post_memory_forget(parse_body(req.body)); });
+        auto r = guard([&] {
+            ours_only(req);
+            return post_memory_forget(parse_body(req.body));
+        });
         return json_response(r.body, r.status);
     });
     CROW_ROUTE(app, "/api/memory/move").methods("POST"_method)([](const crow::request& req) {
-        auto r = guard([&] { return post_memory_move(parse_body(req.body)); });
+        auto r = guard([&] {
+            ours_only(req);
+            return post_memory_move(parse_body(req.body));
+        });
+        return json_response(r.body, r.status);
+    });
+
+    // ---- 技能：设置里「技能」那一类（http/skills_api.hpp） ----
+    CROW_ROUTE(app, "/api/skills")([](const crow::request& req) {
+        const char* p = req.url_params.get("path");
+        auto r = guard([&] { return get_skills(p ? p : ""); });
+        return json_response(r.body, r.status);
+    });
+    CROW_ROUTE(app, "/api/skills/install").methods("POST"_method)([](const crow::request& req) {
+        static const auto fetch = llm::default_http_get();
+        auto r = guard([&] {
+            ours_only(req);
+            return post_skills_install(parse_body(req.body), fetch);
+        });
+        return json_response(r.body, r.status);
+    });
+    CROW_ROUTE(app, "/api/skills/forget").methods("POST"_method)([](const crow::request& req) {
+        auto r = guard([&] {
+            ours_only(req);
+            return post_skills_forget(parse_body(req.body));
+        });
+        return json_response(r.body, r.status);
+    });
+    CROW_ROUTE(app, "/api/skills/move").methods("POST"_method)([](const crow::request& req) {
+        auto r = guard([&] {
+            ours_only(req);
+            return post_skills_move(parse_body(req.body));
+        });
+        return json_response(r.body, r.status);
+    });
+
+    // ---- 扩展（MCP）：设置里「扩展」那一类（http/mcp_api.hpp） ----
+    CROW_ROUTE(app, "/api/mcp")([](const crow::request& req) {
+        static const auto post = llm::default_http_post();
+        const char* p = req.url_params.get("path");
+        auto r = guard([&] { return get_mcp(p ? p : "", post); });
+        return json_response(r.body, r.status);
+    });
+    CROW_ROUTE(app, "/api/mcp/add").methods("POST"_method)([](const crow::request& req) {
+        static const auto post = llm::default_http_post();
+        auto r = guard([&] {
+            ours_only(req);
+            return post_mcp_add(parse_body(req.body), post);
+        });
+        return json_response(r.body, r.status);
+    });
+    CROW_ROUTE(app, "/api/mcp/remove").methods("POST"_method)([](const crow::request& req) {
+        static const auto post = llm::default_http_post();
+        auto r = guard([&] {
+            ours_only(req);
+            return post_mcp_remove(parse_body(req.body), post);
+        });
+        return json_response(r.body, r.status);
+    });
+    CROW_ROUTE(app, "/api/mcp/move").methods("POST"_method)([](const crow::request& req) {
+        static const auto post = llm::default_http_post();
+        auto r = guard([&] {
+            ours_only(req);
+            return post_mcp_move(parse_body(req.body), post);
+        });
+        return json_response(r.body, r.status);
+    });
+    CROW_ROUTE(app, "/api/mcp/enable").methods("POST"_method)([](const crow::request& req) {
+        static const auto post = llm::default_http_post();
+        auto r = guard([&] {
+            ours_only(req);
+            return post_mcp_enable(parse_body(req.body), post);
+        });
+        return json_response(r.body, r.status);
+    });
+    CROW_ROUTE(app, "/api/mcp/trust").methods("POST"_method)([](const crow::request& req) {
+        static const auto post = llm::default_http_post();
+        auto r = guard([&] {
+            ours_only(req);
+            return post_mcp_trust(parse_body(req.body), post);
+        });
         return json_response(r.body, r.status);
     });
 
@@ -2818,7 +2948,11 @@ void run(const config::Settings& settings, const Options& opts) {
 
     // 「每步问我」那一档：人点了允许 / 不（见 chat_api.hpp）。
     CROW_ROUTE(app, "/api/chat/permit").methods("POST"_method)([](const crow::request& req) {
-        auto r = guard([&] { return post_chat_permit(parse_body(req.body)); });
+        // 替人答「允许不允许」：别的网站发来的一律不认（`ours_only`）。
+        auto r = guard([&] {
+            ours_only(req);
+            return post_chat_permit(parse_body(req.body));
+        });
         return json_response(r.body, r.status);
     });
 
@@ -3116,6 +3250,11 @@ void run(const config::Settings& settings, const Options& opts) {
     // 那条 select 线程也收掉。**不收的话进程退不干净**——它挂在一个
     // 永远不会自己醒的 select 上。
     lan::Sense::instance().set_on(false);
+    // 扩展（MCP）拉起来的那几个进程一起关掉：本机命令那种是这个进程的子进程，不关的话
+    // POSIX 上它们留在后台（Windows 上有 Job 兜着，也还是先客气地关）。**关在这儿**，
+    // 不在 main() / 桌面端各调一次：服务停了就该关，而桌面端那一头 include 进来的头
+    // 会拖进 `pipeline/jobs.hpp`，它有个方法叫 `emit`——撞上 Qt 的同名宏。
+    mcp_shutdown();
 
 
     // 预热线程由上面那个 JoinAtExit 在这儿收掉。**一定要等它**：

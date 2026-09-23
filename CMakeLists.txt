@@ -815,21 +815,25 @@ if(_agent_dir)
     # 记得手跑 cmake。
     file(GLOB CHANGJI_AGENT_SOURCES CONFIGURE_DEPENDS "${_agent_dir}/*.cpp")
     file(GLOB CHANGJI_AGENT_TESTS CONFIGURE_DEPENDS "${_agent_dir}/tests/*.cpp")
-    # 外层这一版还没有记忆那三条接口的实现（拿新引擎编一版更早的外层时）：补上
-    # 空壳，不然 server.cpp 链不上——CI 按分支配对，两边不一定同时有它。
-    if(NOT EXISTS "${_agent_dir}/memory_api.cpp")
-        list(APPEND CHANGJI_AGENT_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/http/memory_api_absent.cpp")
-    endif()
+    # 外层这一版还没有记忆 / 技能 / 扩展那几条接口的实现（拿新引擎编一版更早的
+    # 外层时）：补上空壳，不然 server.cpp 链不上——CI 按分支配对，两边不一定同时
+    # 有它。
+    foreach(_api memory_api skills_api mcp_api)
+        if(NOT EXISTS "${_agent_dir}/${_api}.cpp")
+            list(APPEND CHANGJI_AGENT_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/http/${_api}_absent.cpp")
+        endif()
+    endforeach()
 else()
     set(CHANGJI_AGENT_OUTER 0)
     set(CHANGJI_AGENT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/agent")
     set(CHANGJI_AGENT_INCLUDE "")
-    # memory_api_absent.cpp：记忆那三条接口的空壳（记忆是外层代理的东西，
-    # 见 http/memory_api.hpp）。带着外层编时实现在 agent/memory_api.cpp。
+    # *_api_absent.cpp：记忆、技能、扩展那几条接口的空壳（都是外层代理的东西，
+    # 见 http/memory_api.hpp 等）。带着外层编时实现在 agent/*_api.cpp。
     set(CHANGJI_AGENT_SOURCES
         src/agent/transcript.cpp src/agent/tools.cpp src/agent/loop.cpp
         src/agent/outcome.cpp src/agent/attachments.cpp src/http/chat_api.cpp
-        src/http/memory_api_absent.cpp)
+        src/http/memory_api_absent.cpp src/http/skills_api_absent.cpp
+        src/http/mcp_api_absent.cpp)
     set(CHANGJI_AGENT_TESTS tests/unit/test_agent.cpp tests/unit/test_outcome.cpp)
     set(_agent_from "引擎仓库自带的旧版——外层没有 agent/")
     if(DEFINED ENV{GITHUB_ACTIONS})
@@ -843,6 +847,7 @@ add_library(changji_core STATIC
     src/util/paths.cpp
     src/util/say.cpp
     src/util/proc.cpp
+    src/util/child.cpp
     src/util/cmdline.cpp
     src/util/sysstat.cpp
     src/net/ws_client.cpp
@@ -1508,6 +1513,7 @@ if(CHANGJI_BUILD_TESTS)
         tests/unit/test_repetition.cpp
         tests/unit/test_ref_images.cpp
         tests/unit/test_sysstat.cpp
+        tests/unit/test_child.cpp
 
         # 被测的源码。刻意不包含 doctor.cpp、http/server.cpp、
         # llm/client_http.cpp、comfy/client_http.cpp、http/run_deps.cpp
@@ -1555,6 +1561,7 @@ if(CHANGJI_BUILD_TESTS)
         src/util/paths.cpp
     src/util/say.cpp
         src/util/proc.cpp
+        src/util/child.cpp
         src/util/cmdline.cpp
         src/util/sysstat.cpp
         src/net/ws_client.cpp
@@ -1699,6 +1706,19 @@ if(CHANGJI_BUILD_TESTS)
     target_compile_definitions(changji_tests PRIVATE
         CHANGJI_ARGECHO="$<TARGET_FILE:changji_argecho>")
     add_dependencies(changji_tests changji_argecho)
+    # 一个一直跑着、按标准输入输出一行一行说话的小程序：`proc::Child` 的靶子，
+    # 也是扩展（MCP）那几条用例的假扩展（`mcp` 那一档）。真的 .exe，理由同上。
+    add_executable(changji_child_stub tests/tools/child_stub.cpp)
+    target_link_libraries(changji_child_stub PRIVATE nlohmann_json::nlohmann_json)
+    target_compile_features(changji_child_stub PRIVATE cxx_std_20)
+    # 这个目标不走 core 那头的编译选项：MSVC 不给 /utf-8 就按 936 读源码，行注释
+    # 以中文结尾时会吞掉下一行代码（2026-09-24 头一回编它就是一百来个错）。
+    if(MSVC)
+        target_compile_options(changji_child_stub PRIVATE /utf-8)
+    endif()
+    target_compile_definitions(changji_tests PRIVATE
+        CHANGJI_CHILD_STUB="$<TARGET_FILE:changji_child_stub>")
+    add_dependencies(changji_tests changji_child_stub)
     target_compile_features(changji_tests PRIVATE cxx_std_20)
 
     # 金语料的位置。这些 JSON 当初由 Python 侧真实的函数导出，

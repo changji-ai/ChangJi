@@ -6,7 +6,9 @@
 #include "util/httplib.hpp"
 #include "util/say.hpp"
 
+#include <cctype>
 #include <cstdint>
+#include <map>
 #include <string>
 
 #include "http/llm_info.hpp"
@@ -27,6 +29,17 @@ std::pair<std::string, std::string> split_base(const std::string& url) {
     const std::size_t path_start = url.find('/', host_start);
     if (path_start == std::string::npos) return {url, "/"};
     return {url.substr(0, path_start), url.substr(path_start)};
+}
+
+/// 响应头键一律小写（见 `HttpResponse::headers`）。同名的几条只留最后一条。
+std::map<std::string, std::string> lower_headers(const httplib::Headers& h) {
+    std::map<std::string, std::string> out;
+    for (const auto& kv : h) {
+        std::string k = kv.first;
+        for (char& c : k) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        out[k] = kv.second;
+    }
+    return out;
 }
 
 }  // namespace
@@ -59,6 +72,7 @@ HttpPost default_http_post() {
         HttpResponse out;
         out.status = res->status;
         out.body = res->body;
+        out.headers = lower_headers(res->headers);
         return out;
     };
 }
@@ -77,13 +91,37 @@ HttpGet default_http_get() {
         cli.set_decompress(true);
         httplib::Headers h;
         for (const auto& kv : headers) h.emplace(kv.first, kv.second);
-        const auto res = cli.Get(path, h);
+        // **正文边收边数，过了上限当场断开**（2026-09-24）。原来整段收完才交出去，
+        // 而这条路上的网址是模型、网页、人贴进来的——一个回无底正文的地址能把整个
+        // 引擎的内存吃光，装技能那条路在下载完之后才比大小，已经晚了。
+        bool too_big = false;
+        const auto res = cli.Get(
+            path, h,
+            [&](const httplib::Response& r) {
+                out.status = r.status;
+                out.headers = lower_headers(r.headers);
+                return true;
+            },
+            [&](const char* data, std::size_t len) {
+                if (out.body.size() + len > kGetBodyMax) {
+                    too_big = true;
+                    return false;
+                }
+                out.body.append(data, len);
+                return true;
+            });
+        if (too_big) {
+            out.status = 0;
+            out.body.clear();
+            out.transport_error = SAYF("回来的东西太大了（超过 %1 MB），没收完就断开了",
+                                       std::to_string(kGetBodyMax / (1024 * 1024)));
+            return out;
+        }
         if (!res) {
+            out.status = 0;
             out.transport_error = httplib::to_string(res.error());
             return out;
         }
-        out.status = res->status;
-        out.body = res->body;
         return out;
     };
 }

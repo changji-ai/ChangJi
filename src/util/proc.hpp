@@ -36,6 +36,42 @@ struct Result {
 /// 相当于 Unix 的 which / Windows 的 where。
 std::optional<std::string> which(const std::string& name);
 
+/// 同 `which`，只是 PATH（Windows 上连 PATHEXT）用给的这两串，不读这个进程的环境。
+/// `pathext` 空 = 默认那一套（.COM;.EXE;.BAT;.CMD）；别的系统上不看它。
+///
+/// 给要替子进程换 PATH 的调用方用：`Child` 的 `Options::env` 里写了 PATH，
+/// 程序就该先按那个 PATH 找——子进程自己找东西也是按那个找的。
+std::optional<std::string> which_in(const std::string& name, const std::string& path_env,
+                                    const std::string& pathext);
+
+/// 按 CommandLineToArgvW 的规则给一个参数加引号（Windows 上拼命令行用）。
+///
+/// `run` / `spawn` 用的就是这一份；`Child`（util/child.cpp）起 .exe 时也走它。
+/// **收成一处**：引号规则各写一遍的话，哪天改了一处，另一处照旧把
+/// 带空格的路径切成两截，而那种错只在某个参数长得特别时才露出来。
+std::string quote_arg(const std::string& s);
+
+#ifdef _WIN32
+/// （Windows）CreateProcessW，子进程**只**继承给它的那几个标准句柄。
+///
+/// 这个进程是多线程的服务：`run`、`spawn`、`Child` 随时在不同线程上起子进程。
+/// 老办法是 bInheritHandles=TRUE、"继承全部可继承句柄"——那一刻别的线程上
+/// 恰好可继承的管道就漏进这个子进程里。漏进去的后果都是"管道等不到 EOF"：
+/// `run` 卡在 join 上，`Child` 的 kill 叫不回卡在写上的那一笔。
+///
+/// 做法：调用方的句柄一直**不可继承**；这里给每个标准句柄复制一份可继承的，
+/// 用 PROC_THREAD_ATTRIBUTE_HANDLE_LIST 点名只给这几份，起完就关。
+///
+/// 句柄写成 void*：这个头不带 windows.h。`std_*` 三个全空 = 不接标准输入输出
+/// （不设 STARTF_USESTDHANDLES，什么都不继承）；某一路给空或无效句柄 = 那一路不接。
+/// `app` / `env` / `cwd` 可以是空指针，含义同 CreateProcessW。成功回 0，
+/// `*process` / `*thread` 由调用方关；失败回 GetLastError 的值。
+unsigned long create_process_std(const wchar_t* app, wchar_t* cmdline, unsigned long flags,
+                                 void* env, const wchar_t* cwd, void* std_in, void* std_out,
+                                 void* std_err, void** process, void** thread,
+                                 unsigned long* pid);
+#endif
+
 /// 跑一个命令并抓取输出。
 ///
 /// 参数逐个传。**不经过 shell**：Windows 上是 CreateProcessW，
