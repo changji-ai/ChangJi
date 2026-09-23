@@ -142,7 +142,7 @@ TEST_CASE("两个读者：agent/tools.cpp 里不许出现光秃秃的 SAY(") {
     //
     // 做法同 `test_rail.cpp` 那条跨语言的用例：直接读源码。
     const std::filesystem::path p =
-        std::filesystem::path(CHANGJI_SRC_DIR) / "agent" / "tools.cpp";
+        std::filesystem::path(CHANGJI_AGENT_SRC_DIR) / "tools.cpp";   // 编进去的那一份
     std::ifstream in(p);
     REQUIRE_MESSAGE(in.good(), "读不到 " << p.string());
     std::stringstream ss;

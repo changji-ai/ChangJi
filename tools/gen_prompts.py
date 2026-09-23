@@ -3,7 +3,10 @@ r"""把 prompts.toml 里的提示词生成成一个 C++ 头，构建期跑。
 跑法（CMake 会自己调，手跑只是为了看输出）：
     python cpp/tools/gen_prompts.py cpp/prompts.toml <输出路径>.hpp
 
-**提示词的出处是 cpp/prompts.toml，不是任何 .hpp。** 生成出来的头在构建
+读哪一份 prompts.toml 由 CMakeLists.txt 定（外层仓库有 prompts/prompts.toml
+就用它，没有才用 cpp/ 自带的旧版），这个脚本只管把传进来的那份生成出来。
+
+**提示词的出处是 prompts.toml，不是任何 .hpp。** 生成出来的头在构建
 目录里（build/generated/stages/prompts.inc.hpp），每次 prompts.toml 或本
 脚本一变就重新生成，进不了版本库，改了也会被冲掉。
 

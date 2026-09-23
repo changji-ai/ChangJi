@@ -494,16 +494,33 @@ std::vector<std::pair<std::string, std::string>> flat_json(const std::string& t)
 TEST_CASE("多语言 · 引擎说的每一句，十一份表里都得有") {
     // 引擎那一头：`SAY()` 包起来的原话。
     std::set<std::string> said;
-    for (const auto& e : fs::recursive_directory_iterator(cpp_dir() / "src")) {
+    // **扫编进去的那几份。** 外层仓库有 agent/ 时（`CHANGJI_AGENT_OUTER`），
+    // src/agent/ 和 src/http/chat_api.cpp 是没编进去的旧版——扫它们的话，外层
+    // 那份新加的句子没人查，旧版里已经没人说的句子反倒被当成"还在说"。
+    std::vector<fs::path> files;
+    const fs::path src_dir = cpp_dir() / "src";
+    for (const auto& e : fs::recursive_directory_iterator(src_dir)) {
         if (!e.is_regular_file()) continue;
-        const std::string ext = e.path().extension().string();
+        if (CHANGJI_AGENT_OUTER && (e.path().parent_path() == src_dir / "agent" ||
+                                    e.path() == src_dir / "http" / "chat_api.cpp")) {
+            continue;
+        }
+        files.push_back(e.path());
+    }
+    if (CHANGJI_AGENT_OUTER) {
+        for (const auto& e : fs::directory_iterator(fs::path{CHANGJI_AGENT_SRC_DIR})) {
+            if (e.is_regular_file()) files.push_back(e.path());   // tests/ 不算
+        }
+    }
+    for (const auto& path : files) {
+        const std::string ext = path.extension().string();
         if (ext != ".cpp" && ext != ".hpp") continue;
         // 生成物里也有这些字（烤好的表、嵌进去的网页），但那儿没有 `SAY(`。
         //
         // `SAY_NOOP(` 也要抠：它展开之后一个字符都没变，句子躺在一张静态
         // 表里，真翻是在用它的那一行 `SAY(kSlotNames[i])`。漏了它的话，
         // 表里那几句会被判成"源码里已经没人说了"。
-        const std::string src = no_comments(slurp(e.path()));
+        const std::string src = no_comments(slurp(path));
         harvest(src, said, {"SAY(", "SAYF(", "SAYN(", "SAY_NOOP("});
         // `SAY_TO(to, "…")` / `SAYF_TO(to, "…")`：一句话两个读者，句子在
         // **第二个参数**上。模型那一遍拿原话、人那一遍查表，所以这些句子

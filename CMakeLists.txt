@@ -721,7 +721,45 @@ endif()
 # 找不到 Python 就在配置期停下。CHANGJI_LLAMA 那一段也要它（打补丁），
 # 这里是无条件的：没有提示词什么都编不了。
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
-set(CHANGJI_PROMPTS_TOML "${CMAKE_CURRENT_SOURCE_DIR}/prompts.toml")
+
+# **读哪一份提示词。** 2026-09-23 起最新的那份在外层产品仓库的
+# `prompts/prompts.toml`；这儿自带的 `prompts.toml` 原样留着、不再改——只在
+# 单独检出这个仓库（没有外层）时用。按顺序：
+#
+#   1. `-DCHANGJI_PROMPTS=<路径>` 显式给的。给了而文件不在，当场停。
+#   2. `<外层>/prompts/prompts.toml`（外层把这个仓库挂在 `cpp/` 上，CI 里是
+#      `changji/cpp`，所以就是 `../prompts/`）。本机、Actions 打包、Docker
+#      镜像都走这条。
+#   3. 这儿自带的那份。
+#
+# **每次配置都现找，不进缓存**：进了缓存的话，第一次配置时外层还没有
+# prompts/，后面加上了也永远读旧的——而编出来一切正常。
+#
+# 落到第 3 条时在 Actions 里打一条 `::warning::`：那是"打包用了旧提示词"，
+# 而它不会让任何东西变红。
+set(CHANGJI_PROMPTS "" CACHE FILEPATH
+    "提示词文件（prompts.toml）。空 = 外层 prompts/ 有就用它，没有用 cpp/ 自带的")
+if(CHANGJI_PROMPTS)
+    if(NOT EXISTS "${CHANGJI_PROMPTS}")
+        message(FATAL_ERROR "CHANGJI_PROMPTS 指的文件不在：${CHANGJI_PROMPTS}")
+    endif()
+    set(CHANGJI_PROMPTS_TOML "${CHANGJI_PROMPTS}")
+    set(_prompts_from "CHANGJI_PROMPTS 指定")
+elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../prompts/prompts.toml")
+    get_filename_component(CHANGJI_PROMPTS_TOML
+        "${CMAKE_CURRENT_SOURCE_DIR}/../prompts/prompts.toml" ABSOLUTE)
+    set(_prompts_from "外层仓库 prompts/")
+else()
+    set(CHANGJI_PROMPTS_TOML "${CMAKE_CURRENT_SOURCE_DIR}/prompts.toml")
+    set(_prompts_from "引擎仓库自带的旧版——外层没有 prompts/")
+    if(DEFINED ENV{GITHUB_ACTIONS})
+        # `cmake -E echo` 而不是 message()：message(STATUS) 前面带「-- 」，
+        # Actions 认不出那一行是命令。
+        execute_process(COMMAND "${CMAKE_COMMAND}" -E echo
+            "::warning::提示词用的是 cpp/prompts.toml（引擎仓库自带的旧版）：外层仓库这一版没有 prompts/prompts.toml")
+    endif()
+endif()
+message(STATUS "提示词：${CHANGJI_PROMPTS_TOML}（${_prompts_from}）")
 set(CHANGJI_GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
 set(CHANGJI_PROMPTS_HPP "${CHANGJI_GENERATED_DIR}/stages/prompts.inc.hpp")
 add_custom_command(
@@ -735,6 +773,62 @@ add_custom_command(
 # 给多个目标用，CMake 文档推荐的就是这个写法，而不是把 OUTPUT 列进每个
 # 目标的源文件里。
 add_custom_target(changji_prompts DEPENDS "${CHANGJI_PROMPTS_HPP}")
+
+# ---- 场记对话代理：编哪一份 ----
+#
+# 和上面提示词同一个道理（2026-09-23）：最新的代理在外层产品仓库的 `agent/`，
+# 这儿 `src/agent/` + `src/http/chat_api.cpp` 原样留着旧版、不再改，只在单独
+# 检出这个仓库时编。外层那份的样子：
+#
+#   agent/*.cpp *.hpp     对应这儿 src/agent/ 那十个文件
+#   agent/chat_api.cpp    实现 src/http/chat_api.hpp（头还在这儿：server.cpp
+#                         和桌面端都按 "http/chat_api.hpp" 找它）
+#   agent/tests/*.cpp     test_agent / test_outcome，替掉 tests/unit/ 那两份
+#
+# ⚠️ **外层那份的头要排在 src/ 前面。** 两份都叫 "agent/loop.hpp"——谁在前
+# 编进去的就是谁。所以用外层时把外层仓库根目录 BEFORE 加进 include 路径；
+# 头找错一份不一定编不过，而是结构体布局两份不一样、跑起来才坏。
+#
+# 顺序：`-DCHANGJI_AGENT=<…/agent>` 显式给的 → `<外层>/agent/` → 这儿自带的。
+# 不进缓存，理由同提示词那段。
+set(CHANGJI_AGENT "" CACHE PATH
+    "对话代理源码目录（名字必须叫 agent）。空 = 外层 agent/ 有就用它，没有用 src/agent")
+set(_agent_dir "")
+if(CHANGJI_AGENT)
+    get_filename_component(_agent_dir "${CHANGJI_AGENT}" ABSOLUTE)
+    get_filename_component(_agent_name "${_agent_dir}" NAME)
+    if(NOT EXISTS "${_agent_dir}/loop.cpp" OR NOT _agent_name STREQUAL "agent")
+        message(FATAL_ERROR "CHANGJI_AGENT 要指一个叫 agent、里面有 loop.cpp 的目录：${CHANGJI_AGENT}")
+    endif()
+    set(_agent_from "CHANGJI_AGENT 指定")
+elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../agent/loop.cpp")
+    get_filename_component(_agent_dir "${CMAKE_CURRENT_SOURCE_DIR}/../agent" ABSOLUTE)
+    set(_agent_from "外层仓库 agent/")
+endif()
+if(_agent_dir)
+    set(CHANGJI_AGENT_OUTER 1)
+    set(CHANGJI_AGENT_DIR "${_agent_dir}")
+    get_filename_component(CHANGJI_AGENT_INCLUDE "${_agent_dir}" DIRECTORY)
+    set(CHANGJI_AGENT_SOURCES
+        "${_agent_dir}/transcript.cpp" "${_agent_dir}/tools.cpp" "${_agent_dir}/loop.cpp"
+        "${_agent_dir}/outcome.cpp" "${_agent_dir}/attachments.cpp" "${_agent_dir}/chat_api.cpp")
+    set(CHANGJI_AGENT_TESTS
+        "${_agent_dir}/tests/test_agent.cpp" "${_agent_dir}/tests/test_outcome.cpp")
+else()
+    set(CHANGJI_AGENT_OUTER 0)
+    set(CHANGJI_AGENT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/agent")
+    set(CHANGJI_AGENT_INCLUDE "")
+    set(CHANGJI_AGENT_SOURCES
+        src/agent/transcript.cpp src/agent/tools.cpp src/agent/loop.cpp
+        src/agent/outcome.cpp src/agent/attachments.cpp src/http/chat_api.cpp)
+    set(CHANGJI_AGENT_TESTS tests/unit/test_agent.cpp tests/unit/test_outcome.cpp)
+    set(_agent_from "引擎仓库自带的旧版——外层没有 agent/")
+    if(DEFINED ENV{GITHUB_ACTIONS})
+        execute_process(COMMAND "${CMAKE_COMMAND}" -E echo
+            "::warning::对话代理编的是 cpp/src/agent（引擎仓库自带的旧版）：外层仓库这一版没有 agent/")
+    endif()
+endif()
+message(STATUS "对话代理：${CHANGJI_AGENT_DIR}（${_agent_from}）")
 
 add_library(changji_core STATIC
     src/util/paths.cpp
@@ -817,12 +911,7 @@ add_library(changji_core STATIC
     src/infer/worker_farm.cpp
     src/infer/worker_server.cpp
     src/infer/worker_proto.cpp
-    src/agent/transcript.cpp
-    src/agent/tools.cpp
-    src/agent/loop.cpp
-    src/agent/outcome.cpp
-    src/agent/attachments.cpp
-    src/http/chat_api.cpp
+    ${CHANGJI_AGENT_SOURCES}      # 对话代理，见上面「编哪一份」
     src/http/rail.cpp
     src/http/enums.cpp
     src/http/flow.cpp
@@ -1015,6 +1104,11 @@ target_include_directories(changji_core PUBLIC
 add_dependencies(changji_core changji_prompts)
 # 我们那份 httplib 排在最前面，见上面 INTERFACE_SYSTEM_INCLUDE_DIRECTORIES 那段。
 target_include_directories(changji_core BEFORE PUBLIC "${httplib_SOURCE_DIR}")
+# 外层那份代理的头排在 src/ 前面（"agent/loop.hpp" 两份都有），见「编哪一份」。
+# PUBLIC：桌面端的 chat_model.cpp 也 include "agent/attachments.hpp"。
+if(CHANGJI_AGENT_INCLUDE)
+    target_include_directories(changji_core BEFORE PUBLIC "${CHANGJI_AGENT_INCLUDE}")
+endif()
 
 target_link_libraries(changji_core PUBLIC
     nlohmann_json::nlohmann_json
@@ -1289,8 +1383,7 @@ if(CHANGJI_BUILD_TESTS)
 
     add_executable(changji_tests
         tests/unit/main.cpp
-        tests/unit/test_agent.cpp
-        tests/unit/test_outcome.cpp
+        ${CHANGJI_AGENT_TESTS}        # 外层有 agent/ 时是它的 tests/
         tests/unit/test_rail.cpp
         tests/unit/test_enums.cpp
         tests/unit/test_half_written.cpp
@@ -1437,12 +1530,7 @@ if(CHANGJI_BUILD_TESTS)
         # 已经拆到 node_json.cpp 去了，测试要的就是它。
         src/infer/node_json.cpp
         src/infer/node_prefs.cpp
-        src/agent/transcript.cpp
-        src/agent/tools.cpp
-        src/agent/loop.cpp
-        src/agent/outcome.cpp
-        src/agent/attachments.cpp
-        src/http/chat_api.cpp
+        ${CHANGJI_AGENT_SOURCES}
         src/http/rail.cpp
         src/http/enums.cpp
         src/http/flow.cpp
@@ -1569,6 +1657,10 @@ if(CHANGJI_BUILD_TESTS)
     target_include_directories(changji_tests PRIVATE src "${CHANGJI_GENERATED_DIR}"
                                "${ASIO_INCLUDE_DIR}" "${crow_SOURCE_DIR}/include")
     add_dependencies(changji_tests changji_prompts)
+    # 同 changji_core：外层那份代理的头排在 src/ 前面。
+    if(CHANGJI_AGENT_INCLUDE)
+        target_include_directories(changji_tests BEFORE PRIVATE "${CHANGJI_AGENT_INCLUDE}")
+    endif()
     target_link_libraries(changji_tests PRIVATE
         nlohmann_json::nlohmann_json
         tomlplusplus::tomlplusplus
@@ -1607,6 +1699,12 @@ if(CHANGJI_BUILD_TESTS)
     # 那条「枚举值一个都不许漏」的守卫要读 models/shot.hpp 的源码。
     target_compile_definitions(changji_tests PRIVATE
         CHANGJI_SRC_DIR="${CMAKE_CURRENT_SOURCE_DIR}/src")
+    # 按路径读代理源码的那几条守卫（工具名一个不漏、tools.cpp 里不许有光秃秃的
+    # SAY(、多语言表对账）要读**编进去的那一份**，不是 src/agent 里那份旧的——
+    # 读错了照样绿，只是测的已经不是真东西。
+    target_compile_definitions(changji_tests PRIVATE
+        CHANGJI_AGENT_SRC_DIR="${CHANGJI_AGENT_DIR}"
+        CHANGJI_AGENT_OUTER=${CHANGJI_AGENT_OUTER})
     # 那条「图标条那几格，桌面端一格都不许漏」的守卫要读 QML 的源码。
     target_compile_definitions(changji_tests PRIVATE
         CHANGJI_DESKTOP_QML_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../desktop/qml")

@@ -69,6 +69,30 @@ NOT_UI = {
 # 不是它躺在哪个目录。这两个文件仍在这张排除名单里（里头还有没翻完的），
 # 该翻的那几句就地包了 `SAY()`，不影响"还欠多少"。
 NOT_UI_DIR = "cpp/src/stages/"
+
+# 外层仓库的 agent/ 替掉的那几份（2026-09-23 起对话代理在外层，见
+# cpp/CMakeLists.txt「编哪一份」）。外层有 agent/ 时这几份是没编进去的旧版，
+# 扫它们等于数错地方。
+AGENT_OUTER = ROOT / "agent"
+AGENT_REPLACED_DIR = "cpp/src/agent/"
+AGENT_REPLACED = {"cpp/src/http/chat_api.cpp"}
+NOT_UI["agent/tools.cpp"] = NOT_UI["cpp/src/agent/tools.cpp"]
+
+
+def sources():
+    """编进去的那几份 .cpp / .hpp：cpp/src，外层有 agent/ 时换成它的。"""
+    outer = (AGENT_OUTER / "loop.cpp").exists()
+    for p in sorted((ROOT / "cpp/src").rglob("*")):
+        if p.suffix not in (".cpp", ".hpp"):
+            continue
+        r = rel(p)
+        if outer and (r.startswith(AGENT_REPLACED_DIR) or r in AGENT_REPLACED):
+            continue
+        yield p
+    if outer:
+        for p in sorted(AGENT_OUTER.glob("*")):
+            if p.suffix in (".cpp", ".hpp"):
+                yield p
 NOT_UI_DIR_KEEP = {"cpp/src/stages/render.cpp", "cpp/src/stages/frames.cpp"}
 
 LIT = re.compile(r'"(?:[^"\\]|\\.)*"')
@@ -312,9 +336,7 @@ def joiners(path):
 def main(argv):
     if "--joiners" in argv:
         rows = []
-        for p in sorted((ROOT / "cpp/src").rglob("*")):
-            if p.suffix not in (".cpp", ".hpp"):
-                continue
+        for p in sources():
             r = rel(p)
             if r in NOT_UI or (r.startswith(NOT_UI_DIR) and r not in NOT_UI_DIR_KEEP):
                 continue
@@ -350,9 +372,7 @@ def main(argv):
 
     show_all = "--all" in argv
     rows, skipped = [], 0
-    for p in sorted((ROOT / "cpp/src").rglob("*")):
-        if p.suffix not in (".cpp", ".hpp"):
-            continue
+    for p in sources():
         r = rel(p)
         hits = scan(p)
         if not hits:

@@ -23,7 +23,8 @@ namespace {
 
 /// `agent/tools.cpp` 里所有 `fn("名字"` 的名字。
 std::set<std::string> tool_names() {
-    const std::string path = std::string(CHANGJI_SRC_DIR) + "/agent/tools.cpp";
+    // 读**编进去的那一份**：外层仓库有 agent/ 时是它，不是 src/agent 里的旧版。
+    const std::string path = std::string(CHANGJI_AGENT_SRC_DIR) + "/tools.cpp";
     std::ifstream in(path);
     REQUIRE_MESSAGE(in.good(), "读不到 " << path);
     std::stringstream ss;
