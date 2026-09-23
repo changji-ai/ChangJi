@@ -23,6 +23,7 @@
 #include "infer/llama_chat.hpp"
 #include "infer/llama_tts.hpp"
 #include "infer/sd_backend.hpp"
+#include "util/paths.hpp"
 
 using namespace changji;
 
@@ -67,7 +68,7 @@ TEST_CASE("进程内配音没编进来时：说清楚是构建选项，不是配
 TEST_CASE("进程内大模型没编进来时：说清楚是构建选项，不是配置") {
     REQUIRE_FALSE(infer::llama_chat_available());
     std::string why;
-    const auto chat = infer::LlamaChat::load("/不存在/x.gguf", true, why);
+    const auto chat = infer::LlamaChat::load(paths::from_utf8("/不存在/x.gguf"), true, why);
     CHECK(chat == nullptr);
     CHECK(why.find("CHANGJI_LLAMA=OFF") != std::string::npos);
 }

@@ -324,12 +324,12 @@ TEST_CASE("删项目：三道闸") {
         std::error_code ec;
         fs::create_directories(plain, ec);
         {
-            std::ofstream out(plain / "重要资料.txt", std::ios::binary);
+            std::ofstream out(plain / paths::from_utf8("重要资料.txt"), std::ios::binary);
             out << "别删我";
         }
         const auto r = try_del(paths::to_utf8(plain), "只是个目录");
         CHECK(r.status == 404);
-        CHECK(fs::is_regular_file(plain / "重要资料.txt"));
+        CHECK(fs::is_regular_file(plain / paths::from_utf8("重要资料.txt")));
     }
 
     SUBCASE("闸三：名字对不上不给删") {
@@ -383,7 +383,7 @@ TEST_CASE("删项目会连素材和成片一起删") {
     std::error_code ec;
     fs::create_directories(proj / "output", ec);
     {
-        std::ofstream out(proj / "output" / "成片.mp4", std::ios::binary);
+        std::ofstream out(proj / "output" / paths::from_utf8("成片.mp4"), std::ios::binary);
         out << "假的";
     }
 
@@ -393,7 +393,7 @@ TEST_CASE("删项目会连素材和成片一起删") {
             ws.settings);
     });
     REQUIRE(r.status == 200);
-    CHECK_FALSE(fs::exists(proj / "output" / "成片.mp4"));
+    CHECK_FALSE(fs::exists(proj / "output" / paths::from_utf8("成片.mp4")));
     CHECK_FALSE(fs::exists(proj));
 }
 
@@ -760,7 +760,7 @@ TEST_CASE("每一章报的「几镜」数的是能用的，不是数组长度") 
     // （shot_id 是空串）指不到任何文件、进不了任何一步——报数组长度的话，
     // 一章空壳在这三处都显示成"已经有分镜了"。2026-09-17 实见 ep07。
     Workspace ws("数镜头");
-    auto store = models::ProjectStore::create(ws.root / "剧", "p-1", "剧",
+    auto store = models::ProjectStore::create(ws.root / paths::from_utf8("剧"), "p-1", "剧",
                                               models::StyleLine::REALISTIC);
     models::Project pj = store.load_project();
     models::Episode ep;

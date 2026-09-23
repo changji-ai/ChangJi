@@ -664,7 +664,7 @@ TEST_CASE("闸门说的话跟着语言换") {
     };
 
     FakeFF fake;
-    const auto zh = gates::gate_video(make_shot(), "这个文件不存在.mp4", fake.ff(),
+    const auto zh = gates::gate_video(make_shot(), paths::from_utf8("这个文件不存在.mp4"), fake.ff(),
                                       config::GateConfig{}, std::nullopt,
                                       std::nullopt);
     REQUIRE(!zh.ok());
@@ -672,7 +672,7 @@ TEST_CASE("闸门说的话跟着语言换") {
 
     {
         ScopedLang de("de");
-        const auto r = gates::gate_video(make_shot(), "这个文件不存在.mp4",
+        const auto r = gates::gate_video(make_shot(), paths::from_utf8("这个文件不存在.mp4"),
                                          fake.ff(), config::GateConfig{},
                                          std::nullopt, std::nullopt);
         REQUIRE(!r.ok());
@@ -688,7 +688,7 @@ TEST_CASE("闸门说的话跟着语言换") {
     }
 
     // 换回来之后照旧说中文。**进程级的开关，不还原会祸害后面的用例。**
-    const auto back = gates::gate_video(make_shot(), "这个文件不存在.mp4",
+    const auto back = gates::gate_video(make_shot(), paths::from_utf8("这个文件不存在.mp4"),
                                         fake.ff(), config::GateConfig{},
                                         std::nullopt, std::nullopt);
     CHECK(back.reasons.front() == zh.reasons.front());

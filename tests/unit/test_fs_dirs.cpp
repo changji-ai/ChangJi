@@ -42,7 +42,7 @@ TEST_CASE("只列目录，不列文件") {
     const auto root = fresh("onlydirs");
     std::error_code ec;
     fs::create_directories(root / "models", ec);
-    fs::create_directories(root / "另一块盘", ec);
+    fs::create_directories(root / paths::from_utf8("另一块盘"), ec);
     std::ofstream(root / "readme.txt") << "x";
     std::ofstream(root / "wan2.2.gguf") << "x";
 

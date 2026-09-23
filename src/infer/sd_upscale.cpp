@@ -145,8 +145,10 @@ void upscale_video(const fs::path& in, const fs::path& out,
     sd_log_to_stderr();
 
     const Probe p = probe_video(in, assembly);
-    const fs::path raw_in = fs::path(paths::to_utf8(out) + ".in.raw");
-    const fs::path raw_up = fs::path(paths::to_utf8(out) + ".up.raw");
+    fs::path raw_in = out;
+    raw_in += ".in.raw";
+    fs::path raw_up = out;
+    raw_up += ".up.raw";
 
     const std::vector<unsigned char> raw =
         decode_to_raw(in, assembly, raw_in);

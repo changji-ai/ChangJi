@@ -529,7 +529,7 @@ TEST_CASE("预告装到 output/preview/ 下，字幕不盖正片那份") {
 TEST_CASE("预告的配乐用自己的文件名，不会把整章那条占了") {
     // 配乐是"文件在就沿用"，而 ffmpeg 那头短了不循环：预告先出一条两分钟
     // 的，整章再跑就沿用它——**后面几分钟静悄悄没有配乐**。
-    const models::ProjectPaths paths(fs::temp_directory_path() / "changji_配乐名");
+    const models::ProjectPaths paths(fs::temp_directory_path() / paths::from_utf8("changji_配乐名"));
     CHECK(stages::music_path_for(paths, "ep01").filename() ==
           fs::path("ep01_music.wav"));
     CHECK(stages::music_path_for(paths, "ep01", "_preview").filename() ==

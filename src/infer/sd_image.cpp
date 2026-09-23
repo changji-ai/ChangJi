@@ -1544,9 +1544,8 @@ void register_sd_slots(SettingsProvider raw_provider,
                 std::random_device rd;
                 return std::to_string(rd()) + "-" + std::to_string(rd());
             }();
-            const fs::path tmp =
-                store.parent_path() /
-                (store.filename().string() + ".tmp." + kTag);
+            fs::path tmp = store;
+            tmp += ".tmp." + kTag;
             {
                 std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
                 if (!out) return;   // 写不了就算了，下次重新量

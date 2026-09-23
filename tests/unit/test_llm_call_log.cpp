@@ -1063,7 +1063,7 @@ TEST_CASE("闸门：记不下也不许抛") {
     // 而不是"整章几乎没有对白"——真正的原因被记账这件事盖掉了。
     TmpRoot root("gate_boom");
     // 把"根"指到一个**普通文件**上：底下建不了任何目录。
-    const fs::path blocked = root.dir / "不是目录";
+    const fs::path blocked = root.dir / paths::from_utf8("不是目录");
     { std::ofstream f(blocked, std::ios::binary); f << "x"; }
 
     llm::CallLogOptions o = opts(blocked);

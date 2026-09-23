@@ -80,8 +80,8 @@ std::string blob_store(const fs::path& cache_root, const std::string& id,
     // **先写临时文件再改名。** 直接往目标写的话，写到一半进程没了就留下
     // 一个"指纹对得上文件名、内容却是半截"的 blob——而之后每一次
     // `blob_present` 都会说它在，再也不会重传。改名是原子的，没有这个洞。
-    const auto tmp = dest.parent_path() /
-                     (dest.filename().string() + ".part");
+    fs::path tmp = dest;
+    tmp += ".part";
     {
         std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
         if (!out) return SAYF("写不了：%1", paths::to_utf8(tmp));

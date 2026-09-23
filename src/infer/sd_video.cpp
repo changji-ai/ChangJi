@@ -123,7 +123,7 @@ void encode_raw_to_mp4(const fs::path& raw_path, int width, int height, int fps,
     // 留一个「删掉它就没水印」的开关。
     const fs::path wm_png =
         dest.parent_path() /
-        paths::from_utf8(dest.stem().string() + ".cjwm.png");
+        paths::from_utf8(paths::to_utf8(dest.stem()) + ".cjwm.png");
     const media::WatermarkPlan watermark =
         media::stage_watermark(wm_png, width, height);
     struct Cleanup {

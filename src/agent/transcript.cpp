@@ -5,6 +5,8 @@
 #include <fstream>
 #include <system_error>
 
+#include "util/paths.hpp"
+
 using json = nlohmann::json;
 namespace fs = std::filesystem;
 
@@ -46,7 +48,7 @@ Turn turn_from_json(const json& j) {
 fs::path transcript_path(const fs::path& project_root,
                          const std::string& chat_id) {
     if (chat_id.empty()) return project_root / "chat.jsonl";
-    return project_root / "chats" / (chat_id + ".jsonl");
+    return project_root / "chats" / paths::from_utf8(chat_id + ".jsonl");
 }
 
 std::vector<std::string> list_chat_ids(const fs::path& project_root) {
@@ -58,7 +60,7 @@ std::vector<std::string> list_chat_ids(const fs::path& project_root) {
         if (ec) break;
         if (!e.is_regular_file()) continue;
         if (e.path().extension() != ".jsonl") continue;
-        out.push_back(e.path().stem().string());
+        out.push_back(paths::to_utf8(e.path().stem()));
     }
     // **排一下。** 目录序是文件系统说了算，同一份东西在两台机器上顺序不同，
     // 界面上那张表就会莫名其妙地换序。

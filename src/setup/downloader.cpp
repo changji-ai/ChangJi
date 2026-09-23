@@ -483,7 +483,7 @@ bool Downloader::fetch_one(const Item& item, const fs::path& dest, std::size_t i
     // parse_aria2_progress 读的是末尾那几 KB：**A 文件的进度条会跳成
     // B 文件的进度**，而下载本身是好的，从现象完全看不出是日志串了。
     const fs::path log =
-        dest.parent_path() / ("." + paths::to_utf8(dest.filename()) + ".log");
+        dest.parent_path() / paths::from_utf8("." + paths::to_utf8(dest.filename()) + ".log");
 
     for (int attempt = 1; attempt <= kMaxAttempts; ++attempt) {
         if (cancel_) {

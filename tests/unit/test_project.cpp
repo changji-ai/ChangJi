@@ -236,7 +236,7 @@ TEST_CASE("目录布局与相对路径约定") {
 
     SUBCASE("项目外的路径要被拒绝") {
         // 存绝对路径会破坏可移植性，必须抛
-        CHECK_THROWS(paths.rel(root.parent_path() / "别处.png"));
+        CHECK_THROWS(paths.rel(root.parent_path() / changji::paths::from_utf8("别处.png")));
     }
 
     SUBCASE("abs 是 rel 的逆") {

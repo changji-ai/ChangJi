@@ -504,7 +504,7 @@ ApiResult get_assets(const std::string& path) {
     // "把工作流存成 workflows/image.json" 指向一个不存在的做法。）
     const config::Settings img_settings = config::load_settings(store.root());
     std::string image_model =
-        fs::path(paths::from_utf8(img_settings.models.image)).filename().string();
+        paths::to_utf8(paths::from_utf8(img_settings.models.image).filename());
     for (char& ch : image_model) {
         ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
     }

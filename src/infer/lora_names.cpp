@@ -113,7 +113,8 @@ fs::path ensure_sdcpp_lora_names(const fs::path& lora) {
 
     std::ifstream in(lora, std::ios::binary);
     in.seekg(static_cast<std::streamoff>(8 + h.json_len));
-    const fs::path tmp = fixed.string() + ".part";
+    fs::path tmp = fixed;
+    tmp += ".part";
     {
         std::ofstream o(tmp, std::ios::binary | std::ios::trunc);
         if (!o) {

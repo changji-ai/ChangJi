@@ -107,7 +107,7 @@ class ScopedUserConfigDir {
 public:
     explicit ScopedUserConfigDir(const std::string& tag = "default")
         : dir_(std::filesystem::temp_directory_path() /
-               ("changji_empty_cfg_" + tag)) {
+               paths::from_utf8("changji_empty_cfg_" + tag)) {
         std::error_code ec;
         std::filesystem::remove_all(dir_, ec);
         std::filesystem::create_directories(dir_, ec);

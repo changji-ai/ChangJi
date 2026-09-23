@@ -16,6 +16,7 @@
 #include <fstream>
 
 #include "infer/node_prefs.hpp"
+#include "util/paths.hpp"
 
 using namespace changji;
 using namespace changji::infer;
@@ -115,7 +116,7 @@ TEST_CASE("盖掉上一份：写第二遍不留上一遍的残渣") {
 TEST_CASE("写不进去要抛，不能默默回到原样") {
     // 界面上点了开关要么生效、要么当场说没生效（header 上那句）。
     // 拿一个存在的**文件**当项目库：临时文件建不出来。
-    const auto ws = fresh("nodir") / "这是个文件不是目录";
+    const auto ws = fresh("nodir") / paths::from_utf8("这是个文件不是目录");
     std::ofstream(ws) << "x";
     REQUIRE(fs::is_regular_file(ws));
 
