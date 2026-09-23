@@ -1049,11 +1049,38 @@ TEST_CASE("对话表：一直以来那一条排最前，名字取第一句人说
     // **名字取第一句人说的话**，不是第一条——`c2` 的第一条是引擎插的。
     CHECK(list[1].at("id").get<std::string>() == "c2");
     const std::string title = list[1].at("title").get<std::string>();
-    CHECK(title.rfind("把设定里那个人改一下", 0) == 0);
-    // 十八个**字**就够了，后面缀省略号；按字节截会把最后那个汉字劈两半，
-    // 屏幕上就是一个问号。
-    CHECK(title.find("…") != std::string::npos);
-    CHECK(changji::text::utf8_len(title) == 19);   // 18 个字 + 那个省略号
+    // **整句都在，不截。** 原来截成十八个字加「…」，顶上那一行空着大半条
+    // 标题照样是半截（2026-09-23）。截短是界面按自己的宽度做的事。
+    CHECK(title == "把设定里那个人改一下，他现在太扁了，看不出是干什么的");
+}
+
+TEST_CASE("对话表：名字是一行字——换行并成空格，太长才夹") {
+    const auto dir = temp_dir("chat_list_shape");
+    agent::Turn t;
+    t.role = "user";
+    t.at = 1000;
+    t.text = "  第一行\n\n第二行\t  第三行  ";
+    agent::append_turn(dir, t, "c1");
+    // 人贴进来一整章：表上不拖着几千字。按**字**夹（中文按字节截会劈字）。
+    t.text = std::string();
+    for (int i = 0; i < 300; ++i) t.text += "字";
+    agent::append_turn(dir, t, "c2");
+
+    const auto r = http::list_chats(dir.string());
+    REQUIRE(r.status == 200);
+    const auto& list = r.body.at("chats");
+    REQUIRE(list.size() == 2);
+    for (const auto& row : list) {
+        const std::string title = row.at("title").get<std::string>();
+        CAPTURE(title);
+        if (row.at("id") == "c1") {
+            CHECK(title == "第一行 第二行 第三行");
+        } else {
+            CHECK(changji::text::utf8_len(title) == 121);   // 120 个字 + 省略号
+            CHECK(title.substr(title.size() - std::string("…").size()) == "…");
+        }
+    }
+    fs::remove_all(dir);
 }
 
 TEST_CASE("对话表：还没说过话的片子，表是空的，不是错") {

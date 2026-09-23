@@ -141,11 +141,34 @@ ApiResult list_chats(const std::string& project) {
         for (const auto& t : turns) {
             if (at == 0) at = t.at;
             if (t.role != "user" || t.text.empty()) continue;
-            // 头十八个**字**（不是字节）。中文一个字三字节，按字节截会
-            // 把最后那个字劈成两半——屏幕上就是一个问号。
+            // ⚠️ **截短归界面，不归这儿。** 原来这儿截成十八个字加「…」，于是
+            // 顶上那一行明明空着大半条，标题还是「Turn one of today'…」
+            // ——截断是在字到界面之前就做完的，界面按宽度 elide 也救不回来
+            //（2026-09-23 用户说的）。侧栏、顶上那一行各按自己的宽度截。
+            //
+            // 这儿只做两件事：换行和连着的空白**并成一个空格**（界面那几处
+            // 都是单行字，带着换行会摞成两行），再**夹一道 120 个字**——人
+            // 贴进来一整章的话，表上不该拖着几千字。按**字**夹，不按字节：
+            // 中文一个字三字节，按字节截会把最后那个字劈成两半。
+            bool gap = false;
+            std::size_t kept = 0;
             const auto chars = text::utf8_chars(t.text);
-            for (std::size_t i = 0; i < chars.size() && i < 18; ++i) title += chars[i];
-            if (chars.size() > 18) title += "…";
+            for (const auto& c : chars) {
+                const bool blank = c == " " || c == "\n" || c == "\r" || c == "\t" ||
+                                   c == "　";
+                if (blank) {
+                    gap = !title.empty();
+                    continue;
+                }
+                if (kept == 120) {
+                    title += "…";
+                    break;
+                }
+                if (gap) title += ' ';
+                gap = false;
+                title += c;
+                ++kept;
+            }
             break;
         }
         return json{{"id", id},
