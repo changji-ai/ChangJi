@@ -128,9 +128,12 @@ FilmJoinReport join_film(const ProjectStore& store,
         SAYF("把 %1 段接成一部电影", std::to_string(films.size())));
 
     const fs::path dir = final_dir(store.paths());
-    fs::remove_all(dir, ec);
+    // ⚠️ **上一部先别删，等新的拼成了再换。** 原来一进来就 `remove_all(final/)`：
+    // ffmpeg 砸了（某一章的片子坏了）、或者最后那一下挪不动（Windows 上旧的那部
+    // 正在播放器里开着），成片和 film.json 就都没了——页面上一部电影都不剩。
     fs::create_directories(dir, ec);
     const fs::path work = dir / ".work";
+    fs::remove_all(work, ec);
     fs::create_directories(work, ec);
     struct Cleanup {
         const fs::path& d;
@@ -169,6 +172,16 @@ FilmJoinReport join_film(const ProjectStore& store,
     // final/ 里不会躺着一个半截的 成片.mp4——而列表和播放器不会分辨
     // 它是不是完整的，点开就是一部放到一半断掉的成片。
     const fs::path out = dir / paths::from_utf8(film_name);
+    // 拼成了：这会儿才把上一部（成片、film.json，以及换过界面语言留下的别名）清掉。
+    // 先列再删：边走边删一个目录，迭代器会不会失效标准不保证。
+    std::vector<fs::path> old;
+    for (const auto& entry : fs::directory_iterator(dir, ec)) {
+        if (entry.path() != work) old.push_back(entry.path());
+    }
+    for (const auto& p : old) {
+        std::error_code rm;
+        fs::remove_all(p, rm);
+    }
     fs::rename(staged, out, ec);
     if (ec) throw std::runtime_error(SAYF("挪不动合成好的电影：%1", ec.message()));
     report.path = out;

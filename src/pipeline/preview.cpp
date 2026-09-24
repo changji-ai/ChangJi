@@ -103,6 +103,12 @@ RunReport run_preview(const ProjectStore& store,
         // 配音会把时长改短、还会拆镜，所以挑一次不算数。每转一圈至少有一镜
         // 新配上音（没有就是前缀里都配过了，退出），所以一定收敛。
         PreviewPick pick;
+        // 这一圈已经送去配过音的。⚠️ **上面那句「一定收敛」只在每镜都配得上时成立**：
+        // 配音砸了的那一镜（台词过不了模型、参考音色不在、显存不够）照旧是 PLANNED
+        //（AudioStage 只记一句警告），下一圈又挑到它——没有这一道就是死循环，
+        // 出片那个槽一直占着，整条队列等到有人按停。一圈里没有新的可试了就往下走：
+        // 那几镜没配上音，和整章出片时配音砸了是一个下场。
+        std::set<std::string> tried;
         for (;;) {
             if (tok.cancelled()) break;
             Project project = store.load_project();
@@ -121,7 +127,11 @@ RunReport run_preview(const ProjectStore& store,
             const auto todo =
                 ::changji::pipeline::pick(*ep, {ShotStatus::PLANNED},
                                           /*force=*/false, pick.id_set());
-            if (todo.empty()) break;
+            bool fresh = false;
+            for (const auto* s : todo) {
+                if (tried.insert(s->shot_id).second) fresh = true;
+            }
+            if (!fresh) break;
 
             RunOptions one = opts;
             one.only = std::vector<Stage>{Stage::Audio};

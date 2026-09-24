@@ -146,23 +146,32 @@ public:
 
     /// 槽空出来了，起下一件。**只在别的线程上叫**（见 JobTable::set_idle_hook）。
     void start_next() {
-        Entry next;
-        {
-            std::lock_guard<std::mutex> lg(mu_);
-            if (pending_.empty()) return;
-            // 还占着就别动：留在队里，下一次空出来再说。
-            if (pipeline::jobs().running(pipeline::JobKind::Run)) return;
-            next = std::move(pending_.front());
-            pending_.pop_front();
-        }
-        try {
-            post_run(next.body, next.deps);
-        } catch (const std::exception& e) {
-            // **起不来要留下话。** 这一件没有 HTTP 响应可回（人早就走了），
-            // 不记的话它就这么消失了——页面上那句「排着 1 件」下一拍变成
-            // 0 件，而什么都没发生。记在这儿，`GET /api/run` 带回去。
-            std::lock_guard<std::mutex> lg(mu_);
-            last_error_ = e.what();
+        // ⚠️ **一件起不来，接着起下一件。** 原来起一件、砸了就 return：没有活
+        // 起来，"槽空了"那个钩子就再也不响，后面排着的那几件一直排着，槽却
+        // 闲着（排在前面的那部片子被删了、体检没过、缺参考图，都会这样）。
+        for (;;) {
+            Entry next;
+            {
+                std::lock_guard<std::mutex> lg(mu_);
+                if (pending_.empty()) return;
+                // 还占着就别动：留在队里，下一次空出来再说。
+                if (pipeline::jobs().running(pipeline::JobKind::Run)) return;
+                next = std::move(pending_.front());
+                pending_.pop_front();
+            }
+            try {
+                post_run(next.body, next.deps);
+                // 起来了：上一件起不来的那句话过时了，别一直挂在 `GET /api/run` 上。
+                std::lock_guard<std::mutex> lg(mu_);
+                last_error_.clear();
+                return;
+            } catch (const std::exception& e) {
+                // **起不来要留下话。** 这一件没有 HTTP 响应可回（人早就走了），
+                // 不记的话它就这么消失了——页面上那句「排着 1 件」下一拍变成
+                // 0 件，而什么都没发生。记在这儿，`GET /api/run` 带回去。
+                std::lock_guard<std::mutex> lg(mu_);
+                last_error_ = e.what();
+            }
         }
     }
 
@@ -380,6 +389,12 @@ ApiResult post_run(const json& body, const RunDeps& deps) {
             Offload::instance().post([] { RunQueue::instance().start_next(); });
         });
         const int at = RunQueue::instance().enqueue(body, deps);
+        // ⚠️ **排上之后再看一眼。** 上面判"在跑"和排上不是一口气办完的：前面那件
+        // 正好在这当口跑完的话，钩子已经响过了（那时队里还没有这一件），这一件
+        // 就一直排着而槽闲着。空了就当场起。
+        if (!pipeline::jobs().running(pipeline::JobKind::Run)) {
+            Offload::instance().post([] { RunQueue::instance().start_next(); });
+        }
         return {202,
                 {{"started", false},
                  {"queued", true},

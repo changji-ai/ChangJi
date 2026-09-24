@@ -379,3 +379,32 @@ TEST_CASE("合成成功而时长没量到：清单里是 null，不是 0") {
         fs::remove_all(store.root(), ec);
     }
 }
+
+TEST_CASE("再合一次砸了：上一部成片还在，不是一部都不剩") {
+    // 原来一进来就清空 output/final：某一章的片子坏了、ffmpeg 砸了，上一部
+    // 好好的成片和 film.json 一起没了，成片页上一部电影都不剩。
+    models::ProjectStore store = ready_project("再合砸了");
+    const media::FFmpeg good("ffmpeg", "ffprobe",
+                             fake_ff(R"({"format":{"duration":"60"},"streams":[]})"));
+    const auto first = join_with(store, good);
+    REQUIRE(fs::is_regular_file(first.path));
+
+    const media::Runner broken = [](const std::string& exe,
+                                    const std::vector<std::string>&, double) {
+        media::ProcResult r;
+        r.launched = true;
+        r.exit_code = exe == "ffprobe" ? 0 : 1;
+        r.out = "Invalid data found when processing input";
+        return r;
+    };
+    const media::FFmpeg bad("ffmpeg", "ffprobe", broken);
+    (void)join_with(store, bad);
+
+    CHECK(fs::is_regular_file(first.path));
+    CHECK(read_manifest(store).at("total_s").get<double>() == doctest::Approx(60.0));
+    // 拼到一半的那份也不许留在 final/ 里。
+    CHECK_FALSE(fs::exists(pipeline::final_dir(store.paths()) / ".work"));
+
+    std::error_code ec;
+    fs::remove_all(store.root(), ec);
+}
