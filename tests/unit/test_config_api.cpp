@@ -23,6 +23,7 @@
 #include "infer/scheduler.hpp"
 #include "models/hardware.hpp"
 #include "pipeline/jobs.hpp"
+#include "stages/limits.hpp"
 #include "util/paths.hpp"
 
 using namespace changji;
@@ -602,3 +603,38 @@ TEST_CASE("command_args 要是字符串数组，别的形状要报 422") {
     CHECK(r.status == 422);
 }
 
+
+TEST_CASE("正在出片时存设置：出片那一份单镜上限不许被机器那份换掉") {
+    // 出片进门按这部片子算过一遍上限（`[video].max_shot_s`），后面拆超长镜、算
+    // 帧数、「前 n 分钟」重挑都读它。改机器表、下模型这几条存设置的路不挡出片，
+    // 原来一存就按机器那份把它换掉，半截出片之后的镜头按另一套上限走。
+    reset_runtime();
+    pipeline::jobs().cancel(pipeline::JobKind::Run);
+    pipeline::jobs().wait_idle();
+
+    config::Settings film = baseline();
+    film.video.max_shot_s = 3.0;   // 默认那个模型一镜最长 5 秒，3 秒才夹得下来
+    const int film_frames = config::video_limits_for(film).max_frames;
+    const int machine_frames = config::video_limits_for(baseline()).max_frames;
+    REQUIRE(film_frames < machine_frames);   // 两份得真不一样，下面才测得出东西
+
+    std::atomic<bool> release{false};
+    pipeline::jobs().start(pipeline::JobKind::Run, "ep01",
+                           [&release, &film](pipeline::JobProgress& p) {
+                               config::apply_video_limits(film);   // 出片进门那一下
+                               while (!release.load() && !p.cancelled()) {
+                                   std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                               }
+                           });
+    while (stages::video_limits().max_frames != film_frames) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    config::runtime().replace(baseline());               // 半截里存了一下设置
+    CHECK(stages::video_limits().max_frames == film_frames);
+
+    release = true;
+    pipeline::jobs().wait_idle();
+    config::runtime().replace(baseline());               // 出片完了再存：照常换
+    CHECK(stages::video_limits().max_frames == machine_frames);
+}

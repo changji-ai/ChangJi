@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cstdio>
 
+#include "pipeline/jobs.hpp"
 #include "stages/limits.hpp"
 
 namespace {
@@ -77,7 +78,16 @@ void Runtime::replace(Settings s) {
     // 入口有五个（起服务、/api/settings、/api/connections、模型窗……），
     // 漏掉任何一个都是"配置改了但分镜还按老上限排"，而且不报错。
     // 怎么算的见 video_limits_for；按项目重读设置的那几条路也调它。
-    apply_video_limits(s);
+    //
+    // ⚠️ **正在出片时不动全局那一份。** 出片进门按**这部片子**的设置算过一遍
+    //（`[video].max_shot_s`，见 http/run.cpp 的任务体），后面拆超长镜、算帧数、
+    // 闸门、「前 n 分钟」重挑都读它。原来在设置页随手存一下，这儿就按**机器**
+    // 那份把它换掉：半截出片之后的镜头按另一套上限走，预告重挑出来的前缀和按钮
+    // 说好的不一样——而且那几条出片线程正在读这一份，这一写本身就是数据竞争。
+    // 不写没有什么过期：下一次出片进门会按那部片子重算。
+    if (!pipeline::jobs().running(pipeline::JobKind::Run)) {
+        apply_video_limits(s);
+    }
 
     // **帧率也得跟着模型走。** MiniMax-H3 只出 24fps，传别的值 sd.cpp
     // 自己覆盖掉（只打一句 LOG_WARN，淹在 CUDA Graph 刷屏里）。而我们这边
