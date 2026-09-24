@@ -100,7 +100,11 @@ struct WorkerPool::Impl {
             std::lock_guard lg(mu);
             roster->give_back(i);
         }
-        cv.notify_one();
+        // ⚠️ **叫醒全部，不是一个。** 等着的那几路各自带着不同的 `skip`，
+        // `notify_one` 可能叫醒一路恰好不要这个位置的——它看一眼接着睡，
+        // 这一声就丢了，能用它的那一路睡到下一次有人还位置（一整镜的时间，
+        // 卡空着）。`local_exec.cpp` 那儿记着同一个坑。
+        cv.notify_all();
     }
 
     /// 那台满了：去它那儿挂着等一个位置。
@@ -384,6 +388,14 @@ struct WorkerPool::Impl {
                                        httplib::to_string(st.error())));
             }
             misses = 0;
+            // ⚠️ **不是 200 就不是这一件的进度。** 那台重启过（404：这个号它不
+            // 认得了）、口令被收回（401）——回包是 `{"detail": …}`，原来照样拿去解
+            // 进度，缺 state 那一栏就当"排队中"，每半秒问一次问到天荒地老，槽一直
+            // 占着。当它断了：这一镜换一台从头跑。
+            if (st->status != 200) {
+                throw Unreachable(SAYF("工作进程 %1 断了：%2", workers[idx].ep.url,
+                                       "HTTP " + std::to_string(st->status)));
+            }
             const auto body = json::parse(st->body, nullptr, false);
             if (body.is_discarded()) {
                 throw std::runtime_error(SAY("工作进程回的进度不是 JSON"));
@@ -398,7 +410,7 @@ struct WorkerPool::Impl {
             const bool changed = p.step != last_step || p.steps != last_steps ||
                                  p.phase != last_phase;
             if (p.steps > 0 && on_step && changed) {
-                on_step(p.step, p.steps, 0.0, phase_from(p.phase));
+                if (on_step) on_step(p.step, p.steps, 0.0, phase_from(p.phase));
                 last_step = p.step;
                 last_steps = p.steps;
                 last_phase = p.phase;
@@ -479,7 +491,9 @@ struct WorkerPool::Impl {
                 if (!down_since) down_since = std::chrono::steady_clock::now();
                 const auto waited = std::chrono::duration_cast<std::chrono::minutes>(
                     std::chrono::steady_clock::now() - *down_since);
-                on_step(static_cast<int>(waited.count()), 0, 0.0, Phase::Wait);
+                // 配音那条路传的是空的（见 `tts_synthesizer`），调空的 std::function
+                // 是 bad_function_call——每台都连不上时这一句配音就这么砸了。
+                if (on_step) on_step(static_cast<int>(waited.count()), 0, 0.0, Phase::Wait);
                 constexpr auto kDownRetry = std::chrono::seconds(20);
                 const auto until = std::chrono::steady_clock::now() + kDownRetry;
                 while (std::chrono::steady_clock::now() < until) {

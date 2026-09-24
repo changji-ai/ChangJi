@@ -1,5 +1,6 @@
 #include "infer/worker_server.hpp"
 
+#include <random>
 #include <atomic>
 #include <filesystem>
 #include <fstream>
@@ -102,6 +103,16 @@ struct State {
     Capacity capacity;
     std::size_t slots() const { return capacity ? std::max<std::size_t>(1, capacity()) : 1; }
     std::atomic<std::uint64_t> next_id{1};
+    /// 任务号前面那一截，**每起一次进程换一个**。只有递增的号的话，这台重启之后
+    /// 又从 1 数起：派活那台还在问重启前的 5 号，问到的是重启后另一镜的 5 号——
+    /// 跑完照样按它拉产物，把别人那一镜写进了自己这一镜（指纹也对得上，因为指纹
+    /// 就是拉回来那一份算的）。
+    const std::string boot = [] {
+        std::random_device rd;
+        std::ostringstream o;
+        o << std::hex << rd() << rd();
+        return o.str();
+    }();
 
     /// **空位变动的序号**，每放出一个位置就 +1。
     ///
@@ -545,8 +556,23 @@ void mount_worker_api_impl(http::EngineApp& app,
             // 一次，这儿认出来就行。
             //
             // **两台机器派同一件活也走这条**：第二台不会让这张卡再算一遍。
-            if (const auto hit = state->finished.find(key);
-                hit != state->finished.end()) {
+            //
+            // ⚠️ **只认做成了的，而且那份结果真交得出去。**
+            //   · 砸了的不当"做过了"：原来砸的那一次（显存不够、被取消）原样
+            //     回给每一次重派，同一句台词永远配不上，取消也白白吃掉这一镜的
+            //     一次重试。**砸了的照旧留在表里**——`GET /task/<id>` 要靠它告诉
+            //     派活方"那一次砸了"；只是不拿它顶替新派的这一件。
+            //   · 不带回产物（同机子进程、盘是共享的）时，"做过了"是说**那一次**
+            //     写到了那一次的 dest；这一次的 dest 不在（比如主角镜那两条 take
+            //     被删过又重跑）就得真算一遍，不然回一句 done 而文件根本不在。
+            const auto hit = state->finished.find(key);
+            const bool reusable =
+                hit != state->finished.end() && hit->second->progress.state == "done" &&
+                (task.return_artifact || [&] {
+                    std::error_code ec;
+                    return std::filesystem::exists(paths::from_utf8(task.dest), ec);
+                }());
+            if (reusable) {
                 hit->second->seen = std::chrono::steady_clock::now();
                 std::fprintf(stderr, SAY_NEVER("[节点] 这件做过了，直接给结果：%s key=%s\n"),
                              task.shot_id.c_str(), key.substr(0, 12).c_str());
@@ -576,7 +602,7 @@ void mount_worker_api_impl(http::EngineApp& app,
             }
 
             const std::string id =
-                std::to_string(state->next_id.fetch_add(1));
+                state->boot + "-" + std::to_string(state->next_id.fetch_add(1));
             auto live = std::make_shared<Live>();
             live->progress.state = "running";
             // 记下这件活的内容指纹：跑完挪到「放在一边」那格时按它存，

@@ -200,13 +200,22 @@ NodeState probe_peer(const config::Settings& s,
             } else {
                 n.error = SAY("答的不是 JSON，那头多半不是 changji");
             }
-        } else {
+        } else try {
+            // ⚠️ **回包的形状由对面说了算，一栏类型不对就是 type_error。**
+            // `"name": null`、`capabilities: ["frame"]` 这种都会让 `value()` 抛，
+            // 而这儿跑在一条裸线程上（`refresh` 里那几条）——漏出去就是
+            // std::terminate，整个引擎没了。当它答的不是 changji。
             n.online = true;
             n.name = js.value("name", cfg.url);
             n.busy = js.value("busy", false);
             // 那台同时收得下几件。没报（老版本）按 1。
-            n.slots = std::max<std::size_t>(
-                1, js.value("slots", std::size_t{1}));
+            //
+            // ⚠️ **夹在 1~64**：报一个 -1 的话按 size_t 读出来是天文数字，
+            // `remote_slots_for` 照着往表里推那么多个地址，内存当场耗尽。
+            const auto sl = js.find("slots");
+            const long long want =
+                sl != js.end() && sl->is_number_integer() ? sl->get<long long>() : 1;
+            n.slots = static_cast<std::size_t>(std::clamp<long long>(want, 1, 64));
             if (js.contains("capabilities") &&
                 js["capabilities"].is_array()) {
                 for (const auto& item : js["capabilities"]) {
@@ -222,6 +231,15 @@ NodeState probe_peer(const config::Settings& s,
                     }
                 }
             }
+        } catch (const nlohmann::json::exception&) {
+            // 只收回从回包里读出来的那几样；配置里来的（锁着的开关之类）照留。
+            n.name = cfg.url;
+            n.online = false;
+            n.busy = false;
+            n.slots = 1;
+            n.able.clear();
+            n.why.clear();
+            n.error = SAY("答的不是 JSON，那头多半不是 changji");
         }
     }
     if (!complaint.empty()) {
