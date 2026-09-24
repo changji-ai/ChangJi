@@ -30,6 +30,10 @@ constexpr std::size_t kDoneKeep = 200;
 /// 20 万字节大约六七万汉字，比任何一次写作想的都多。
 constexpr std::size_t kThinkingKeep = 200000;
 
+/// 写出来的东西最多留多少字节（见 Task::set_output）。一章剧本几千字，
+/// 这个数只是兜底。
+constexpr std::size_t kOutputKeep = 200000;
+
 struct Row {
     std::uint64_t id = 0;
     std::string kind;
@@ -44,6 +48,10 @@ struct Row {
     /// `thinking` 里第一个字的**绝对位置**（从这件活开工算起）。
     /// 被从头截掉一段时它往前走，取的那头据此知道自己断了一截。
     std::size_t thinking_from = 0;
+    /// 到现在为止写出来的东西（整份换，见 Task::set_output）。
+    std::string output;
+    /// 换过几次。0 = 一个字都还没写。
+    std::uint64_t output_ver = 0;
     std::string error;
     TaskState state = TaskState::Queued;
     /// 长跑任务表里也有一份，见 Task::mark_long_job。
@@ -141,6 +149,8 @@ nlohmann::json to_json_locked(Board& b, const Row& r, Clock::time_point now) {
         // 拉思考用的偏移量是另一个数（/api/task/thinking 的 end），
         // **那个必须还是字节**，别顺手一起改。
         {"thinking_chars", static_cast<int>(text::utf8_len(r.thinking))},
+        // 写出来的东西换过几次（正文走 /api/task/thinking 的 `out`）。
+        {"output_ver", r.output_ver},
         // **按了叉之后它还在名单上待一会儿。**
         //
         // 排着的那几件是"有空位了才被领走"的，取消只是把令牌立起来——真正
@@ -278,6 +288,19 @@ void Task::append_thinking(const std::string& piece) {
             row.thinking_from += cut;
         })
 }
+void Task::set_output(std::string all) {
+    // **截在锁外面**：一整份几千字，别攥着整本账的锁去拷。
+    if (all.size() > kOutputKeep) {
+        std::size_t cut = all.size() - kOutputKeep;
+        // 别从一个汉字中间切开（UTF-8 的续字节是 10xxxxxx）。
+        while (cut < all.size() && (static_cast<unsigned char>(all[cut]) & 0xC0) == 0x80) ++cut;
+        all.erase(0, cut);
+    }
+    CHANGJI_TASK_MUTATE(
+        if (row.output == all) return;
+        row.output = std::move(all);
+        ++row.output_ver;)
+}
 void Task::fail(std::string why) { CHANGJI_TASK_MUTATE(row.error = std::move(why);) }
 void Task::mark_long_job() { CHANGJI_TASK_MUTATE(row.long_job = true;) }
 void Task::set_progress(int current, int total) {
@@ -333,6 +356,28 @@ Thinking task_thinking(std::uint64_t id, std::size_t from) {
         return out;
     }
     out.text = row->thinking.substr(out.start - row->thinking_from);
+    return out;
+}
+
+Output task_output(std::uint64_t id, std::uint64_t ver) {
+    Board& b = board();
+    std::lock_guard lg(b.mu);
+    const Row* row = nullptr;
+    auto it = b.live.find(id);
+    if (it != b.live.end()) {
+        row = it->second.get();
+    } else {
+        for (const auto& r : b.done) {
+            if (r->id == id) { row = r.get(); break; }
+        }
+    }
+    if (row == nullptr) return {};
+    Output out;
+    out.ver = row->output_ver;
+    if (row->output_ver != ver) {
+        out.changed = true;
+        out.text = row->output;
+    }
     return out;
 }
 
@@ -435,6 +480,9 @@ nlohmann::json running_activities() {
             // 正文不在这儿（两秒一推，一件就能把通道占满），
             // 要看走 `/api/task/thinking`。
             {"thinking_chars", static_cast<int>(text::utf8_len(row->thinking))},
+            // 写出来的东西换过几次。0 = 这件活不往外报写的东西（或者还没写）。
+            // 正文走 `/api/task/thinking` 的 `out`，理由同上。
+            {"output_ver", row->output_ver},
             // **已经干了多久。** 和任务页那份（`to_json_locked`）同一个字段名、
             // 同一笔账——一件活开工那一刻起算（`Task::begin`）。
             //

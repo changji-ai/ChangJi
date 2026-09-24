@@ -115,6 +115,16 @@ public:
     /// "它最后在想什么"。
     void append_thinking(const std::string& piece);
 
+    /// 到现在为止写出来的东西（给人读的那一份，不是模型吐的原文）。
+    ///
+    /// **覆盖式，整份换**，不像思考那样接着攒：写的东西是从一段还没写完的
+    /// JSON 里抠出来排好的，后到的一个字段可能改掉前面那一行的样子（先有台词、
+    /// 后有说话人），只能每次整份重排。每换一次版本号加一，取的那头拿版本号
+    /// 判断要不要重取（`task_output`）。
+    ///
+    /// 有上限：太长就只留最后那一截——人看的是"正写到哪儿"。
+    void set_output(std::string all);
+
     /// 砸了。记一句原话，析构时按"失败"结账。
     void fail(std::string why);
 
@@ -200,5 +210,16 @@ struct Thinking {
     std::string text;
 };
 Thinking task_thinking(std::uint64_t id, std::size_t from = 0);
+
+/// 那件活到现在为止写出来的东西（`Task::set_output`）。
+///
+/// `ver` 是调用方手上那份的版本号：**没变就不带正文**（`text` 空、`changed`
+/// 为 false），变了才整份给。版本号 0 = 还一个字都没写。
+struct Output {
+    std::uint64_t ver = 0;
+    bool changed = false;
+    std::string text;
+};
+Output task_output(std::uint64_t id, std::uint64_t ver = 0);
 
 }  // namespace changji::pipeline

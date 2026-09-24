@@ -11,6 +11,8 @@
 #include "models/project.hpp"
 #include "models/story.hpp"
 #include "pipeline/activity.hpp"
+#include "pipeline/task_board.hpp"
+#include "stages/json_partial.hpp"
 #include "stages/script.hpp"
 #include "stages/script_story.hpp"
 #include "util/paths.hpp"
@@ -186,6 +188,45 @@ std::vector<std::string> character_names(const AssetLibrary& assets) {
     std::vector<std::string> names;
     for (const auto& kv : assets.characters) names.push_back(kv.second.name);
     return names;
+}
+
+/// 剧本**边写边排成人读的样子**，给任务那一行实时看（`Task::set_output`）。
+///
+/// 用户 2026-09-24：「写剧本看不到实时思考内容和写作内容」。模型吐的是 JSON，
+/// 原样摆出来是一堆括号和键名；这儿只抠拍子：场次头套【】、台词前面挂说话人、
+/// 动作原样。**从还没写完的那份里抠**（`PartialJson` 补齐再解），所以最后那一拍
+/// 的字是一个一个长出来的。
+///
+/// 两种形状都认：按章改编是 `scenes.<场>.beats`，照梗概写是顶层 `beats`。
+std::string render_script_beats(const json& snap) {
+    std::string out;
+    const auto one = [&](const json& beats) {
+        if (!beats.is_array()) return;
+        for (const auto& b : beats) {
+            if (!b.is_object()) continue;
+            const auto str = [&](const char* k) {
+                return b.contains(k) && b.at(k).is_string() ? b.at(k).get<std::string>()
+                                                             : std::string();
+            };
+            const std::string text = str("text");
+            if (text.empty()) continue;
+            const std::string kind = str("kind");
+            const std::string who = str("speaker");
+            if (!out.empty()) out += "\n";
+            if (kind == "scene") out += "【" + text + "】";
+            else if (kind == "dialogue" && !who.empty()) out += who + "：" + text;
+            else out += text;
+        }
+    };
+    if (!snap.is_object()) return out;
+    if (snap.contains("scenes") && snap.at("scenes").is_object()) {
+        for (const auto& [key, sc] : snap.at("scenes").items()) {
+            if (sc.is_object() && sc.contains("beats")) one(sc.at("beats"));
+        }
+    } else if (snap.contains("beats")) {
+        one(snap.at("beats"));
+    }
+    return out;
 }
 
 }  // namespace
@@ -479,6 +520,37 @@ ApiResult post_script_write(const json& body, llm::Client& client,
     //
     // 分镜那一步 2026-09-15 就是这么拆的（storyboard_run.cpp 里
     // `scenes.size() > 1` 走逐场），这儿照它。
+    // **写出来的东西实时报到任务那一行上**（`render_script_beats` 上那段）。
+    // 写完的那几场排好攒在 `done_text`，正在写的那一场每来一截重排一次接在后面。
+    std::string done_text;
+    const auto joined = [&](const std::string& now) {
+        if (done_text.empty()) return now;
+        if (now.empty()) return done_text;
+        return done_text + "\n\n" + now;
+    };
+    const auto complete_live = [&](const llm::Request& r) {
+        stages::PartialJson pj;
+        std::size_t shown_at = 0;
+        std::string raw = client.complete(r, tok, [&](const std::string& piece) {
+            pj.feed(piece);
+            // 攒够一截再重排：一个 token 一两个字，每个都重解一遍那份 JSON 是白费。
+            if (pj.size() - shown_at < 32) return;
+            shown_at = pj.size();
+            const json snap = pj.snapshot();
+            if (!snap.is_null()) act.task().set_output(joined(render_script_beats(snap)));
+        });
+        // 这一场写完了：按整份排一遍收进 `done_text`。解不开就不收（后面照样
+        // 解析失败报错，这一行只是给人看的）。
+        stages::PartialJson whole;
+        whole.feed(raw);
+        const json snap = whole.snapshot();
+        if (!snap.is_null()) {
+            done_text = joined(render_script_beats(snap));
+            act.task().set_output(done_text);
+        }
+        return raw;
+    };
+
     stages::ScriptDraft draft;
     if (chapter_script && chapter_scenes.size() > 1) {
         for (std::size_t i = 0; i < chapter_scenes.size(); ++i) {
@@ -488,11 +560,14 @@ ApiResult post_script_write(const json& body, llm::Client& client,
                 story, *plan, project.style_line, names, prev_tail, one);
             one_req.schema = stages::script_schema_for_chapter(one, names);
             // 顶栏说清在写第几场，不然一章三场看着像卡住了。
-            act.set_note(SAYF("第 %1/%2 场", std::to_string(i + 1),
-                              std::to_string(chapter_scenes.size())));
+            //
+            // ⚠️ **报成进度，别写进 `note`。** `note` 是「排队中，前面还有 N 件」
+            // 那一栏，有字就算排着（`running_activities` 的 `queued`）——原来写在
+            // 那儿，这一行整场被画成「等待中」，连「想了 N 字」都藏掉了
+            // （2026-09-24 用户：「写剧本看不到实时思考内容」）。
+            act.set_progress(static_cast<int>(i), static_cast<int>(chapter_scenes.size()));
             const stages::ScriptDraft part = llm_guard([&] {
-                return stages::parse_chapter_script(client.complete(one_req, tok),
-                                                    one);
+                return stages::parse_chapter_script(complete_live(one_req), one);
             });
             // 标题和梗概取第一场那次的：每场都会写一份，后面的没有更多信息。
             if (draft.title.empty()) draft.title = part.title;
@@ -504,7 +579,7 @@ ApiResult post_script_write(const json& body, llm::Client& client,
         }
     } else {
         draft = llm_guard([&] {
-            const std::string raw = client.complete(req, tok);
+            const std::string raw = complete_live(req);
             return chapter_script
                        ? stages::parse_chapter_script(raw, chapter_scenes)
                        : stages::parse_script(raw, used_duration, variation);

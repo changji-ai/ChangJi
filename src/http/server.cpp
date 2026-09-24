@@ -804,10 +804,17 @@ void run(const config::Settings& settings, const Options& opts) {
                 from != nullptr ? std::strtoull(from, nullptr, 10) : 0);
             // `start` 大于问的那个 `from` 就是中间断了一截（思考太长被从头
             // 截过）。页面据此把手上那份丢掉重接，而不是把两段错接起来。
-            return {200,
-                    {{"thinking", t.text},
-                     {"start", t.start},
-                     {"end", t.end}}};
+            json out = {{"thinking", t.text}, {"start", t.start}, {"end", t.end}};
+            // **写出来的东西顺路一起取**（给了 `out` 才带）：桌面端那一行
+            // 一秒问一次，一件活两样一趟拿齐。`out` 是手上那份的版本号，
+            // 没变就只回版本号不回正文（见 `task_output`）。
+            if (const char* ov = req.url_params.get("out"); ov != nullptr) {
+                const auto o = pipeline::task_output(std::strtoull(id, nullptr, 10),
+                                                     std::strtoull(ov, nullptr, 10));
+                out["output_ver"] = o.ver;
+                if (o.changed) out["output"] = o.text;
+            }
+            return {200, out};
         });
         return json_response(r.body, r.status);
     });
