@@ -239,7 +239,7 @@ void start_reaper(const std::shared_ptr<State>& state) {
     }).detach();
 }
 
-void mount_worker_api_impl(crow::SimpleApp& app,
+void mount_worker_api_impl(http::EngineApp& app,
                            const config::Settings& settings,
                            const WorkerOptions& opts,
                            const models::HardwareProfile& profile,
@@ -719,7 +719,7 @@ void mount_worker_api_impl(crow::SimpleApp& app,
 
 }
 
-bool mount_worker_api(crow::SimpleApp& app, const config::Settings& settings,
+bool mount_worker_api(http::EngineApp& app, const config::Settings& settings,
                       const WorkerOptions& opts, TaskRunner runner,
                       Capacity capacity) {
     // **对外监听而没设口令就不挂。** 挂了等于谁都能派活过来烧这张卡、
@@ -798,7 +798,10 @@ bool run_worker(const config::Settings& settings, const WorkerOptions& opts) {
     auto state = std::make_shared<State>();
     // `--worker` 这条也要自己收：它一样会被一台下了线的机器丢下没人认领的活。
     start_reaper(state);
-    crow::SimpleApp app;
+    // 门在 app 里（`http/crow_guard.hpp`）：工作进程也监听端口——按卡拉起的那几个在
+    // 回环上，浏览器里的网页一样摸得到；`/task` 能让它把产物写到任意路径。
+    http::EngineApp app;
+    app.get_middleware<http::SameSiteGuard>().policy = http::guard_policy_for(opts.host);
     app.loglevel(crow::LogLevel::Warning);
     // 连接计时器放宽到 60 秒：一段 blob 在 10 KB/s 的链路上也要二十多秒，
     // 默认 5 秒会把它切断（见上面 /blob 那条）。

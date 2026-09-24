@@ -918,6 +918,7 @@ add_library(changji_core STATIC
     src/infer/node_json.cpp
     src/infer/node_registry.cpp
     src/infer/peer_auth.cpp
+    src/http/request_guard.cpp
     src/infer/node_status.cpp
     src/infer/local_exec.cpp
     src/infer/task_run.cpp
@@ -1427,6 +1428,7 @@ if(CHANGJI_BUILD_TESTS)
         tests/unit/test_exec_queue.cpp
         tests/unit/test_capability.cpp
         tests/unit/test_peer_auth.cpp
+        tests/unit/test_request_guard.cpp
         tests/unit/test_blob.cpp
         tests/unit/test_node_pick.cpp
         tests/unit/test_node_table.cpp
@@ -1533,6 +1535,7 @@ if(CHANGJI_BUILD_TESTS)
         src/infer/local_exec.cpp
         src/infer/capability.cpp
         src/infer/peer_auth.cpp
+        src/http/request_guard.cpp
         src/infer/blob.cpp
         src/infer/node_pick.cpp
         # **这两个是 test_node_table / test_node_prefs 要的。**

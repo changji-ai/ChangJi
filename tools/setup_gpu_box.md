@@ -369,9 +369,9 @@ content 里；默认（auto）会剥到 `reasoning_content`，content 才干净�
 
 **先看画面，再量速度。** 在 L20 那台上先量了 39 分钟的速度，才发现量的是雪花。
 
-    # 只出首帧，抽一张出来看
-    curl -X POST :8080/api/run -d '{"project":"...","episode_id":"ep01",
-                                    "stages":["frames"],"force":true}'
+    # 只出首帧，抽一张出来看。要带 -H：引擎只收 JSON（不带的话 curl 发的是表单，回 415）
+    curl -X POST :8080/api/run -H 'Content-Type: application/json' \
+         -d '{"project":"...","episode_id":"ep01","stages":["frames"],"force":true}'
     # 然后真的把 frames/*.png 打开看
 
 分不出来的时候用上游的 `sd-cli` 拿同一批权重跑一遍，能把"我们的代码"

@@ -23,6 +23,7 @@
 #include <string>
 
 #include "config/settings.hpp"
+#include "http/crow_guard.hpp"
 #include "infer/worker_pool.hpp"
 
 namespace changji::infer {
@@ -73,7 +74,7 @@ using TaskRunner = LocalRunner;
 /// 后面 51 次全 409。
 using Capacity = std::function<std::size_t()>;
 
-bool mount_worker_api(crow::SimpleApp& app, const config::Settings& settings,
+bool mount_worker_api(http::EngineApp& app, const config::Settings& settings,
                       const WorkerOptions& opts, TaskRunner runner = {},
                       Capacity capacity = {});
 
