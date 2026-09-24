@@ -75,6 +75,8 @@ FarmRunner local_farm_runner(const config::Settings& settings) {
         std::atomic<bool> ready{false};
         std::shared_ptr<infer::WorkerPool> pool;
         std::size_t n = 0;
+        /// 本机拉起来的那几个子进程（配置里写死地址的那种没有）。槽数问它。
+        std::shared_ptr<infer::WorkerFarm> farm;
     };
     static auto warm = std::make_shared<Warm>();
     static std::once_flag once;
@@ -108,6 +110,7 @@ FarmRunner local_farm_runner(const config::Settings& settings) {
                 for (const auto& u : eps) weps.push_back(infer::WorkerEndpoint{u, ""});
                 warm->pool = std::make_shared<infer::WorkerPool>(std::move(weps));
                 warm->n = eps.size();
+                warm->farm = farm;
             }
             warm->ready.store(true, std::memory_order_release);
         }).detach();
@@ -132,7 +135,10 @@ FarmRunner local_farm_runner(const config::Settings& settings) {
     };
     r.capacity = [] {
         if (warm->ready.load(std::memory_order_acquire) && warm->pool) {
-            return std::max<std::size_t>(1, warm->n);
+            // **活着的才算**：死了一个的话照旧报 n，别的机器以为这台还有位置，
+            // 派过来的活挤在这台排队（见 WorkerFarm 里 `watch` 那段）。
+            const std::size_t live = warm->farm ? warm->farm->alive() : warm->n;
+            return std::max<std::size_t>(1, live);
         }
         return std::size_t{1};
     };

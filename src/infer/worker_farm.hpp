@@ -84,6 +84,10 @@ public:
     /// 真正起来了几个。
     std::size_t size() const { return endpoints_.size(); }
 
+    /// **此刻活着的**有几个。死了的那一个在被重拉回来之前不算——报槽数（`/status`
+    /// 的 `slots`）要用它，不是用起服务时起来了几个。
+    std::size_t alive() const;
+
 private:
     WorkerFarm();
     struct Impl;
