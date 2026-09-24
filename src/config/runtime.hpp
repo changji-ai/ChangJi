@@ -61,11 +61,14 @@ stages::VideoLimits video_limits_for(const Settings& s);
 
 /// `stages::set_video_limits(video_limits_for(s))`。
 ///
-/// 出片（http/run.cpp）和拆分镜（batch / episodes / planning）每次都按
-/// **项目**重读设置（`load_settings(项目目录)`），根本不经过 Runtime；
-/// 而单镜上限现在是项目的属性，所以这几条路进门先调一次这个。全局那一份
-/// 是可变的，同时跑两个项目时后进的盖前面的——一次运行只跑一个项目的
-/// 出片，拆分镜那几处最多影响正在渲的那一章对帧数的**夹低**，不会放开。
+/// **只有出片调它**（http/run.cpp，全机器一件）：出片按**项目**重读设置
+/// （`load_settings(项目目录)`），根本不经过 Runtime，而单镜上限是项目的属性，
+/// 所以进门先设一次全局那份——出片底下好几条线程（首帧、出片、配音）都读它。
+///
+/// ⚠️ **拆分镜别调它**，挂 `stages::ScopedVideoLimits`（只管自己那条线程）。
+/// 原来拆分镜也改全局这份，而且注释写着"最多只会夹低"——那不对：分镜那头
+/// 发出去的时长档位和回来时拿来卡的档位是同一个全局值，中间被别的片子换了，
+/// 两头就对不上；按对话分道之后两部片子同时拆分镜是常事。
 void apply_video_limits(const Settings& s);
 
 }  // namespace changji::config

@@ -279,8 +279,9 @@ ApiResult post_script(const json& body, llm::Client& client,
     if (regenerate) {
         const AssetLibrary assets = store.load_assets();
         // 单镜的时长档位是这部电影的属性（[video].max_shot_s），按项目那份设置
-        // 算一遍再拆镜头。见 config::apply_video_limits。
-        config::apply_video_limits(config::load_settings(store.root()));
+        // 算一遍再拆镜头——只挂在这条线程上（见 stages::ScopedVideoLimits）。
+        const stages::ScopedVideoLimits limits_here{
+            config::video_limits_for(config::load_settings(store.root()))};
 
         // 同步接口也要在顶栏露面，理由见 pipeline/activity.hpp 开头那段：
         // 它占着 LLM 槽，不露面的话别人挂在「显存不够」上而挡路的是谁查不到。
@@ -309,7 +310,21 @@ ApiResult post_script(const json& body, llm::Client& client,
         out["regenerated"] = true;
         out["shots"] = ep->shots.size();
     }
-    store.save_project(project);
+    // **只把这一章换进此刻盘上那份，一把锁。** `project` 是进门时读的，
+    // 拆镜头那一趟要几分钟——整份写回去，这几分钟里别的对话写好的别几章的
+    // 剧本、分镜全被冲回旧样子（批量那几条早就是"重读、只换自己那一格"）。
+    const auto store_guard = store.lock();
+    Project latest = load_or_400(store);
+    Episode* dst = latest.episode_by_id(episode_id);
+    if (dst == nullptr) throw ApiError(404, SAYF("没有章节 %1", episode_id));
+    dst->script = ep->script;
+    dst->target_duration_s = ep->target_duration_s;
+    dst->synopsis = ep->synopsis;
+    if (regenerate) {
+        dst->shots = ep->shots;
+        dst->shots_from = ep->shots_from;
+    }
+    store.save_project(latest);
     return {200, out};
 }
 

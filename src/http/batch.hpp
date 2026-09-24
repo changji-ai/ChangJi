@@ -98,4 +98,22 @@ void run_understand_work(const models::ProjectStore& store,
 ApiResult post_story_from_web(const nlohmann::json& body,
                               std::shared_ptr<llm::Client> client, llm::HttpGet get);
 
+/// GET /api/script/series?path=&lane= —— **这部片子、这一道**上写作那一件的快照。
+///
+/// 形状和不带参数时一样（Write 那几个键），外加 `project` / `lane` 原样回去。
+/// **不带 `path` 是老客户端**：回最近起的那一件（原来全机器只有一件）。
+///
+/// 页面上的按钮派活不带 `lane`，所以页面带着自己的片子来问，问到的就是自己
+/// 按的那一件——而不是另一部片子正在写的（原来 B 的故事页上挂着 A 的进度条，
+/// B 的「写这一章」也跟着灰掉）。
+ApiResult get_write_status(const std::string& project, const std::string& lane);
+
+/// POST /api/script/series/stop —— 停写作。body `{project?, lane?}`，回 `{stopped}`。
+///
+/// 带 `project`：只停**这部片子、这一道**（`lane` 不带就是页面按钮那一道）；
+/// 再带 `all: true` 就是这部片子所有道上的。
+/// 不带：老客户端——**恰好只有一件在写**时停它，好几件的话谁也不停（回
+/// false），不能替人猜是哪一件。
+ApiResult post_write_stop(const nlohmann::json& body);
+
 }  // namespace changji::http

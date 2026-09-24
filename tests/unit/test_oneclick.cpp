@@ -85,9 +85,10 @@ TEST_CASE("一键成片：写过正文的项目不带 overwrite 就别动它") {
     fs::remove_all(store.root(), ec);
 }
 
-TEST_CASE("一键成片：出片那个槽忙着的时候按下去，当场说清楚") {
-    // 最后一步要 Run 那个槽。等跑到第六步（四十分钟之后）才发现它被占着，
-    // 前面五步全白跑——那五步的产物留着，但人等的是一条片子。
+TEST_CASE("一键成片：别的片子在出片也按得下去——出片那一步排队，不当场 409") {
+    // 原来这儿钉的是「出片那个槽忙着就 409」：那是 RunQueue 之前的事——第六步
+    // 撞上别人在出片就是一个 409，前面五步白跑。现在第二件出片进队列排着、轮到
+    // 了自己开始，于是别的片子出一个钟头的片，这一部的一键成片不必干等着。
     reset_jobs();
     auto store = make_store("槽忙着");
 
@@ -102,9 +103,7 @@ TEST_CASE("一键成片：出片那个槽忙着的时候按下去，当场说清
         return http::post_oneclick(
             json{{"project", paths::to_utf8(store.root())}}, mute(), no_deps());
     });
-    CHECK(r.status == 409);
-    CHECK(r.body.at("detail").get<std::string>().find("出片") !=
-          std::string::npos);
+    CHECK(r.status != 409);
 
     reset_jobs();
     std::error_code ec;

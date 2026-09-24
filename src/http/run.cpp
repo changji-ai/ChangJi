@@ -195,6 +195,37 @@ public:
         return n;
     }
 
+    /// 这部片子、这一道还有排着的吗。
+    bool has(const std::string& project, const std::string& lane) const {
+        std::lock_guard<std::mutex> lg(mu_);
+        for (const auto& e : pending_) {
+            if (paths::same_dir(e.body.value("project", std::string{}), project) &&
+                e.body.value("lane", std::string{}) == lane) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// 只清这部片子的（`lane` 非空时再收窄到那一道）。回清掉了几件。
+    int clear_for(const std::string& project, const std::string* lane) {
+        std::lock_guard<std::mutex> lg(mu_);
+        const auto before = pending_.size();
+        pending_.erase(
+            std::remove_if(pending_.begin(), pending_.end(),
+                           [&](const Entry& e) {
+                               if (!paths::same_dir(
+                                       e.body.value("project", std::string{}),
+                                       project)) {
+                                   return false;
+                               }
+                               return lane == nullptr ||
+                                      e.body.value("lane", std::string{}) == *lane;
+                           }),
+            pending_.end());
+        return static_cast<int>(before - pending_.size());
+    }
+
 private:
     struct Entry {
         json body;
@@ -322,7 +353,9 @@ ApiResult post_run(const json& body, const RunDeps& deps) {
     // 是静默的（webapp/client/src/composables/useShots.js 那个 api.run）。
     static const std::set<std::string> kKnown = {
         "project", "episode_id",   "skip_final", "skip_draft", "shot_ids",
-        "force",   "all_episodes", "stages",     "order",      "preview_s"};
+        "force",   "all_episodes", "stages",     "order",      "preview_s",
+        // 谁派的（`pipeline::chat_lane`）。任务表记着它，停的时候按它认。
+        "lane"};
     std::vector<std::string> unknown;
     for (const auto& [key, _] : body.items()) {
         if (kKnown.count(key) == 0) unknown.push_back(key);
@@ -351,7 +384,11 @@ ApiResult post_run(const json& body, const RunDeps& deps) {
                 {{"started", false},
                  {"queued", true},
                  {"position", at},
-                 {"running", running_episode()}}};
+                 {"running", running_episode()},
+                 // 前面跑着的是哪部片子的。只有章号的话「排在 ep01 后面」读起来
+                 // 像是自己的 ep01。
+                 {"running_project",
+                  pipeline::jobs().running_project(pipeline::JobKind::Run)}}};
     }
 
     // **开工前那趟体检要在这儿判，不能只长在界面上。**
@@ -603,7 +640,8 @@ ApiResult post_run(const json& body, const RunDeps& deps) {
             ? SAYF("预告 · %1 · 前 %2", queue[0], util::human_time(preview_s))
         : queue.size() == 1
             ? SAYF("出片 · %1", queue[0])
-            : SAYF("出片 · %1 章", std::to_string(queue.size())));
+            : SAYF("出片 · %1 章", std::to_string(queue.size())),
+        body.value("lane", std::string{}));
 
     // start() 只在同种任务已经在跑时返回 false，而上面刚判过。
     // 还是要判：那两步之间没有锁，两个请求同时进来时后一个要拿到 409，
@@ -635,8 +673,42 @@ ApiResult get_run_status(const std::string& project) {
     return {200, out};
 }
 
-ApiResult post_run_queue_clear() {
-    return {200, {{"cleared", RunQueue::instance().clear()}}};
+ApiResult post_run_queue_clear(const json& body) {
+    const std::string project =
+        body.is_object() ? body.value("project", std::string{}) : std::string{};
+    if (project.empty()) return {200, {{"cleared", RunQueue::instance().clear()}}};
+    std::string lane;
+    const bool has_lane = body.contains("lane") && body.at("lane").is_string();
+    if (has_lane) lane = body.at("lane").get<std::string>();
+    return {200, {{"cleared", RunQueue::instance().clear_for(
+                                  project, has_lane ? &lane : nullptr)}}};
+}
+
+bool run_queued_for(const std::string& project, const std::string& lane) {
+    return RunQueue::instance().has(project, lane);
+}
+
+ApiResult post_run_stop(const json& body) {
+    const std::string project =
+        body.is_object() ? body.value("project", std::string{}) : std::string{};
+    // 没在跑时回 {"stopped": false} 而不是报错。
+    // 前端的停止按钮是无条件可点的，重复点不该弹错误框。
+    if (project.empty()) {
+        return {200, {{"stopped", pipeline::jobs().cancel(pipeline::JobKind::Run)},
+                      {"dequeued", 0}}};
+    }
+    if (body.contains("lane") && body.at("lane").is_string()) {
+        const std::string lane = body.at("lane").get<std::string>();
+        // **先撤排着的再停在跑的**：反过来的话，停掉槽上那件的一瞬间队列
+        // 就起下一件——正是这条对话排着的那件。
+        const int dequeued = RunQueue::instance().clear_for(project, &lane);
+        const bool stopped =
+            pipeline::jobs().cancel(pipeline::JobKind::Run, project, lane);
+        return {200, {{"stopped", stopped}, {"dequeued", dequeued}}};
+    }
+    const bool stopped =
+        pipeline::jobs().cancel_project(pipeline::JobKind::Run, project) > 0;
+    return {200, {{"stopped", stopped}, {"dequeued", 0}}};
 }
 
 ApiResult get_run_preview(const std::string& path,

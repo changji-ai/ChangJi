@@ -690,6 +690,9 @@ RunReport run_episode(const ProjectStore& store,
     // 不在这儿解决。
     bool gone_said = false;
     const auto save = [&] {
+        // 读→换这一格→存，一把锁（ProjectStore::lock）：同一部片子别的对话
+        // 在拆另一章的分镜，各读各存的话后存的那份把前一份冲回去。
+        const auto store_guard = store.lock();
         Project latest = store.load_project();
         Episode* target = latest.episode_by_id(opts.episode_id);
         if (target == nullptr) {
@@ -936,6 +939,7 @@ RunReport run_episode(const ProjectStore& store,
                         //
                         // `ensure_character_voice` 只改一个字段（voice_id），
                         // 所以只搬这一个；这期间人自己挑了音色的就不顶。
+                        const auto store_guard = store.lock();   // 读→改→存一把锁
                         AssetLibrary latest = store.load_assets();
                         for (const std::string& id : speaking) {
                             const auto src = assets.characters.find(id);

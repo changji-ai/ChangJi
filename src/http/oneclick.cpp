@@ -112,11 +112,18 @@ ApiResult post_oneclick(const json& body, std::shared_ptr<llm::Client> client,
     //
     // **都要在这儿判。** 起了活再抛的话，那句话落进任务状态的 error 里，
     // 页面上是一条"失败的任务"，而人按下去那一刻什么提示都没有。
-    if (pipeline::jobs().running(pipeline::JobKind::Write)) {
-        throw ApiError(409, SAY("剧本那边还在忙"));
-    }
-    if (pipeline::jobs().running(pipeline::JobKind::Run)) {
-        throw ApiError(409, SAY("已经在出片了。等这一轮跑完再按"));
+    //
+    // **只挡这部片子、这个派活的人手上那一件**（`JobTable::start` 的 `lane`）。
+    // 原来挡的是全机器：别的片子在写，这边一键成片按不下去。
+    //
+    // 出片那道闸拿掉了：它是 RunQueue 之前的东西（那时候第六步撞上别的片子
+    // 在出片就是一个 409）。现在第二件出片进队列排着，轮到了自己开始。
+    {
+        const std::string lane = body.value("lane", std::string{});
+        if (pipeline::jobs().running(pipeline::JobKind::Write,
+                                     body.value("project", std::string{}), lane)) {
+            throw ApiError(409, SAY("剧本那边还在忙"));
+        }
     }
     // 已经写过正文的项目：第一步就会把整个故事换掉，那是人几个钟头的东西。
     refuse_to_clobber(story_or_empty(store), body);
@@ -135,7 +142,7 @@ ApiResult post_oneclick(const json& body, std::shared_ptr<llm::Client> client,
         [store, client, root, premise, keywords, preview_s,
          deps](pipeline::JobProgress& p) {
             const JobScope scope{
-                pipeline::jobs().job_id(pipeline::JobKind::Write), p.token()};
+                p.job_id(), p.token()};
             pipeline::CancelToken& tok = p.token();
             p.set_total(kStepCount);
 
@@ -223,16 +230,20 @@ ApiResult post_oneclick(const json& body, std::shared_ptr<llm::Client> client,
                         "卡在哪儿了"));
             }
             say(p, 6, util::human_time(preview_s));
+            // **带上这一道**：这条链是哪条对话派的，出片那件也记在它名下——
+            // 人在那条对话里说「停」，排着、跑着的片子要跟着停。
             post_run(json{{"project", root},
                           {"episode_id", episode_id},
-                          {"preview_s", preview_s}},
+                          {"preview_s", preview_s},
+                          {"lane", p.lane()}},
                      deps);
             p.set_done(kStepCount);
             p.set_message(SAYF("前 %1 的片子在出了——跟着出片那条进度看",
                                util::human_time(preview_s)));
         },
         SAY("已手动停止。已经写出来的故事、剧本、分镜都留着。"), root,
-        SAYF("一键成片 · 前 %1", util::human_time(preview_s)));
+        SAYF("一键成片 · 前 %1", util::human_time(preview_s)),
+        body.value("lane", std::string{}));
     if (!started) throw ApiError(409, SAY("剧本那边还在忙"));
     return {202,
             {{"started", true},

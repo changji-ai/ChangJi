@@ -225,7 +225,7 @@ ApiResult post_film_join(const json& body) {
     const bool started = pipeline::jobs().start(
         pipeline::JobKind::Run, "",
         [root](pipeline::JobProgress& p) {
-            const JobScope scope{pipeline::jobs().job_id(pipeline::JobKind::Run), p.token()};
+            const JobScope scope{p.job_id(), p.token()};
             const ProjectStore st(paths::from_utf8(root));
             const config::Settings s = config::load_settings(st.root());
             const media::FFmpeg ff(s.assembly.ffmpeg_path, s.assembly.ffprobe_path,

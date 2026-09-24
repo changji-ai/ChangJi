@@ -270,6 +270,10 @@ json character_ref_job(const std::string& project_path,
     // 改的外观、提示词、别的格子刚画好的图全被静默盖掉——而"一边出图一边
     // 在抽屉里改字"正是这一页的日常：界面那边专门为它写过"只刷新没改过的
     // 那几条"，结果引擎这头把人改的东西吞了。
+    //
+    // **读、填、存一把锁**（ProjectStore::lock）：两张卡同时出完两格的话，
+    // 各读各存，后存的那份里前一格还是空的——图在盘上、库里说没有。
+    std::unique_lock<std::recursive_mutex> store_guard = store.lock();
     AssetLibrary latest = store.load_assets();
     const auto dst = latest.characters.find(char_id);
     if (dst == latest.characters.end()) {
@@ -283,6 +287,7 @@ json character_ref_job(const std::string& project_path,
     else if (slot == "three_quarter") dst->second.ref_three_quarter = out.rel;
     else                              dst->second.ref_back = out.rel;
     store.save_assets(latest);
+    store_guard.unlock();
 
     // 和上传那条一样**无条件重跑**：参考图直接决定画面长什么样。
     return {
@@ -375,7 +380,8 @@ json location_ref_job(const std::string& project_path,
         stages::build_location_ref_prompt(l, assets.style),
         stages::ref_negative(assets.style), seed, stream_id, shared, enrolled);
 
-    // 同 character_ref_job：重新读一份，只填这一格。理由见那儿。
+    // 同 character_ref_job：重新读一份，只填这一格，一把锁。理由见那儿。
+    std::unique_lock<std::recursive_mutex> store_guard = store.lock();
     AssetLibrary latest = store.load_assets();
     const auto dst = latest.locations.find(location_id);
     if (dst == latest.locations.end()) {
@@ -385,6 +391,7 @@ json location_ref_job(const std::string& project_path,
     }
     dst->second.ref_empty = out.rel;
     store.save_assets(latest);
+    store_guard.unlock();
 
     return {
         {"saved", out.rel},

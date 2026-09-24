@@ -239,6 +239,9 @@ int remap_shots(Project& project, const IdRemap& remap) {
 
 ApiResult merge_bible(const ProjectStore& store, const AssetLibrary& fresh,
                       bool overwrite, const char* source) {
+    // 读项目、读库、合并、存两份、清镜头状态——一把锁（ProjectStore::lock）。
+    // 这里面没有大模型，锁得住。
+    const auto store_guard = store.lock();
     Project project = load_or_400(store);
     // **库要在这儿读，不能让调用方在出圣经之前就读好。**
     //
@@ -506,8 +509,9 @@ ApiResult post_plan(const json& body, llm::Client& client,
     }
 
     // 单镜的时长档位是这部电影的属性（[video].max_shot_s），按项目那份设置
-    // 算一遍再拆镜头。见 config::apply_video_limits。
-    config::apply_video_limits(config::load_settings(store.root()));
+    // 算一遍再拆镜头——只挂在这条线程上（见 stages::ScopedVideoLimits）。
+    const stages::ScopedVideoLimits limits_here{
+        config::video_limits_for(config::load_settings(store.root()))};
     // 切场、拆镜、补台词、查覆盖、重编号、拉回时长，都在 run_storyboard 里
     // ——三处调用共用那一份，按场拆镜（2026-09-15）就是在那儿分的岔。
     pipeline::StoryboardRunOptions sb;
@@ -555,6 +559,7 @@ ApiResult post_plan(const json& body, llm::Client& client,
     // 而 `project` 是那几分钟**之前**读的。把它整份写回去，这期间界面上改
     // 的东西全被悄悄吞掉：别的章的镜头抽屉存的那一笔、改过的章名、手动加
     // 的一章。批量那条（post_plan_all）和写全片那条都是这么修的。
+    const auto store_guard = store.lock();   // 读→改→存一把锁（ProjectStore::lock）
     Project latest = store.load_project();
     Episode* ep = latest.episode_by_id(episode_id);
     if (ep == nullptr) {

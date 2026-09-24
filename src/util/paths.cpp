@@ -26,6 +26,14 @@ bool same_dir(const std::string& a, const std::string& b) {
     return pa == pb;
 }
 
+std::string dir_key(const std::string& dir) {
+    if (dir.empty()) return {};
+    std::error_code ec;
+    const std::filesystem::path p = std::filesystem::weakly_canonical(from_utf8(dir), ec);
+    if (ec) return dir;
+    return to_utf8(p);
+}
+
 namespace fs = std::filesystem;
 
 #ifdef _WIN32

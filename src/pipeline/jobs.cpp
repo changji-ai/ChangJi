@@ -2,6 +2,8 @@
 
 #include "pipeline/activity.hpp"
 #include "pipeline/task_board.hpp"
+#include "util/paths.hpp"
+#include "util/writer.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -62,29 +64,98 @@ json Event::to_json() const {
     };
 }
 
-JobTable::JobTable() = default;
+std::string chat_lane(const std::string& chat) { return "chat:" + chat; }
+
+namespace {
+
+/// Write 槽的键。片子走 `paths::dir_key`（第十一条：同一部片子两种写法
+/// 要落到同一个槽上，不然该 409 的没 409，两件同时往一个文件里写）。
+std::string lane_key(const std::string& project, const std::string& lane) {
+    return paths::dir_key(project) + '\x1f' + lane;
+}
+
+/// 槽上那件是不是这部片子、这一道的。Run 只有一个槽，问"这一道"时靠它。
+bool slot_is(const JobSlot& s, const std::string& project, const std::string& lane) {
+    return s.state.lane == lane && paths::same_dir(s.state.project, project);
+}
+
+}  // namespace
+
+JobTable::JobTable() { run_.kind = JobKind::Run; }
 
 JobTable::~JobTable() {
     // 先请求取消再等。不取消的话析构会卡在一个可能跑几十分钟的任务上。
-    run_.token.request();
-    write_.token.request();
+    {
+        std::lock_guard lg(mu_);
+        for (Slot* s : all_slots()) s->token.request();
+    }
     wait_idle();
-    if (run_.worker.joinable()) run_.worker.join();
-    if (write_.worker.joinable()) write_.worker.join();
+    // 锁外 join：工作线程收尾要拿这把锁。槽只增不减，拿一份指针表够了。
+    std::vector<Slot*> slots;
+    {
+        std::lock_guard lg(mu_);
+        slots = all_slots();
+    }
+    for (Slot* s : slots) {
+        if (s->worker.joinable()) s->worker.join();
+    }
 }
 
-JobTable::Slot& JobTable::slot(JobKind k) {
-    return k == JobKind::Run ? run_ : write_;
+JobTable::Slot* JobTable::find(JobKind k, const std::string& project,
+                               const std::string& lane, bool make) {
+    if (k == JobKind::Run) return &run_;
+    const std::string key = lane_key(project, lane);
+    auto it = write_.find(key);
+    if (it != write_.end()) return it->second.get();
+    if (!make) return nullptr;
+    auto s = std::make_unique<Slot>();
+    s->kind = JobKind::Write;
+    Slot* raw = s.get();
+    write_.emplace(key, std::move(s));
+    return raw;
 }
-const JobTable::Slot& JobTable::slot(JobKind k) const {
-    return k == JobKind::Run ? run_ : write_;
+
+const JobTable::Slot* JobTable::find(JobKind k, const std::string& project,
+                                     const std::string& lane) const {
+    if (k == JobKind::Run) return &run_;
+    auto it = write_.find(lane_key(project, lane));
+    return it == write_.end() ? nullptr : it->second.get();
+}
+
+const JobTable::Slot* JobTable::latest(JobKind k) const {
+    if (k == JobKind::Run) return &run_;
+    const Slot* best = nullptr;
+    for (const auto& [key, s] : write_) {
+        // 在跑的优先：老客户端不带片子来问"写得怎么样了"，给它一件跑完的
+        // 而另一件正在跑，它会以为全停了。
+        if (best == nullptr) { best = s.get(); continue; }
+        if (s->state.running != best->state.running) {
+            if (s->state.running) best = s.get();
+            continue;
+        }
+        if (s->seq > best->seq) best = s.get();
+    }
+    return best;
+}
+
+std::vector<JobTable::Slot*> JobTable::all_slots() {
+    std::vector<Slot*> out{&run_};
+    for (auto& [key, s] : write_) out.push_back(s.get());
+    return out;
+}
+
+std::vector<const JobTable::Slot*> JobTable::all_slots() const {
+    std::vector<const Slot*> out{&run_};
+    for (const auto& [key, s] : write_) out.push_back(s.get());
+    return out;
 }
 
 bool JobTable::start(JobKind kind, const std::string& episode_id, Body body,
                      const std::string& stop_message,
-                     const std::string& project, const std::string& title) {
+                     const std::string& project, const std::string& title,
+                     const std::string& lane) {
     std::unique_lock lk(mu_);
-    Slot& s = slot(kind);
+    Slot& s = *find(kind, project, lane, /*make=*/true);
     if (s.state.running) return false;
 
     // 先占坑再干别的。下面 join 上一轮线程时要临时解锁，
@@ -96,6 +167,10 @@ bool JobTable::start(JobKind kind, const std::string& episode_id, Body body,
     // 还在收尾（那种情况 running 早就是 false 了）。这里一定要等到它真的结束：
     // 不等的话 std::thread 的赋值运算符会调 terminate，
     // 而且新旧两条线程会同时写同一个 state。
+    //
+    // **只等这一道自己的上一件。** 分道之前这儿等的是全机器那个槽——A 那边
+    // 刚按了停、还在收尾（命令行后端一收尾就是一次完整的生成），B 派活的那个
+    // 请求线程就陪着干等。
     if (s.worker.joinable()) {
         lk.unlock();
         s.worker.join();
@@ -108,18 +183,21 @@ bool JobTable::start(JobKind kind, const std::string& episode_id, Body body,
     s.state.job_id = new_job_id(kind);
     if (!episode_id.empty()) s.state.episode_id = episode_id;
     s.state.project = project;
+    s.state.lane = lane;
     s.state.started_at = std::chrono::steady_clock::now();
     s.state.stop_message = stop_message;
     s.active = true;
+    s.seq = ++next_seq_;
 
     const std::string job_id = s.state.job_id;
+    Slot* sp = &s;
 
     const std::string task_title =
         !title.empty() ? title
         : kind == JobKind::Run ? SAY("出片")
                                : SAY("批量写作");
     s.state.title = task_title;
-    s.worker = std::thread([this, kind, job_id, project, task_title,
+    s.worker = std::thread([this, kind, sp, job_id, project, lane, task_title,
                             body = std::move(body)]() {
         // **长跑任务也要进那本任务账。**
         //
@@ -134,29 +212,33 @@ bool JobTable::start(JobKind kind, const std::string& episode_id, Body body,
         //   · 令牌挂到这个槽的令牌上，页面上按「结束」等于按顶栏那个停。
         pipeline::Activity act{to_string(kind), project, std::string{},
                                task_title};
-        act.task().token().link(&slot(kind).token);
+        act.task().token().link(&sp->token);
         // 顶栏那块牌子把任务表和短活接成一个列表，这一件两边都在——
         // 打个记号，短活那一份跳过它，别数两遍。
         act.task().mark_long_job();
         {
             std::lock_guard lg(mu_);
-            slot(kind).task_id = act.task().id();
+            sp->task_id = act.task().id();
         }
-        JobProgress progress(this, kind);
+        JobProgress progress(this, kind, sp, job_id, project, lane);
+        // **这条线程上写盘的是谁**（`util/writer.hpp`）：写作记在派活的那一道
+        // 名下，存盘时认得出"盖了别人"；出片只是回填状态、路径，不算作者。
+        const util::WriterScope writer{util::Writer{
+            lane, /*derived=*/kind == JobKind::Run, task_title, {}}};
         try {
             body(progress);
         } catch (const std::exception& e) {
             std::lock_guard lg(mu_);
-            slot(kind).state.error = e.what();
+            sp->state.error = e.what();
         } catch (...) {
             std::lock_guard lg(mu_);
-            slot(kind).state.error = SAY("未知异常");
+            sp->state.error = SAY("未知异常");
         }
 
         json final_msg;
         {
             std::lock_guard lg(mu_);
-            Slot& sl = slot(kind);
+            Slot& sl = *sp;
             sl.state.running = false;
             sl.active = false;
             // 跑完了就没有"还没落定"的了。留着的话下一次页面一进来，
@@ -177,6 +259,10 @@ bool JobTable::start(JobKind kind, const std::string& episode_id, Body body,
                 final_msg = {{"type", "done"}, {"job_id", job_id},
                              {"outputs", sl.state.outputs}};
             }
+            // **哪部片子、谁派的**。同一条 "write" 频道上同时有好几件在推，
+            // 界面不认这两样就会把 A 的「写完了」当成自己这件写完了。
+            final_msg["project"] = sl.state.project;
+            final_msg["lane"] = sl.state.lane;
         }
         emit(job_id, final_msg);
         idle_cv_.notify_all();
@@ -213,9 +299,7 @@ void JobTable::emit(const std::string& job_id, const json& msg) const {
     if (s) s(job_id, msg);
 }
 
-bool JobTable::cancel(JobKind kind) {
-    std::lock_guard lg(mu_);
-    Slot& s = slot(kind);
+bool JobTable::cancel_locked(Slot& s) {
     if (!s.state.running) return false;
     s.token.request();
 
@@ -235,26 +319,68 @@ bool JobTable::cancel(JobKind kind) {
     // 批量出分镜停了是"已经出好的分镜留着"。下面这句兜底只在任务没自报时用，
     // 一件活一条常量见 jobs.hpp 里 kWriteStoppedMessage 那一族。
     // 翻在这一行：常量里存的是中文原话（见 jobs.hpp 那段）。
-    s.state.error = SAY(s.state.stop_message.empty() ? stopped_message(kind)
+    s.state.error = SAY(s.state.stop_message.empty() ? stopped_message(s.kind)
                                                      : s.state.stop_message);
     return true;
 }
 
-void JobTable::record(JobKind kind, Event ev) {
+bool JobTable::cancel(JobKind kind) {
+    std::lock_guard lg(mu_);
+    bool any = false;
+    for (Slot* s : all_slots()) {
+        if (s->kind == kind && cancel_locked(*s)) any = true;
+    }
+    return any;
+}
+
+bool JobTable::cancel(JobKind kind, const std::string& project,
+                      const std::string& lane) {
+    std::lock_guard lg(mu_);
+    if (kind == JobKind::Run) {
+        // Run 只有一个槽：**不是这一道的不停**。原来谁按停都停它，于是 B 那边
+        // 按停，A 的片子出到一半没了。
+        if (!slot_is(run_, project, lane)) return false;
+        return cancel_locked(run_);
+    }
+    Slot* s = find(kind, project, lane, /*make=*/false);
+    return s != nullptr && cancel_locked(*s);
+}
+
+int JobTable::cancel_project(JobKind kind, const std::string& project) {
+    // 空的片子不认：空串匹配谁都行的话，一个没带片子的"停"会停掉全部——
+    // 那正是这一整套要治的事。
+    if (project.empty()) return 0;
+    std::lock_guard lg(mu_);
+    int n = 0;
+    for (Slot* s : all_slots()) {
+        if (s->kind != kind || !s->state.running) continue;
+        if (!paths::same_dir(s->state.project, project)) continue;
+        if (cancel_locked(*s)) ++n;
+    }
+    return n;
+}
+
+void JobTable::record(Slot& slot, Event ev) {
     std::string job_id;
     json msg;
+    const JobKind kind = slot.kind;
 
     // 预览图**只广播**：不进事件环（几十 KB 一张，环放不下），不动进度
     // （它不是一步，是一步中间的样子），不进 /api/run（和 Python 对拍）。
     // 老客户端不认识 kind = preview，按 progress 处理也只是多刷一次状态。
     if (ev.kind == "preview") {
+        std::string project, lane;
         {
             std::lock_guard lg(mu_);
-            job_id = slot(kind).state.job_id;
+            job_id = slot.state.job_id;
+            project = slot.state.project;
+            lane = slot.state.lane;
         }
         emit(job_id, json{{"type", "progress"},
                           {"kind", "preview"},
                           {"job_id", job_id},
+                          {"project", project},
+                          {"lane", lane},
                           {"stage", ev.stage},
                           {"shot_id", ev.shot_id.value_or("")},
                           {"step", ev.current},
@@ -263,8 +389,7 @@ void JobTable::record(JobKind kind, Event ev) {
     }
     {
         std::lock_guard lg(mu_);
-        Slot& s = slot(kind);
-        JobState& st = s.state;
+        JobState& st = slot.state;
 
         // 事件时间戳由这里统一打，调用方不用管。Python 那边是 append 时
         // 取 round(time.time(),3)，同一个位置。
@@ -311,6 +436,9 @@ void JobTable::record(JobKind kind, Event ev) {
             // **加字段不改旧字段**，老客户端照旧。
             {"kind", ev.kind},
             {"job_id", job_id},
+            // 哪部片子、谁派的。见 JobState::lane。
+            {"project", st.project},
+            {"lane", st.lane},
             {"stage", ev.stage},
             // **推 st.* 而不是 ev.*。** 上面那道「只有带总数的事件才更新
             // 进度」只守住了服务端这份快照，推出去的消息原来带的还是事件
@@ -362,20 +490,18 @@ void JobTable::record(JobKind kind, Event ev) {
 
 std::vector<std::string> JobTable::pending(JobKind kind) const {
     std::lock_guard lg(mu_);
-    return slot(kind).state.pending;
+    const Slot* s = latest(kind);
+    return s != nullptr ? s->state.pending : std::vector<std::string>{};
 }
 
 bool JobTable::cancel_by_task(std::uint64_t task_id) {
     if (task_id == 0) return false;
-    for (const JobKind k : {JobKind::Run, JobKind::Write}) {
-        bool hit = false;
-        {
-            // **查完就放锁。** 下面 cancel() 自己要拿同一把锁，
-            // 攥着进去就是自锁。
-            std::lock_guard lg(mu_);
-            hit = slot(k).task_id == task_id;
-        }
-        if (hit) return cancel(k);
+    // **一把锁里查完、停完。** 原来查一个槽放一次锁、再去 cancel(kind)
+    // ——分道之后 cancel(kind) 是"这一类全停"，照原样搬过来就是按一行的叉
+    // 停掉所有片子的写作。
+    std::lock_guard lg(mu_);
+    for (Slot* s : all_slots()) {
+        if (s->task_id == task_id) return cancel_locked(*s);
     }
     return false;
 }
@@ -383,8 +509,9 @@ bool JobTable::cancel_by_task(std::uint64_t task_id) {
 json JobTable::running_jobs() const {
     std::lock_guard lg(mu_);
     json out = json::array();
-    for (const JobKind k : {JobKind::Run, JobKind::Write}) {
-        const JobState& s = slot(k).state;
+    for (const Slot* sl : all_slots()) {
+        const JobState& s = sl->state;
+        const JobKind k = sl->kind;
         if (!s.running) continue;
         const double elapsed =
             s.started_at.time_since_epoch().count() == 0
@@ -396,9 +523,11 @@ json JobTable::running_jobs() const {
         out.push_back({
             // 账本上那一行的 id。**思考正文按它取**（`/api/task/thinking`），
             // 和短活那份（`running_activities`）同一个字段名。0 = 还没登记上。
-            {"id", slot(k).task_id},
+            {"id", sl->task_id},
             {"kind", to_string(k)},
             {"project", s.project},
+            // 谁派的（见 JobState::lane）。对话按它认"这件是我派的"。
+            {"lane", s.lane},
             {"episode_id", s.episode_id.value_or("")},
             {"stage", s.stage},
             // 长跑任务不画某一格参考图。字段还是要有，理由同下面那个
@@ -409,7 +538,7 @@ json JobTable::running_jobs() const {
             {"current", k == JobKind::Run ? s.current : s.done},
             {"total", s.total},
             {"message", s.message},
-            // 长跑任务没有"排队"这一说：一种一个槽，起得来就是在跑。
+            // 长跑任务没有"排队"这一说：一道一个槽，起得来就是在跑。
             // 字段还是要有，前端一套代码画两边。
             {"queued", false},
             // **这是一整件长跑，它底下那些镜头是另外几行。** 数「几件在跑」
@@ -424,10 +553,9 @@ json JobTable::running_jobs() const {
     return out;
 }
 
-json JobTable::snapshot(JobKind kind) const {
-    std::lock_guard lg(mu_);
-    const JobState& s = slot(kind).state;
+namespace {
 
+json snapshot_of(JobKind kind, const JobState& s) {
     json events = json::array();
     const std::size_t skip =
         s.events.size() > kSnapshotEvents ? s.events.size() - kSnapshotEvents : 0;
@@ -472,25 +600,94 @@ json JobTable::snapshot(JobKind kind) const {
     };
 }
 
+}  // namespace
+
+json JobTable::snapshot(JobKind kind) const {
+    std::lock_guard lg(mu_);
+    const Slot* s = latest(kind);
+    return snapshot_of(kind, s != nullptr ? s->state : JobState{});
+}
+
+json JobTable::snapshot(JobKind kind, const std::string& project,
+                        const std::string& lane) const {
+    std::lock_guard lg(mu_);
+    if (kind == JobKind::Run) {
+        // Run 只有一个槽。**不是这一道的就当没在跑**——不然 B 问自己的进度，
+        // 回来的是 A 那件跑到第几镜。
+        return snapshot_of(kind, slot_is(run_, project, lane) ? run_.state
+                                                               : JobState{});
+    }
+    const Slot* s = find(kind, project, lane);
+    return snapshot_of(kind, s != nullptr ? s->state : JobState{});
+}
+
 bool JobTable::running(JobKind kind) const {
     std::lock_guard lg(mu_);
-    return slot(kind).state.running;
+    for (const Slot* s : all_slots()) {
+        if (s->kind == kind && s->state.running) return true;
+    }
+    return false;
+}
+
+bool JobTable::running(JobKind kind, const std::string& project,
+                       const std::string& lane) const {
+    std::lock_guard lg(mu_);
+    if (kind == JobKind::Run) return run_.state.running && slot_is(run_, project, lane);
+    const Slot* s = find(kind, project, lane);
+    return s != nullptr && s->state.running;
+}
+
+bool JobTable::running_in(JobKind kind, const std::string& project) const {
+    std::lock_guard lg(mu_);
+    for (const Slot* s : all_slots()) {
+        if (s->kind != kind || !s->state.running) continue;
+        // 在跑、却没说是哪部片子的：**当它是**（fail-closed，见 running_project）。
+        if (s->state.project.empty() || paths::same_dir(s->state.project, project)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 std::string JobTable::running_project(JobKind kind) const {
     std::lock_guard lg(mu_);
-    const Slot& s = slot(kind);
-    return s.state.running ? s.state.project : std::string();
+    const Slot* s = latest(kind);
+    return s != nullptr && s->state.running ? s->state.project : std::string();
+}
+
+std::vector<std::string> JobTable::running_projects(JobKind kind) const {
+    std::lock_guard lg(mu_);
+    std::vector<std::string> out;
+    for (const Slot* s : all_slots()) {
+        if (s->kind == kind && s->state.running) out.push_back(s->state.project);
+    }
+    return out;
 }
 
 std::string JobTable::job_id(JobKind kind) const {
     std::lock_guard lg(mu_);
-    return slot(kind).state.job_id;
+    const Slot* s = latest(kind);
+    return s != nullptr ? s->state.job_id : std::string();
+}
+
+std::string JobTable::job_id(JobKind kind, const std::string& project,
+                             const std::string& lane) const {
+    std::lock_guard lg(mu_);
+    if (kind == JobKind::Run) {
+        return slot_is(run_, project, lane) ? run_.state.job_id : std::string();
+    }
+    const Slot* s = find(kind, project, lane);
+    return s != nullptr ? s->state.job_id : std::string();
 }
 
 void JobTable::wait_idle() {
     std::unique_lock lk(mu_);
-    idle_cv_.wait(lk, [this] { return !run_.active && !write_.active; });
+    idle_cv_.wait(lk, [this] {
+        for (const Slot* s : all_slots()) {
+            if (s->active) return false;
+        }
+        return true;
+    });
 }
 
 
@@ -511,6 +708,9 @@ static nlohmann::json progress_of(JobKind kind, const std::string& job_id,
     return {{"type", "progress"},
             {"kind", "progress"},
             {"job_id", job_id},
+            // 哪部片子、谁派的。见 JobState::lane。
+            {"project", s.project},
+            {"lane", s.lane},
             {"stage", s.stage},
             {"step", kind == JobKind::Run ? s.current : s.done},
             {"total", s.total},
@@ -529,7 +729,7 @@ static nlohmann::json progress_of(JobKind kind, const std::string& job_id,
 }
 
 template <typename F>
-void JobTable::mutate(JobKind kind, F&& fn) {
+void JobTable::mutate(Slot& slot, F&& fn) {
     // **改完要推出去。** 原来这儿只改状态不广播，而 JobProgress 的
     // set_done / set_total / set_message 全走它——也就是说写章节这条路
     // 从头到尾一条进度都没推过，界面只能靠 1.5 秒一次的轮询。轮询一旦
@@ -544,17 +744,17 @@ void JobTable::mutate(JobKind kind, F&& fn) {
     std::string note;
     {
         std::lock_guard lg(mu_);
-        JobState& st = slot(kind).state;
+        JobState& st = slot.state;
         fn(st);
         // 没在跑就不用推：起之前和收尾之后的那几次 mutate 跟界面无关，
         // 而收尾自己会发 done/error。
         if (!st.running) return;
         job_id = st.job_id;
-        msg = progress_of(kind, job_id, st);
-        task_id = slot(kind).task_id;
+        msg = progress_of(slot.kind, job_id, st);
+        task_id = slot.task_id;
         // Run 用 current（第几镜），Write 用 done（第几章）——和
         // `running_jobs` 那儿抹平成一套是同一个道理。
-        cur = kind == JobKind::Run ? st.current : st.done;
+        cur = slot.kind == JobKind::Run ? st.current : st.done;
         tot = st.total;
         note = st.message;
     }
@@ -571,63 +771,63 @@ void JobTable::mutate(JobKind kind, F&& fn) {
     emit(job_id, msg);
 }
 
-void JobProgress::report(Event ev) { table_->record(kind_, std::move(ev)); }
+void JobProgress::report(Event ev) { table_->record(*slot_, std::move(ev)); }
 
 void JobProgress::set_message(std::string m) {
-    table_->mutate(kind_, [&](JobState& s) { s.message = std::move(m); });
+    table_->mutate(*slot_, [&](JobState& s) { s.message = std::move(m); });
 }
 
 void JobProgress::set_done(int done) {
-    table_->mutate(kind_, [&](JobState& s) { s.done = done; });
+    table_->mutate(*slot_, [&](JobState& s) { s.done = done; });
 }
 
 void JobProgress::set_total(int total) {
-    table_->mutate(kind_, [&](JobState& s) { s.total = total; });
+    table_->mutate(*slot_, [&](JobState& s) { s.total = total; });
 }
 
 void JobProgress::add_episode(nlohmann::json ep) {
-    table_->mutate(kind_,
+    table_->mutate(*slot_,
                    [&](JobState& s) { s.episodes.push_back(std::move(ep)); });
 }
 
 void JobProgress::set_pending(std::vector<std::string> shot_ids,
                               std::string stage) {
-    table_->mutate(kind_, [&](JobState& s) {
+    table_->mutate(*slot_, [&](JobState& s) {
         s.pending = std::move(shot_ids);
         s.pending_stage = std::move(stage);
     });
 }
 
 void JobProgress::set_output(std::string path) {
-    table_->mutate(kind_, [&](JobState& s) { s.output = std::move(path); });
+    table_->mutate(*slot_, [&](JobState& s) { s.output = std::move(path); });
 }
 
 void JobProgress::add_output(std::string path) {
-    table_->mutate(kind_,
+    table_->mutate(*slot_,
                    [&](JobState& s) { s.outputs.push_back(std::move(path)); });
 }
 
 void JobProgress::set_episode_id(std::string id) {
-    table_->mutate(kind_, [&](JobState& s) { s.episode_id = std::move(id); });
+    table_->mutate(*slot_, [&](JobState& s) { s.episode_id = std::move(id); });
 }
 
 void JobProgress::set_queue(int done, int total) {
-    table_->mutate(kind_, [&](JobState& s) {
+    table_->mutate(*slot_, [&](JobState& s) {
         s.queue_done = done;
         s.queue_total = total;
     });
 }
 
 void JobProgress::set_error(std::string e) {
-    table_->mutate(kind_, [&](JobState& s) { s.error = std::move(e); });
+    table_->mutate(*slot_, [&](JobState& s) { s.error = std::move(e); });
 }
 
 bool JobProgress::cancelled() const {
     std::lock_guard lg(table_->mu_);
-    return table_->slot(kind_).token.cancelled();
+    return slot_->token.cancelled();
 }
 
-CancelToken& JobProgress::token() { return table_->slot(kind_).token; }
+CancelToken& JobProgress::token() { return slot_->token; }
 
 JobTable& jobs() {
     static JobTable table;

@@ -15,6 +15,7 @@
 #include <atomic>
 #include <chrono>
 #include <future>
+#include <mutex>
 #include <set>
 #include <string>
 #include <thread>
@@ -1091,5 +1092,143 @@ TEST_CASE("多语言 · 手动停止那句话跟着界面语言走") {
     // 德语下这两条都得成立：**换掉了**，而且换成的正是表里那一句。
     CHECK(err != std::string(kRunStoppedMessage));
     CHECK(err == SAY(kRunStoppedMessage));
+    t.wait_idle();
+}
+
+// ---- 按「片子 + 谁派的」分道（2026-09-24） ----
+//
+// 用户报「两个项目的会话没法一起写东西」：写作原来全机器一个槽，A 片子在写
+// 正文，B 片子的对话说什么「写」都回 409。现在 Write 一道一个槽，出片还是
+// 全机器一个（显卡就那几张）。
+
+namespace {
+
+/// 卡住、等放行的任务体。
+JobTable::Body hold(std::atomic<bool>& release) {
+    return [&release](JobProgress& p) {
+        while (!release.load() && !p.cancelled()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    };
+}
+
+}  // namespace
+
+TEST_CASE("写作按道分：两部片子、同一部片子的两条对话可以同时写；同一道上才挡") {
+    JobTable t;
+    std::atomic<bool> release{false};
+    CHECK(t.start(JobKind::Write, "", hold(release), "", "/films/a", "", "chat:1"));
+    CHECK(t.start(JobKind::Write, "", hold(release), "", "/films/b", "", "chat:2"));
+    // 同一部片子、另一条对话：也不挡。
+    CHECK(t.start(JobKind::Write, "", hold(release), "", "/films/a", "", "chat:3"));
+    // 同一部片子、页面按钮那一道：不挡。
+    CHECK(t.start(JobKind::Write, "", hold(release), "", "/films/a", "", ""));
+    // 同一道：挡（调用方据此回 409）。
+    CHECK_FALSE(t.start(JobKind::Write, "", noop(), "", "/films/a", "", "chat:1"));
+
+    CHECK(t.running(JobKind::Write, "/films/a", "chat:1"));
+    CHECK_FALSE(t.running(JobKind::Write, "/films/b", "chat:1"));
+    CHECK(t.running_in(JobKind::Write, "/films/b"));
+    CHECK(t.running_projects(JobKind::Write).size() == 4);
+    CHECK(t.running_jobs().size() == 4);
+
+    release = true;
+    t.wait_idle();
+}
+
+TEST_CASE("写作按道分：停一道只停那一道，停一部片子停它所有道，别的片子照跑") {
+    JobTable t;
+    std::atomic<bool> release{false};
+    REQUIRE(t.start(JobKind::Write, "", hold(release), "", "/films/a", "", "chat:1"));
+    REQUIRE(t.start(JobKind::Write, "", hold(release), "", "/films/a", "", "chat:2"));
+    REQUIRE(t.start(JobKind::Write, "", hold(release), "", "/films/b", "", "chat:1"));
+
+    CHECK(t.cancel(JobKind::Write, "/films/a", "chat:1"));
+    CHECK_FALSE(t.running(JobKind::Write, "/films/a", "chat:1"));
+    CHECK(t.running(JobKind::Write, "/films/a", "chat:2"));
+    CHECK(t.running(JobKind::Write, "/films/b", "chat:1"));
+
+    CHECK(t.cancel_project(JobKind::Write, "/films/a") == 1);
+    CHECK_FALSE(t.running_in(JobKind::Write, "/films/a"));
+    CHECK(t.running(JobKind::Write, "/films/b", "chat:1"));
+    // 空的片子不认：没带片子的"停"不许停掉全部。
+    CHECK(t.cancel_project(JobKind::Write, "") == 0);
+    CHECK(t.running(JobKind::Write, "/films/b", "chat:1"));
+
+    release = true;
+    t.wait_idle();
+}
+
+TEST_CASE("出片还是全机器一个槽；按道停只停自己派的那一件") {
+    JobTable t;
+    std::atomic<bool> release{false};
+    REQUIRE(t.start(JobKind::Run, "ep01", hold(release), "", "/films/a", "", "chat:1"));
+    CHECK_FALSE(t.start(JobKind::Run, "ep01", noop(), "", "/films/b", "", "chat:2"));
+    // 别人（别的片子、同片子别的对话）按停：不动。
+    CHECK_FALSE(t.cancel(JobKind::Run, "/films/b", "chat:2"));
+    CHECK_FALSE(t.cancel(JobKind::Run, "/films/a", "chat:2"));
+    CHECK(t.cancel_project(JobKind::Run, "/films/b") == 0);
+    CHECK(t.running(JobKind::Run));
+    // 派它的那一道按停：停。
+    CHECK(t.cancel(JobKind::Run, "/films/a", "chat:1"));
+    release = true;
+    t.wait_idle();
+}
+
+TEST_CASE("任务体拿到的是自己的 job id，推出去的每条都带着片子和道") {
+    JobTable t;
+    std::mutex mu;
+    std::vector<json> sent;
+    t.set_sink([&](const std::string&, const json& m) {
+        std::lock_guard<std::mutex> lg(mu);
+        sent.push_back(m);
+    });
+    std::atomic<bool> release{false};
+    std::string id_a, id_b;
+    std::atomic<int> started{0};
+    const auto body = [&](std::string& out) {
+        return [&, pout = &out](JobProgress& p) {
+            *pout = p.job_id();
+            p.set_message("写着呢");
+            ++started;
+            while (!release.load()) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        };
+    };
+    REQUIRE(t.start(JobKind::Write, "", body(id_a), "", "/films/a", "", "chat:1"));
+    REQUIRE(t.start(JobKind::Write, "", body(id_b), "", "/films/b", "", "chat:2"));
+    while (started.load() < 2) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+
+    // **不是"这一类最新那件"**：各拿各的。原来任务体里问 job_id(Write)，
+    // 分道之后会拿到别人的，思考、正文、停全挂到那一件上。
+    CHECK(id_a == t.job_id(JobKind::Write, "/films/a", "chat:1"));
+    CHECK(id_b == t.job_id(JobKind::Write, "/films/b", "chat:2"));
+    CHECK(id_a != id_b);
+
+    release = true;
+    t.wait_idle();
+    std::lock_guard<std::mutex> lg(mu);
+    REQUIRE(!sent.empty());
+    for (const auto& m : sent) {
+        CAPTURE(m.dump());
+        CHECK(m.contains("project"));
+        CHECK(m.contains("lane"));
+        if (m.value("job_id", std::string()) == id_a) {
+            CHECK(m.value("project", std::string()) == "/films/a");
+            CHECK(m.value("lane", std::string()) == "chat:1");
+        }
+    }
+}
+
+TEST_CASE("按道要快照：没起过的道是空闲那份，老客户端不带片子问的是最近那件") {
+    JobTable t;
+    std::atomic<bool> release{false};
+    REQUIRE(t.start(JobKind::Write, "", hold(release), "", "/films/a", "写 A", "chat:1"));
+    const json mine = t.snapshot(JobKind::Write, "/films/a", "chat:1");
+    CHECK(mine.at("running") == true);
+    CHECK(mine.at("title") == "写 A");
+    const json other = t.snapshot(JobKind::Write, "/films/b", "");
+    CHECK(other.at("running") == false);
+    CHECK(t.snapshot(JobKind::Write).at("title") == "写 A");
+    release = true;
     t.wait_idle();
 }

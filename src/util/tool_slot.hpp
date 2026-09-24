@@ -107,7 +107,10 @@ inline bool tool_is_read_only(std::string_view name) {
            // 那一档不让记，「每步问我」记之前问一声（人看得见要记下什么）。
            name == "memory_read" ||
            // 读技能的说明：同上，只读。装、删、挪会动盘。
-           name == "skill_read";
+           name == "skill_read" ||
+           // 看"被别的对话盖掉的那几块"（两份都摆出来）：只读。按人的决定写回
+           // 的那个（overwrite_resolve）会动盘，不在这儿。
+           name == "overwrites_read";
 }
 
 /// 这个工具**本来就没有可看的产出物**（不是"忘了分类"）。
@@ -126,7 +129,10 @@ inline bool tool_shows_nothing(std::string_view name) {
            // 技能、扩展同理：装了什么、接上了什么在回话上，全部的在设置里。
            name == "skill_read" || name == "skill_install" || name == "skill_forget" ||
            name == "skill_move" || name == "mcp_add" || name == "mcp_remove" ||
-           name == "mcp_move";
+           name == "mcp_move" ||
+           // 被盖掉的那几块：看、办的结果都在那一行回话上。写回的是哪一格要看
+           // 参数里那一件（正文、剧本、分镜、大纲都有可能），按名字归不了格。
+           name == "overwrites_read" || name == "overwrite_resolve";
 }
 
 }  // namespace changji::util

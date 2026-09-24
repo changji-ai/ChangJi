@@ -27,6 +27,7 @@
 #include <utility>
 #include <filesystem>
 #include <map>
+#include <mutex>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -280,9 +281,22 @@ public:
     /// 用户 2026-09-13 报的就是这个："点击让 ai 写大纲，刷新后什么都没有了"。
     ///
 
+    /// 存盘。**三处都在这部片子的存盘锁里写**，写完顺手记一笔"这一块是谁写的"
+    /// （`models/versions.hpp`）：盖了另一条对话写的东西，旧的那份留底、报出去。
     void save_project(Project& project) const;
     void save_assets(const AssetLibrary& assets) const;
     void save_story(const Story& story) const;
+
+    /// 这部片子的**存盘锁**（按规范化后的目录，一部片子一把；可重入）。
+    ///
+    /// **读→改→存要在一把锁里**：两件活各自读了 story.json、各改各的那一章、
+    /// 先后存回去——后存的那份里前一章还是旧的，前一件写好的那章就这么没了，
+    /// 一声不响。原来全机器只有一个写作槽，两件写作活碰不到一起，这件事被
+    /// 挡住了；按对话分道之后就是家常便饭。
+    ///
+    /// ⚠️ **只锁读、改、存那几行**，别把大模型调用、出片圈进来——那是几分钟，
+    /// 期间这部片子的一切存盘（包括手改稿子）都得等。
+    std::unique_lock<std::recursive_mutex> lock() const;
 
     /// 把外部文件复制进项目，返回相对路径。
     ///

@@ -121,11 +121,31 @@ ApiResult get_run_preview(const std::string& path,
 /// `project` 留空就不判，`mine` 一律为真（老客户端、命令行）。
 ApiResult get_run_status(const std::string& project);
 
-/// POST /api/run/queue/clear —— 把排着的全清了。回 {cleared: N}。
+/// POST /api/run/queue/clear —— 把排着的清了。回 {cleared: N}。
 ///
 /// **点错了要能撤。** 没有这条出口的话，手滑排上去的那几件只能等它们一件件
 /// 跑完——而那是几个钟头。
-ApiResult post_run_queue_clear();
+///
+/// body `{project?, lane?}`：带了 `project` 就**只清这部片子的**（带了 `lane`
+/// 再收窄到那一条对话派的）。原来谁点都全清，于是 C 的镜头页点「撤」，B 的
+/// 对话排着的那一章也没了，而那一句「撤了 2 件」里有一件根本不是 C 的。
+/// 不带 = 老客户端，全清。
+ApiResult post_run_queue_clear(const nlohmann::json& body = nlohmann::json::object());
+
+/// POST /api/stop —— 停出片。body `{project?, lane?}`，回 `{stopped, dequeued}`。
+///
+/// **带了 `project` 就只停这部片子的**：槽上那件不是它的就不动（回 stopped
+/// false）。原来谁按停都停那一个槽，于是 B 的页面、B 的对话按停，A 出到一半的
+/// 片子没了。带 `lane`（对话）时连这条对话**排着没轮到的**也一起撤掉——人说
+/// 「停」说的是"我让你做的那些"，排着的那件轮到了就会开跑。
+/// 不带 = 老客户端，停槽上那件。
+ApiResult post_run_stop(const nlohmann::json& body);
+
+/// 这部片子、这一道（对话）**还有没有排着没轮到的**出片。
+///
+/// 对话那头守着自己派的活时要问它：排着的那件不在任何账上（还没开跑），
+/// 只看账的话守望六秒就报「跑完了」，而片子一个钟头后才开始出。
+bool run_queued_for(const std::string& project, const std::string& lane);
 
 /// GET /api/outputs —— 列出已经出好的成片。审片时直接在界面里播。
 ApiResult get_outputs(const std::string& path);

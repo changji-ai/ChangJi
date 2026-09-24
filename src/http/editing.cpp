@@ -133,6 +133,8 @@ ApiResult post_shot(const json& body) {
     if (!patch.is_object()) throw ApiError(400, SAY("patch 要是一个对象"));
 
     ProjectStore store(paths::from_utf8(project_path));
+    // 读→改这一镜→存，一把锁（ProjectStore::lock）。中间没有大模型。
+    const auto store_guard = store.lock();
     Project project = store.load_project();
 
     Episode* ep = project.episode_by_id(episode_id);

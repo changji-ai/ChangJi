@@ -26,6 +26,7 @@ int reset_episode(Episode& ep) {
 }  // namespace
 
 int reset_all_shots(const ProjectStore& store) {
+    const auto store_guard = store.lock();   // 读→改→存一把锁（ProjectStore::lock）
     Project project = store.load_project();
     int n = 0;
     for (auto& ep : project.episodes) n += reset_episode(ep);
@@ -35,6 +36,7 @@ int reset_all_shots(const ProjectStore& store) {
 
 int reset_shots_in(const ProjectStore& store,
                    const std::set<std::string>& episode_ids) {
+    const auto store_guard = store.lock();   // 读→改→存一把锁
     Project project = store.load_project();
     int n = 0;
     for (auto& ep : project.episodes) {

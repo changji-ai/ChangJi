@@ -285,9 +285,24 @@ VideoLimits& mutable_video_limits() {
     return v;
 }
 
+/// 这条线程上按项目挂的那几份（`ScopedVideoLimits`），最里面那份算数。
+std::vector<VideoLimits>& scoped_video_limits() {
+    thread_local std::vector<VideoLimits> s;
+    return s;
+}
+
 }  // namespace
 
-const VideoLimits& video_limits() { return mutable_video_limits(); }
+const VideoLimits& video_limits() {
+    const auto& s = scoped_video_limits();
+    return s.empty() ? mutable_video_limits() : s.back();
+}
+
+ScopedVideoLimits::ScopedVideoLimits(VideoLimits v) {
+    scoped_video_limits().push_back(std::move(v));
+}
+
+ScopedVideoLimits::~ScopedVideoLimits() { scoped_video_limits().pop_back(); }
 
 void set_video_limits(VideoLimits v) { mutable_video_limits() = std::move(v); }
 

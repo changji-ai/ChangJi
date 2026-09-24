@@ -752,7 +752,10 @@ void run(const config::Settings& settings, const Options& opts) {
             if (!path.empty()) {
                 const config::Settings s =
                     config::load_settings(paths::from_utf8(path));
-                config::apply_video_limits(s);
+                // **只挂在这条线程上**：一次只读的 GET 原来会把全局那份换成
+                // 这部片子的，正在出片的另一部当场读到别人的帧数上限。
+                const stages::ScopedVideoLimits limits_here{
+                    config::video_limits_for(s)};
                 return get_hardware(s, config::runtime().profile());
             }
             return get_hardware(config::runtime().snapshot(),
@@ -2977,10 +2980,17 @@ void run(const config::Settings& settings, const Options& opts) {
     });
 
     // 排着的那几件出片，全清了。点错了要能撤。
-    CROW_ROUTE(app, "/api/run/queue/clear").methods("POST"_method)([] {
-        auto r = guard([] { return post_run_queue_clear(); });
-        return json_response(r.body, r.status);
-    });
+    // 带了 `project` 只清这部片子的（见 `post_run_queue_clear`）。
+    CROW_ROUTE(app, "/api/run/queue/clear").methods("POST"_method)(
+        [](const crow::request& req) {
+            auto r = guard([&] {
+                json b = req.body.empty()
+                             ? json::object()
+                             : json::parse(req.body, nullptr, false);
+                return post_run_queue_clear(b.is_object() ? b : json::object());
+            });
+            return json_response(r.body, r.status);
+        });
 
     // 开跑之前先看看这一次会做什么、大概多久。一按就是几十分钟，
     // 哪些镜头会重做应该在按下去之前就知道。
@@ -3134,21 +3144,32 @@ void run(const config::Settings& settings, const Options& opts) {
         return json_response(r.body, r.status);
     });
 
-    CROW_ROUTE(app, "/api/stop").methods("POST"_method)([](const crow::request&) {
-        // 没在跑时回 {"stopped": false} 而不是报错。
-        // 前端的停止按钮是无条件可点的，重复点不该弹错误框。
-        const bool stopped = pipeline::jobs().cancel(pipeline::JobKind::Run);
-        return json_response({{"stopped", stopped}});
-    });
+    // 停的那两条**带着片子来**（`{project, lane?}`），只停它的——见
+    // `post_run_stop` / `post_write_stop`。老客户端发空 body 也收：停止按钮
+    // 是无条件可点的，重复点、空着点都不该弹错误框。
+    const auto lenient_body = [](const crow::request& req) {
+        if (req.body.empty()) return json::object();
+        json b = json::parse(req.body, nullptr, /*allow_exceptions=*/false);
+        return b.is_object() ? b : json::object();
+    };
 
-    CROW_ROUTE(app, "/api/script/series")([] {
-        return json_response(pipeline::jobs().snapshot(pipeline::JobKind::Write));
+    CROW_ROUTE(app, "/api/stop").methods("POST"_method)(
+        [lenient_body](const crow::request& req) {
+            auto r = guard([&] { return post_run_stop(lenient_body(req)); });
+            return json_response(r.body, r.status);
+        });
+
+    CROW_ROUTE(app, "/api/script/series")([](const crow::request& req) {
+        auto r = guard([&] {
+            return get_write_status(query(req, "path"), query(req, "lane"));
+        });
+        return json_response(r.body, r.status);
     });
 
     CROW_ROUTE(app, "/api/script/series/stop").methods("POST"_method)
-        ([](const crow::request&) {
-            const bool stopped = pipeline::jobs().cancel(pipeline::JobKind::Write);
-            return json_response({{"stopped", stopped}});
+        ([lenient_body](const crow::request& req) {
+            auto r = guard([&] { return post_write_stop(lenient_body(req)); });
+            return json_response(r.body, r.status);
         });
 
     // ---- WebSocket ----

@@ -178,6 +178,24 @@ VideoLimits cap_by_kernel_limit(VideoLimits limits, int width, int height);
 const VideoLimits& video_limits();
 void set_video_limits(VideoLimits v);
 
+/// 在这个作用域里、**这条线程上**，`video_limits()` 回 `v`（按这部片子算的那份）。
+///
+/// **拆分镜按项目算上限，不再去改全局那一份。** 单镜时长档位是电影的属性
+/// （`[video].max_shot_s`、画幅），原来拆镜之前 `apply_video_limits` 把全局那份
+/// 换成这部片子的——写作按对话分道之后，两部片子同时在拆分镜，A 按自己的档位
+/// 发出去的 schema、回来时被 B 换过的档位去卡，镜头时长全对不上；同时在出片的
+/// 那一部也读到别人的帧数上限，超了显存核的限制是整个引擎当场退出。
+/// 全局那份现在只归出片（全机器一件）和改配置的地方设。
+///
+/// 拆分镜在一条线程上跑完（不另开线程），所以挂在线程上够用。
+class ScopedVideoLimits {
+public:
+    explicit ScopedVideoLimits(VideoLimits v);
+    ~ScopedVideoLimits();
+    ScopedVideoLimits(const ScopedVideoLimits&) = delete;
+    ScopedVideoLimits& operator=(const ScopedVideoLimits&) = delete;
+};
+
 /// 单个镜头能生成的最长时长。等于 `video_limits().max_duration_s(fps)`。
 double max_shot_duration_s(int fps = 24);
 

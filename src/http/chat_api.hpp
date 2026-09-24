@@ -17,8 +17,13 @@
 // 秒里 `/api/run`、`/api/system` 卡二十多秒，于是"一写字界面就卡住"
 //（见 `http/server.hpp` 里 concurrency 那段）。
 //
-// **一个项目同时只跑一轮。** 第二句话进来回 409，不排队：两轮并着跑会往同
-// 一个 chat.jsonl 里交叉写，而且各自看到的状态摘要都是半截的。
+// **一条对话同时只跑一轮**（2026-09-24 起；原来是一个项目一轮）。同一条对话
+// 第二句话进来回 409，不排队：两轮并着跑会往同一个文件里交叉写，而且各自看到
+// 的状态摘要都是半截的。**别的对话不挡**，同一部片子的也不挡——两条对话写到
+// 同一块上时，存盘那一头认得出来，被盖的那一条会来问人（`models/versions.hpp`）。
+//
+// 推送（"chat" 频道）**每一条都带 `project` 和 `chat`**，界面按这两样认是不是
+// 眼前这一条的；`project` 事件另带 `from`（从哪儿搬过来的）。
 
 #include <functional>
 #include <memory>
@@ -53,7 +58,10 @@ namespace changji::http {
 ApiResult post_chat(const nlohmann::json& body, std::shared_ptr<llm::Client> client,
                     std::function<RunDeps()> run_deps);
 
-/// GET /api/chat/history?project=…&chat=… —— 回 `{turns: [...]}`
+/// GET /api/chat/history?project=…&chat=… —— 回 `{turns: [...]}`，外加这条对话
+/// 此刻的样子：`busy`（在不在跑）、`doing`（在干什么）、`asking`（「每步问我」
+/// 正在等的那一问 `{id, what}`，没有就不带）、`overwrites_open`（这条写的、被别的
+/// 对话盖掉还没办的几件）。推送一过就没了，界面切回来靠这几样接上。
 ///
 /// `project` 空着就回"还没有项目"那条对话；`chat` 空着就是一直以来那一条
 ///（`<项目目录>/chat.jsonl`）。`chat` 不合规回 400（它会变成文件名）。
@@ -76,10 +84,12 @@ ApiResult list_chats(const std::string& project);
 /// 之后它接着写，等于又建了一个半截的。
 ApiResult delete_chat(const std::string& project, const std::string& chat);
 
-/// POST /api/chat/stop —— body: `{project?}`。没在跑就什么都不做，照样 200。
+/// POST /api/chat/stop —— body: `{project?, chat?}`。**只停这一条对话**；没在跑
+/// 就什么都不做，照样 200。它派出去的活另停（`/api/script/series/stop`、
+/// `/api/stop` 带 `lane: "chat:<对话编号>"`）。
 ApiResult post_chat_stop(const nlohmann::json& body);
 
-/// POST /api/chat/permit —— body: `{project, id, allow}`。
+/// POST /api/chat/permit —— body: `{project, chat?, id, allow}`。`id` 全进程唯一。
 ///
 /// 「每步问我」那一档：场记要动东西之前推一条 `{event: "permit", id, what}`，
 /// 然后停在那儿等；人点「允许」或「不」走这儿。`id` 不是正在等的那一问就回

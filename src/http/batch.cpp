@@ -59,11 +59,38 @@ void forbid_extra(const json& body, const std::set<std::string>& allowed) {
         // `async` 不在这儿放行是因为它在更上面就被 take_async 摘掉了
         // （见 server.cpp），到这儿本来就没有。
         if (kv.key() == "stream") continue;
+        // **`lane` 同理**：谁派的（`pipeline::chat_lane`），任务表拿它分槽，
+        // 处理函数自己不看。
+        if (kv.key() == "lane") continue;
         if (allowed.count(kv.key()) == 0) {
             throw unprocessable_top(kv.key(), "Extra inputs are not permitted",
                                     kv.value(), "extra_forbidden");
         }
     }
+}
+
+/// 谁派的这一件（`pipeline::JobTable::start` 的 `lane`）。不带 = 页面上的按钮。
+std::string lane_of(const json& body) {
+    const auto it = body.find("lane");
+    return it != body.end() && it->is_string() ? it->get<std::string>()
+                                               : std::string();
+}
+
+/// 请求里写的那部片子，原样（判 409 用；键由任务表自己规范化）。
+std::string project_of(const json& body) {
+    const auto it = body.find("project");
+    return it != body.end() && it->is_string() ? it->get<std::string>()
+                                               : std::string();
+}
+
+/// **这一道上**是不是已经有一件在写。
+///
+/// 原来判的是"全机器有没有一件在写"，于是 A 片子在写正文，B 片子的对话
+/// 派什么都 409（2026-09-24 用户撞到的那一次，就是这一句把 B 的场记骗成
+/// 「卡住了」、转手把 A 停了）。现在只挡同一部片子、同一个派活的人。
+bool lane_busy(const json& body) {
+    return pipeline::jobs().running(pipeline::JobKind::Write, project_of(body),
+                                    lane_of(body));
 }
 
 std::string need_str(const json& body, const char* key) {
@@ -188,7 +215,7 @@ ApiResult post_story_chapters(const json& body,
 
     // 409 在建 store 之前判，和 post_script_series 一个顺序：
     // 两个都错时回哪一个是可观测的。
-    if (pipeline::jobs().running(pipeline::JobKind::Write)) {
+    if (lane_busy(body)) {
         throw ApiError(409, SAY("已经在写了"));
     }
     ProjectStore store = open_project(body);
@@ -229,7 +256,7 @@ ApiResult post_story_chapters(const json& body,
             // '-' 之前的部分当类名（"write-a3f…" → "write"），而客户端只订
             // 得到类名——具体 id 从来不从任何接口暴露出去。
             const std::string job_id =
-                pipeline::jobs().job_id(pipeline::JobKind::Write);
+                p.job_id();
             // 思考流挂到这条 job 的频道上。**令牌借 p 那个，不能让
             // JobScope 自带一个**：循环查的是 `p.cancelled()`、给大模型的
             // 是 `p.token()`，自带那个没人读——顶栏「停下」按下去接口回
@@ -294,8 +321,15 @@ ApiResult post_story_chapters(const json& body,
                 bool last_hopeless = false;
                 // 上一轮被打回的稿；空 = 上一轮没留下能改的稿（或者还没跑）。
                 std::optional<stages::ChapterRejected> rejected;
+                // **读→改→存在一把锁里**（`ProjectStore::lock`）：从下面重读
+                // story.json 那一下拿住，存完、对齐完章节记录才放。别的对话同一
+                // 部片子也在写别的章，不锁的话两边各读各存，后存的那份把前一章
+                // 冲回旧样子，一声不响。**大模型那一两分钟不在锁里**——每一轮
+                // 开头先放掉。
+                std::unique_lock<std::recursive_mutex> story_guard;
                 constexpr int kAttempts = 3;
                 for (int attempt = 0; attempt < kAttempts; ++attempt) {
+                    if (story_guard.owns_lock()) story_guard.unlock();
                     // 点了停就别再来一次了——重试的那一次一样会当场被取消，
                     // 白跑一趟提示词。
                     if (p.cancelled()) break;
@@ -386,6 +420,7 @@ ApiResult post_story_chapters(const json& body,
                         // 重读一次的代价是一个文件；换来的是"丢一章手写的
                         // 正文"这种没法补救的事不会发生。
                         call_id = llm::take_last_call_id();
+                        story_guard = store.lock();
                         next = stages::apply_chapter(
                             store.load_story(), id,
                             stages::parse_chapter(raw, floor_chars, strict));
@@ -411,6 +446,7 @@ ApiResult post_story_chapters(const json& body,
                     if (p.cancelled()) break;
                 }
                 if (!last_error.empty()) {
+                    if (story_guard.owns_lock()) story_guard.unlock();
                     // 一章写砸了不该让前面几章白写，记下来接着往下写。
                     // **但配错了的除外**，见 hopeless：那种重来还是一样，
                     // 接着写只是让人多等十几分钟再看到同一句话。
@@ -437,6 +473,7 @@ ApiResult post_story_chapters(const json& body,
                 store.save_story(next);
                 // 正文扩写完，这一章的梗概和它值多长都变了——章节记录跟着对齐。
                 sync_episodes_to_chapters(store, next);
+                if (story_guard.owns_lock()) story_guard.unlock();
 
                 const Chapter* written = next.chapter_by_id(id);
                 p.add_episode(json{
@@ -462,7 +499,8 @@ ApiResult post_story_chapters(const json& body,
         paths::to_utf8(store.root()),
         // 任务页面那一行。**`JobKind::Write` 一个槽里跑着六件活**（这个文件里
         // 六处 start），不各自报名字的话那一行只会写「批量」。
-        SAYN("写正文 · 还缺的 %n 章", static_cast<long long>(todo.size())));
+        SAYN("写正文 · 还缺的 %n 章", static_cast<long long>(todo.size())),
+        lane_of(body));
 
     if (!started) throw ApiError(409, SAY("已经在写了"));
     return {200, {{"started", true}, {"chapters", todo.size()}}};
@@ -480,7 +518,7 @@ ApiResult post_script_series(const json& body,
     // 409 要在**建 store 之前**判断吗？不。Python 那边是先判 running
     // 再 load_project，所以SAY("已经在写了")优先于"项目不存在"。照抄这个顺序：
     // 两个都错时回哪一个是可观测的。
-    if (pipeline::jobs().running(pipeline::JobKind::Write)) {
+    if (lane_busy(body)) {
         throw ApiError(409, SAY("已经在写了"));
     }
     ProjectStore store = open_project(body);
@@ -497,15 +535,18 @@ ApiResult post_script_series(const json& body,
             // 停这一族仍然走 /api/script/series/stop（JobKind::Write 那个槽），
             // 不是按 stream——这条 job 本来就只有一个。
             // 令牌借 p 那个，理由同上面展开正文那条。
-            const JobScope scope{pipeline::jobs().job_id(pipeline::JobKind::Write),
+            const JobScope scope{p.job_id(),
                                  p.token()};
 
             // 梗概先存下来。下次打开界面时回填，不用凭记忆重打。
+            {
+            const auto store_guard = store.lock();
             Project first = store.load_project();
             const std::string trimmed = text::strip_ws(premise);
             if (first.premise != trimmed) {
                 first.premise = text::truncate_utf8(trimmed, 2000);
                 store.save_project(first);
+            }
             }
 
             int done = 0;
@@ -588,6 +629,7 @@ ApiResult post_script_series(const json& body,
                 //
                 // 章号也要按新那份算：这几分钟里手动加过一章的话，照旧那份
                 // 算出来的号会撞上它。
+                const auto store_guard = store.lock();   // 读→改→存一把锁
                 Project latest = store.load_project();
                 const std::string episode_id = next_episode_id(latest);
                 Episode ep;
@@ -612,7 +654,8 @@ ApiResult post_script_series(const json& body,
         },
         // 收在 `pipeline/jobs.hpp`：那边改了措辞，这儿跟着走。
         pipeline::kScriptSeriesStoppedMessage,
-        paths::to_utf8(store.root()), SAYN("写全片 · %n 章", episodes));
+        paths::to_utf8(store.root()), SAYN("写全片 · %n 章", episodes),
+        lane_of(body));
 
     if (!started) throw ApiError(409, SAY("已经在写了"));
     return {200, {{"started", true}, {"total", episodes}}};
@@ -753,7 +796,7 @@ ApiResult post_script_all(const json& body, std::shared_ptr<llm::Client> client)
     forbid_extra(body, {"project", "overwrite"});
     const bool overwrite = opt_bool(body, "overwrite", false);
 
-    if (pipeline::jobs().running(pipeline::JobKind::Write)) {
+    if (lane_busy(body)) {
         throw ApiError(409, SAY("剧本那边还在忙"));
     }
     ProjectStore store = open_project(body);
@@ -789,7 +832,7 @@ ApiResult post_script_all(const json& body, std::shared_ptr<llm::Client> client)
             p.set_total(static_cast<int>(todo.size()));
             // 思考流和取消令牌都挂在这条 job 上，理由同 post_plan_all。
             const JobScope scope{
-                pipeline::jobs().job_id(pipeline::JobKind::Write), p.token()};
+                p.job_id(), p.token()};
             int done = 0;
             for (const std::string& episode_id : todo) {
                 if (p.cancelled()) return;
@@ -824,7 +867,8 @@ ApiResult post_script_all(const json& body, std::shared_ptr<llm::Client> client)
         },
         // 收在 `pipeline/jobs.hpp`，和另外两件写作活各是一条。
         pipeline::kScriptAllStoppedMessage, root,
-        SAYN("写剧本 · 还缺的 %n 章", static_cast<long long>(todo.size())));
+        SAYN("写剧本 · 还缺的 %n 章", static_cast<long long>(todo.size())),
+        lane_of(body));
     if (!started) throw ApiError(409, SAY("剧本那边还在忙"));
     return {202, {{"started", true}, {"episodes", todo}}};
 }
@@ -872,6 +916,7 @@ void run_understand_work(const ProjectStore& store,
     // （同 commit_story 里那段「先把项目重读一遍」的坑）。
     if (need_read) {
         try {
+            const auto store_guard = store.lock();   // 读→改→存一把锁
             Project fresh = store.load_project();
             fresh.understood_from = book_fp;
             store.save_project(fresh);
@@ -979,7 +1024,7 @@ ApiResult post_story_understand(const json& body,
     forbid_extra(body, {"project", "overwrite"});
     const bool overwrite = opt_bool(body, "overwrite", false);
 
-    if (pipeline::jobs().running(pipeline::JobKind::Write)) {
+    if (lane_busy(body)) {
         throw ApiError(409, SAY("剧本那边还在忙"));
     }
     ProjectStore store = open_project(body);
@@ -1044,7 +1089,7 @@ ApiResult post_story_understand(const json& body,
         [store, client, overwrite, need_read, total,
          book_fp](pipeline::JobProgress& p) {
             const JobScope scope{
-                pipeline::jobs().job_id(pipeline::JobKind::Write), p.token()};
+                p.job_id(), p.token()};
             run_understand_work(store, client, p, overwrite, need_read, book_fp,
                                 total);
         },
@@ -1054,7 +1099,8 @@ ApiResult post_story_understand(const json& body,
         // 原来印的是「理解故事 · 0 章」。
         plan_union.empty()
             ? SAY("理解故事 · 读一遍")
-            : SAYF("理解故事 · %1 章", std::to_string(plan_union.size())));
+            : SAYF("理解故事 · %1 章", std::to_string(plan_union.size())),
+        lane_of(body));
     if (!started) throw ApiError(409, SAY("剧本那边还在忙"));
     return {202, {{"started", true}, {"total", total}}};
 }
@@ -1112,7 +1158,7 @@ ApiResult post_story_from_web(const json& body, std::shared_ptr<llm::Client> cli
     }
     if (chapter_id.empty()) throw ApiError(422, SAY("缺 chapter_id：写的是哪一章"));
     const bool overwrite = opt_bool(body, "overwrite", false);
-    if (pipeline::jobs().running(pipeline::JobKind::Write)) {
+    if (lane_busy(body)) {
         throw ApiError(409, SAY("剧本那边还在忙"));
     }
     ProjectStore store = open_project(body);
@@ -1142,7 +1188,7 @@ ApiResult post_story_from_web(const json& body, std::shared_ptr<llm::Client> cli
             // 推正文要用它。按类订阅也收得到：Hub 把第一个 '-' 之前的部分
             // 当类名（"write-a3f…" → "write"），而界面只订得到类名。
             const std::string job_id =
-                pipeline::jobs().job_id(pipeline::JobKind::Write);
+                p.job_id();
             const JobScope scope{job_id, p.token()};
             pipeline::CancelToken& tok = p.token();
             pipeline::Activity act{"story_web", root, "", SAYF("从网上热点写 %1", chapter_id)};
@@ -1194,7 +1240,8 @@ ApiResult post_story_from_web(const json& body, std::shared_ptr<llm::Client> cli
                 + (wc.source.empty() ? std::string()
                                      : SAYF(" · 来自「%1」", wc.source)));
         },
-        SAY("已手动停止。这一章没写完，原来的留着。"), root, SAYF("从网上热点写 %1", chapter_id));
+        SAY("已手动停止。这一章没写完，原来的留着。"), root, SAYF("从网上热点写 %1", chapter_id),
+        lane_of(body));
     if (!started) throw ApiError(409, SAY("剧本那边还在忙"));
     return {202, {{"started", true}, {"chapter_id", chapter_id}}};
 }
@@ -1203,7 +1250,7 @@ ApiResult post_plan_all(const json& body, std::shared_ptr<llm::Client> client) {
     forbid_extra(body, {"project", "overwrite"});
     const bool overwrite = opt_bool(body, "overwrite", false);
 
-    if (pipeline::jobs().running(pipeline::JobKind::Write)) {
+    if (lane_busy(body)) {
         // 和写全片不是同一句话。用户看到SAY("已经在写了")会去找哪里在写剧本，
         // 而实际情况是那个槽被别的事占着。
         throw ApiError(409, SAY("剧本那边还在忙"));
@@ -1257,7 +1304,7 @@ ApiResult post_plan_all(const json& body, std::shared_ptr<llm::Client> client) {
             // 按钮自己变成「停下」，而那颗「停下」调的正是
             // /api/script/series/stop。令牌不借 p 那个的话，它就是一张
             // 空头支票：屏幕上那件看着停了，这一章的设定还在往下出。
-            const JobScope scope{pipeline::jobs().job_id(pipeline::JobKind::Write),
+            const JobScope scope{p.job_id(),
                                  p.token()};
             int done = 0;
             for (const std::string& episode_id : todo) {
@@ -1291,6 +1338,7 @@ ApiResult post_plan_all(const json& body, std::shared_ptr<llm::Client> client) {
                         // 定页按了「照故事定妆」。那就用人家那份——它是照整
                         // 个故事出的，比这儿照一章剧本出的全，而且人正看着
                         // 它。反过来拿这一份顶掉，人刚定完的角色当场全换。
+                        const auto assets_guard = store.lock();   // 读→改→存一把锁
                         AssetLibrary latest = store.load_assets();
                         if (latest.characters.empty()) {
                             assets = std::move(made);
@@ -1301,8 +1349,10 @@ ApiResult post_plan_all(const json& body, std::shared_ptr<llm::Client> client) {
                     }
 
                     // 单镜的时长档位是这部电影的属性（[video].max_shot_s），
-                    // 按项目那份设置算一遍再拆镜头。见 config::apply_video_limits。
-                    config::apply_video_limits(config::load_settings(store.root()));
+                    // 按项目那份设置算一遍再拆镜头——**只挂在这条线程上**，
+                    // 不去改全局那份（见 stages::ScopedVideoLimits）。
+                    const stages::ScopedVideoLimits limits_here{
+                        config::video_limits_for(config::load_settings(store.root()))};
                     // 切场、拆镜、补台词、查覆盖、重编号、拉回时长都在
                     // run_storyboard 里，和 post_plan 是同一份。
                     pipeline::StoryboardRunOptions sb;
@@ -1326,6 +1376,7 @@ ApiResult post_plan_all(const json& body, std::shared_ptr<llm::Client> client) {
                     //
                     // 这一章在这期间被删了的话就别写了：拿旧快照写回去
                     // 等于把它从坟里刨出来。
+                    const auto store_guard = store.lock();   // 读→改→存一把锁
                     Project latest = store.load_project();
                     if (Episode* target = latest.episode_by_id(episode_id)) {
                         target->shots = ep->shots;
@@ -1366,10 +1417,44 @@ ApiResult post_plan_all(const json& body, std::shared_ptr<llm::Client> client) {
         },
         SAY("已手动停止。已经出好的分镜留着。"),
         paths::to_utf8(store.root()),
-        SAYN("补分镜 · 还缺的 %n 章", static_cast<long long>(todo.size())));
+        SAYN("补分镜 · 还缺的 %n 章", static_cast<long long>(todo.size())),
+        lane_of(body));
 
     if (!started) throw ApiError(409, SAY("剧本那边还在忙"));
     return {200, {{"started", true}, {"episodes", todo}}};
+}
+
+ApiResult get_write_status(const std::string& project, const std::string& lane) {
+    if (project.empty()) {
+        return {200, pipeline::jobs().snapshot(pipeline::JobKind::Write)};
+    }
+    json out = pipeline::jobs().snapshot(pipeline::JobKind::Write, project, lane);
+    out["project"] = project;
+    out["lane"] = lane;
+    // 这一道最近那件的 id。WebSocket 上 "write" 那一类同时有好几件在推，
+    // 页面拿它认"哪几条是我这一件的"。
+    out["job_id"] = pipeline::jobs().job_id(pipeline::JobKind::Write, project, lane);
+    return {200, out};
+}
+
+ApiResult post_write_stop(const json& body) {
+    const std::string project =
+        body.is_object() ? body.value("project", std::string{}) : std::string{};
+    if (project.empty()) {
+        if (pipeline::jobs().running_projects(pipeline::JobKind::Write).size() != 1) {
+            return {200, {{"stopped", false}}};
+        }
+        return {200, {{"stopped", pipeline::jobs().cancel(pipeline::JobKind::Write)}}};
+    }
+    // `all`：这部片子**所有道**上的都停（桌面端那颗停：它不知道对话派的活
+    // 落在哪一道上，人按下去的意思是"这部片子别写了"）。
+    if (body.value("all", false)) {
+        return {200, {{"stopped", pipeline::jobs().cancel_project(
+                                      pipeline::JobKind::Write, project) > 0}}};
+    }
+    const std::string lane = body.value("lane", std::string{});
+    return {200, {{"stopped", pipeline::jobs().cancel(pipeline::JobKind::Write,
+                                                      project, lane)}}};
 }
 
 }  // namespace changji::http

@@ -199,19 +199,21 @@ void guard_not_running(const fs::path& canon, What what) {
         return this_one ? SAY("这个项目正在跑，改了会把跑到一半的东西弄坏")
                         : SAY("正在跑，改了会把跑到一半的东西弄坏");
     };
+    // **每一件在跑的都要看**：写作按「片子 + 谁派的」分道，同时可能有好几件，
+    // 只看"最近那一件"的话，删 B 时恰好 A 是最近的那件，B 的就漏过去了。
     for (const auto kind : {pipeline::JobKind::Run, pipeline::JobKind::Write}) {
-        if (!pipeline::jobs().running(kind)) continue;
-        const std::string busy = pipeline::jobs().running_project(kind);
-        if (busy.empty()) {
-            throw ApiError(409, whole(false));
-        }
-        std::error_code bec;
-        const fs::path busy_path =
-            fs::weakly_canonical(paths::from_utf8(busy), bec);
-        const bool same_or_inside =
-            bec || busy_path == canon || strictly_inside(busy_path, canon);
-        if (same_or_inside) {
-            throw ApiError(409, whole(true));
+        for (const std::string& busy : pipeline::jobs().running_projects(kind)) {
+            if (busy.empty()) {
+                throw ApiError(409, whole(false));
+            }
+            std::error_code bec;
+            const fs::path busy_path =
+                fs::weakly_canonical(paths::from_utf8(busy), bec);
+            const bool same_or_inside =
+                bec || busy_path == canon || strictly_inside(busy_path, canon);
+            if (same_or_inside) {
+                throw ApiError(409, whole(true));
+            }
         }
     }
 }

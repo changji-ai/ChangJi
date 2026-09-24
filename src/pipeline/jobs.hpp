@@ -23,6 +23,7 @@
 #include <condition_variable>
 #include <deque>
 #include <functional>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -34,7 +35,14 @@
 
 namespace changji::pipeline {
 
-/// 任务种类。一种一个槽，同种不能并发。
+/// 任务种类。
+///
+/// **Run 全机器一个槽**（显卡就那几张，第二件进 `http/run.cpp` 的 RunQueue
+/// 排队）。**Write 一条「道」一个槽**：道是「哪部片子 + 谁派的」（见
+/// `JobTable::start` 的 `lane`）——两部片子、同一部片子里的两条对话，各写
+/// 各的，互不 409。原来 Write 也是全机器一个，于是 A 那边在写正文，B 的对话
+/// 说什么「写」都回「已经在写了」（2026-09-24 用户报的「两个项目的会话没法
+/// 一起写东西」）。写作只占大模型和自己那部片子的文件，没有要全机器排队的东西。
 enum class JobKind {
     Run,    ///< 跑流水线，对应 RunState
     Write,  ///< 写全片 / 批量排分镜，对应 WriteState
@@ -133,6 +141,10 @@ struct JobState {
     /// 而一个进程可以轮流跑好几个项目——只报 episode_id 的话，界面上说
     /// "ep01 正在出片"，用户点过去可能是另一部电影的 ep01。
     std::string project;
+    /// 谁派的这一件（`JobTable::start` 的 `lane`）。空 = 页面上的按钮；
+    /// `chat:<对话编号>` = 那一条对话。推出去的每条消息都带着它和 `project`，
+    /// 界面按这两样认"是不是我这一条的"。
+    std::string lane;
     std::chrono::steady_clock::time_point started_at{};
 
     // 进度
@@ -213,6 +225,7 @@ using Sink = std::function<void(const std::string& job_id, const nlohmann::json&
 using ShotCommit = std::function<void()>;
 
 class JobTable;
+struct JobSlot;
 
 /// 任务体能改的那部分状态。
 ///
@@ -263,15 +276,66 @@ public:
     /// 只给 cancelled() 的话，点停止要等当前这一镜跑完才有反应——
     /// 成片档一镜就是几分钟。
     ///
-    /// 引用一直有效：令牌挂在 job 表的槽上，槽是表的成员，地址不变。
+    /// 引用一直有效：令牌挂在 job 表的槽上，槽一旦建出来就不挪、不删。
     CancelToken& token();
+
+    /// **这一件自己的** job id。
+    ///
+    /// 任务体里原来一律 `jobs().job_id(JobKind::Write)`——那时候 Write 全机器
+    /// 一个槽，问"那个槽"就是问自己。按道分开之后同时有好几件，问"那一类
+    /// 最新的那件"会拿到**别人的** id：思考流、「正文」推送、`/api/job/cancel`
+    /// 全挂到另一件上（停 B 停掉 A）。任务体一律问这儿。
+    const std::string& job_id() const { return job_id_; }
+    /// 这一件跑的是哪部片子（`start` 的 `project`，原样）。
+    const std::string& project() const { return project_; }
+    /// 谁派的（`start` 的 `lane`）。
+    const std::string& lane() const { return lane_; }
 
 private:
     friend class JobTable;
-    JobProgress(JobTable* t, JobKind k) : table_(t), kind_(k) {}
+    JobProgress(JobTable* t, JobKind k, JobSlot* s, std::string job_id,
+                std::string project, std::string lane)
+        : table_(t), kind_(k), slot_(s), job_id_(std::move(job_id)),
+          project_(std::move(project)), lane_(std::move(lane)) {}
     JobTable* table_;
     JobKind kind_;
+    JobSlot* slot_;
+    std::string job_id_;
+    std::string project_;
+    std::string lane_;
 };
+
+/// 一个任务槽。Run 一个，Write 一道一个（见 `JobTable::start`）。
+///
+/// **建出来就不删**：`JobProgress::token()` 回的是引用、账本那一行的令牌
+/// `link` 在它上面（jobs.cpp），挪了地址就是悬空指针。道的个数就是用过的
+/// 「片子 × 对话」数，一台机器上几十个，不值得为回收冒这个险。
+struct JobSlot {
+    JobKind kind = JobKind::Run;
+    JobState state;
+    CancelToken token;
+    std::thread worker;
+    /// 这一轮在账本上那一行的 id。**进度和那句现说的话要同步过去**，
+    /// 页面上那条进度条画的就是它。0 = 还没起或者已经结完账。
+    std::uint64_t task_id = 0;
+    /// 线程是否还在跑。
+    ///
+    /// 跟 state.running 不是一回事：手动停止后 running 立刻变 false
+    /// （对齐 Python 的可观测行为，见 cancel()），但线程要跑到下一个
+    /// 取消检查点才退。析构和 wait_idle() 要等的是**这个**，
+    /// 等 running 的话会在线程还活着的时候就返回，然后析构掉它正在用的成员。
+    bool active = false;
+    /// 第几个起的（全表递增）。"这一类最新那件"按它挑，不按时钟——
+    /// 两件在同一个时钟刻度里起的话，按时钟挑不出先后。
+    std::uint64_t seq = 0;
+};
+
+/// 派活那条「道」的写法：`chat:<对话编号>`。
+///
+/// 一直以来那一条对话的编号是空串，道就是 `chat:`——**和页面按钮那条
+/// （空串）是两条道**：页面上按「展开正文」和在对话里说「写正文」是两个
+/// 人（一个人的两只手）在派活，各占各的。
+std::string chat_lane(const std::string& chat);
 
 /// 任务表。所有公开方法可从任意线程调用。
 class JobTable {
@@ -303,13 +367,28 @@ public:
     /// 因为 `JobKind::Write` 这一个槽里跑着**六件**活——展开正文、写全片、
     /// 批量写剧本、理解故事、从热点写这一章、批量补分镜（六处 `start` 都在
     /// `http/batch.cpp`）——一律写「批量」的话，页面上那一行说不出正在干哪一件。
+    ///
+    /// `lane` 是**谁派的**：空 = 页面上的按钮，`chat_lane(对话编号)` = 那一条
+    /// 对话。**Write 按「片子 + 道」分槽**，同一道上已经有一件在跑才回 false；
+    /// 别的片子、同一部片子里别的对话都不挡。Run 不管道，全机器一个槽。
     bool start(JobKind kind, const std::string& episode_id, Body body,
                const std::string& stop_message = "",
                const std::string& project = "",
-               const std::string& title = "");
+               const std::string& title = "",
+               const std::string& lane = "");
 
     /// 请求取消。没在跑返回 false，对应 Python 的 {"stopped": false}。
+    ///
+    /// **这一类全部**。⚠️ Write 那一类可能同时有好几部片子在写，这个会把它们
+    /// 全停掉——只给关停、用例收尾用。人按的停走下面按道的，或 `cancel_project`。
     bool cancel(JobKind kind);
+
+    /// 取消**这一道**上那一件。Run 那一类：槽上那件是这部片子、这一道的才停。
+    bool cancel(JobKind kind, const std::string& project, const std::string& lane);
+
+    /// 取消**这部片子**所有道上的（Write），或者槽上那件是这部片子的（Run）。
+    /// 回停了几件。页面上「停下」那颗按钮只知道片子不知道道，走它。
+    int cancel_project(JobKind kind, const std::string& project);
 
     /// 按**账本上那一行的 id** 取消。找不到对应的槽返回 false。
     ///
@@ -325,7 +404,12 @@ public:
     bool cancel_by_task(std::uint64_t task_id);
 
     /// 快照。形状与 Python 侧对应的 State.snapshot() 一致。
+    ///
+    /// Write 那一类回**最近起的那一道**（老客户端不带片子来问时的兜底）。
     nlohmann::json snapshot(JobKind kind) const;
+    /// 这部片子、这一道的快照。没起过就是空闲时那份初值。
+    nlohmann::json snapshot(JobKind kind, const std::string& project,
+                            const std::string& lane) const;
 
     /// 此刻在跑的那些，一行一个，给顶栏那块"AI 作业中"用。
     ///
@@ -334,17 +418,30 @@ public:
     /// 没在跑就是空数组——顶栏那块跟着整个不显示。
     nlohmann::json running_jobs() const;
 
+    /// 这一类**有没有哪一件**在跑。
     bool running(JobKind kind) const;
+    /// 这部片子、这一道上有没有一件在跑。**派活之前判 409 用这个**。
+    bool running(JobKind kind, const std::string& project,
+                 const std::string& lane) const;
+    /// 这部片子**哪一道**上有没有在跑的（删项目、改名那道闸用）。
+    bool running_in(JobKind kind, const std::string& project) const;
 
     /// 这个槽此刻在跑哪个项目（目录绝对路径）。没在跑返回空串。
+    /// Write 那一类回最近起的那件在跑的。
     ///
     /// ⚠️ **空串有歧义**：既可能是「没在跑」，也可能是「在跑但发起方没告诉
     /// 我们是哪个项目」（start 的 project 是尾参，默认空串）。调用方拿它做
     /// 闸的时候必须 fail-closed——见 post_delete_project。
     std::string running_project(JobKind kind) const;
+    /// 这一类此刻在跑的**每一件**是哪部片子（可能重复：同一部片子两道）。
+    /// 空串照样放进去——调用方要 fail-closed，见上。
+    std::vector<std::string> running_projects(JobKind kind) const;
     /// 这一轮还没落定的镜头。见 JobState::pending。
     std::vector<std::string> pending(JobKind kind) const;
+    /// 这一类最近起的那件的 id。**任务体里别用它**，用 `JobProgress::job_id()`。
     std::string job_id(JobKind kind) const;
+    std::string job_id(JobKind kind, const std::string& project,
+                       const std::string& lane) const;
 
     /// 等所有在跑的任务结束。析构和优雅关停时用。
     void wait_idle();
@@ -364,37 +461,38 @@ public:
     void set_idle_hook(IdleHook h);
 
 private:
-    struct Slot {
-        JobState state;
-        CancelToken token;
-        std::thread worker;
-    /// 这一轮在账本上那一行的 id。**进度和那句现说的话要同步过去**，
-    /// 页面上那条进度条画的就是它。0 = 还没起或者已经结完账。
-    std::uint64_t task_id = 0;
-        /// 线程是否还在跑。
-        ///
-        /// 跟 state.running 不是一回事：手动停止后 running 立刻变 false
-        /// （对齐 Python 的可观测行为，见 cancel()），但线程要跑到下一个
-        /// 取消检查点才退。析构和 wait_idle() 要等的是**这个**，
-        /// 等 running 的话会在线程还活着的时候就返回，然后析构掉它正在用的成员。
-        bool active = false;
-    };
+    using Slot = JobSlot;
 
-    Slot& slot(JobKind k);
-    const Slot& slot(JobKind k) const;
+    /// 这一类、这部片子、这一道的槽。**锁里调**。Run 永远回那一个；Write
+    /// 没有就回 nullptr（`make` 为真时建一个）。
+    Slot* find(JobKind k, const std::string& project, const std::string& lane,
+               bool make);
+    const Slot* find(JobKind k, const std::string& project,
+                     const std::string& lane) const;
+    /// 这一类最近起的那件（Write 可能一件都没起过，回 nullptr）。锁里调。
+    const Slot* latest(JobKind k) const;
+    /// 这一类的每一个槽。锁里调。
+    std::vector<Slot*> all_slots();
+    std::vector<const Slot*> all_slots() const;
+    /// 在锁里停一个槽。停了回 true。
+    bool cancel_locked(Slot& s);
+
     friend class JobProgress;
-    void record(JobKind kind, Event ev);
+    void record(Slot& s, Event ev);
     void emit(const std::string& job_id, const nlohmann::json& msg) const;
     /// 在锁里改一下这个槽的状态。JobProgress 的所有 setter 都走它。
     template <typename F>
-    void mutate(JobKind kind, F&& fn);
+    void mutate(Slot& s, F&& fn);
 
     mutable std::mutex mu_;
     Sink sink_;
     std::condition_variable idle_cv_;
     IdleHook idle_hook_;
     Slot run_;
-    Slot write_;
+    /// 键是 `片子的规范路径 + '\x1f' + 道`（见 jobs.cpp 的 `lane_key`）。
+    /// unique_ptr：槽的地址要稳（令牌被引用着）。
+    std::map<std::string, std::unique_ptr<Slot>> write_;
+    std::uint64_t next_seq_ = 0;
 };
 
 /// 全局单例。接口层各处都要查状态和起任务，逐层传引用不划算。

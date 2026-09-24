@@ -93,6 +93,13 @@ std::filesystem::path from_utf8(const std::string& s);
 /// 认尾斜杠，漏掉的那一处会静悄悄地答错。
 bool same_dir(const std::string& a, const std::string& b);
 
+/// 一个目录的**键**：`same_dir(a, b)` 为真的两串，键一样。
+///
+/// 要拿路径当 map 的键时用它（任务表按片子分槽、对话按片子分会话）——
+/// 拿原串当键就是第十一条那个坑：同一部片子两种写法，两个槽、两个会话，
+/// 该挡的没挡住。空串的键是空串；规范化不出来（盘符不在之类）就用原串。
+std::string dir_key(const std::string& dir);
+
 std::filesystem::path self_exe();
 
 /// 命令行参数，**UTF-8 的**。

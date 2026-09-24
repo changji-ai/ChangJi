@@ -452,9 +452,12 @@ TEST_CASE("参数校验") {
     fs::remove_all(root, ec);
 }
 
-TEST_CASE("409 优先于项目不存在") {
-    // Python 那边是先判 running 再 load_project。两个都错时回哪一个
-    // 是可观测的，所以顺序要照抄。
+TEST_CASE("别的片子在写，不挡这一部：不存在的项目照实回 400，不是 409") {
+    // 原来这条叫「409 优先于项目不存在」：写作全机器一个槽，A 在写的时候
+    // 随便问一个别的项目都先回 409——理由是和 Python 那边的判断顺序对拍，而
+    // Python 引擎 2026-09-10 就删了。2026-09-24 起写作按「片子 + 谁派的」分道
+    // （用户报的「两个项目的会话没法一起写东西」），**别的片子在写跟这一部
+    // 没关系**，这一部自己的问题（目录不在）照实说。
     reset_jobs();
     const fs::path root = fresh_copy("顺序");
     std::vector<std::string> many;
@@ -471,7 +474,16 @@ TEST_CASE("409 优先于项目不存在") {
         return http::post_script_series(
             json{{"project", "Z:/没有这个目录"}, {"premise", "x"}}, client);
     });
-    CHECK(r.status == 409);   // 不是 400
+    CHECK(r.status == 400);   // 不是 409：挡着的是别的片子
+
+    // 同一部片子、同一个派活的人（页面按钮那一道）再按一次：照旧 409。
+    const auto again = http::guard([&] {
+        return http::post_script_series(
+            json{{"project", paths::to_utf8(root)}, {"premise", "梗概"}}, client);
+    });
+    if (pipeline::jobs().running(pipeline::JobKind::Write, paths::to_utf8(root), "")) {
+        CHECK(again.status == 409);
+    }
 
     pipeline::jobs().cancel(pipeline::JobKind::Write);
     wait_done();

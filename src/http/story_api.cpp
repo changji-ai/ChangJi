@@ -33,6 +33,7 @@
 #include "stages/json_partial.hpp"
 #include "stages/json_stream.hpp"
 #include "stages/story_revise.hpp"
+#include "util/writer.hpp"
 #include "util/cancel_words.hpp"
 #include "util/paths.hpp"
 #include "util/say.hpp"
@@ -64,6 +65,9 @@ void forbid_extra(const json& body, const std::set<std::string>& allowed) {
         // `async` 不在这儿放行是因为它在更上面就被 take_async 摘掉了
         // （见 server.cpp），到这儿本来就没有。
         if (kv.key() == "stream") continue;
+        // **`lane` 同理**：谁派的（`pipeline::chat_lane`）。存盘时认"这一块是
+        // 谁写的"靠它（`models/versions.hpp`），处理函数自己不看。
+        if (kv.key() == "lane") continue;
         if (allowed.count(kv.key()) == 0) {
             throw unprocessable_top(kv.key(), "Extra inputs are not permitted",
                                     kv.value(), "extra_forbidden");
@@ -285,6 +289,10 @@ void refuse_to_clobber(const Story& existing, const json& body) {
 /// 在 write_outline 上），它们直接落盘。四处各写一遍的话迟早只改一边。
 json commit_story(const ProjectStore& store, Project project, Story story,
                   const Story& existing) {
+    // 存故事、对齐章节记录、梗概写回——**三次存盘在一把锁里**（可重入，
+    // 调用方已经拿着也没事）。中间放手的话，别的对话那一章正好插进来存了，
+    // 下面重读项目那一下读到的就是半截的。
+    const auto guard = store.lock();
     if (story.episode_duration_s <= 0.0) {
         story.episode_duration_s = existing.episode_duration_s;
     }
@@ -629,8 +637,13 @@ ApiResult post_story_outline(const json& body_in, llm::Client& client,
         // 幂等）。直接调这条路时页面拿到 202 马上就会去问，后台线程可能
         // 还没跑到 write_outline。擦账和记错都在 write_outline 里，这儿不管。
         OutlineRegistry::instance().started(project_path, stream_id);
+        const std::string lane = opt_str(body, "lane", "");
         Offload::instance().post([project_path, premise, scale, keywords,
-                                  stream_id, variation, chapters, &client] {
+                                  stream_id, variation, chapters, lane, &client] {
+            // 这份大纲记在派它的那一道名下（`util/writer.hpp`）：它落盘时整份
+            // 故事换掉，换掉了别的对话写的东西要认得出来。
+            const util::WriterScope writer{
+                util::Writer{lane, /*derived=*/false, SAY("写大纲"), {}}};
             try {
                 ProjectStore st = open_project(project_path);
                 const Project pj = load_or_400(st);
@@ -759,23 +772,34 @@ ApiResult post_story_analyze(const json& body_in, llm::Client& client,
     if (peek) return peek_prompt(req);
 
     Story read;
+    std::string raw;
     try {
         // 这条口子上没有那个勾（界面不走它，见 server.cpp 的路由表）。
         // **照旧全部重出**：显式点「读一遍」要的就是整份重读。
-        read = stages::apply_analysis(
-            story, pasted.empty() ? client.complete(req, tok) : pasted,
-            /*overwrite=*/true);
+        raw = pasted.empty() ? client.complete(req, tok) : pasted;
+        read = stages::apply_analysis(story, raw, /*overwrite=*/true);
     } catch (const stages::StoryError& e) {
         throw ApiError(502, SAYF("大模型没读出能用的结构：%1", e.what()));
     } catch (const std::exception& e) {
         throw ApiError(502, e.what());
     }
 
+    // **套在此刻盘上那份上，不是开头读的那份。** 读一遍要几分钟，这几分钟
+    // 里别的对话可能写了一章正文、人可能改了一段——拿开头那份整份存回去，
+    // 那些字就被冲回去了（apply_analysis 是从传进去的那份出发的）。
+    const auto guard = store.lock();
+    const Story fresh = load_story_or_400(store);
+    try {
+        read = stages::apply_analysis(fresh, raw, /*overwrite=*/true);
+    } catch (const std::exception&) {
+        // 同一份回答刚刚解析过，这里不该砸；真砸了就用上面那份，不白跑。
+    }
+
     // 正文一个字不动，只多了人物、关系、地点和钩子——不用挡，直接落。
     // 钩子变了切点就变了，commit_story 里会重算章节计划：这正是这一步的
     // 价值，机械切点只保证不切在半句话中间，现在能切在真正的悬念上了。
     const bool needs_analysis = read.characters.empty();
-    json out = commit_story(store, project, std::move(read), story);
+    json out = commit_story(store, project, std::move(read), fresh);
     out["needs_analysis"] = needs_analysis;
     return {200, out};
 }
@@ -810,8 +834,10 @@ ApiResult post_story_understand_once(const json& body_in, llm::Client& client,
         config::load_settings(store.root()).video.aspect_ratio();
     Story read;
     AssetLibrary looks;
+    std::string last_raw;
     try {
         const std::string raw = pasted.empty() ? client.complete(req, tok) : pasted;
+        last_raw = raw;
         // **同一份回答喂两个解析器。** 结构那半和长相那半是同一批人、同一批
         // 地方——不需要再比一遍名单。
         // 那个勾一路传到底：不勾只补缺的那一档，**读这一步也只补不顶**
@@ -826,7 +852,14 @@ ApiResult post_story_understand_once(const json& body_in, llm::Client& client,
         throw ApiError(502, e.what());
     }
 
-    json out = commit_story(store, project, std::move(read), story);
+    // 套在此刻盘上那份上（理由同 post_story_analyze 那段）。
+    const auto guard = store.lock();
+    const Story fresh = load_story_or_400(store);
+    try {
+        read = stages::apply_analysis(fresh, last_raw, overwrite);
+    } catch (const std::exception&) {
+    }
+    json out = commit_story(store, project, std::move(read), fresh);
     const ApiResult merged = merge_assets(store, looks, overwrite, "story");
     out["assets"] = merged.body;
     return {200, out};
@@ -951,7 +984,11 @@ json write_one_chapter(ProjectStore& store, const Project& project, Story story,
     std::string last_error;
     const int floor_chars = static_cast<int>(
         stages::chapter_target_chars(story) * stages::kChapterMinRatio);
+    // 重读→套上这一章→存，一把锁（见 ProjectStore::lock）；大模型那一两分钟
+    // 不在锁里，每一轮开头先放掉。理由同批量那条（batch.cpp）。
+    std::unique_lock<std::recursive_mutex> story_guard;
     for (int attempt = 0; attempt < attempts; ++attempt) {
+        if (story_guard.owns_lock()) story_guard.unlock();
         const bool revising = attempt > 0 && rejected.has_value();
         const bool strict = pasted.empty() ? attempt + 1 < attempts : true;
         if (attempt > 0) {
@@ -1002,6 +1039,7 @@ json write_one_chapter(ProjectStore& store, const Project& project, Story story,
             // 批量展开那条（batch.cpp 里 `apply_chapter(store.load_story(), …)`）
             // 早就这么写了，注释也在那儿——单章这条是同一个函数、同一种坏法，
             // 只是漏了。重读一次的代价是一个文件。
+            story_guard = store.lock();
             Story latest = store.load_story();
             if (latest.chapter_by_id(chapter_id) == nullptr) {
                 // 这一两分钟里这一章被删了。**不能混进下面那句 502 里说**
@@ -1056,6 +1094,7 @@ json write_one_chapter(ProjectStore& store, const Project& project, Story story,
         if (chapter_gone) break;
     }
     if (!last_error.empty()) {
+        if (story_guard.owns_lock()) story_guard.unlock();
         if (!stream_id.empty()) {
             job_relay(stream_id, {{"type", "story_error"},
                                   {"job_id", stream_id},
@@ -1118,6 +1157,8 @@ ApiResult post_story_chapter(const json& body_in, llm::Client& client,
 /// 返回这一轮建了几个、更新了几个、还有哪几个落了单（对不上任何一章）。
 /// **落单的不删**：它们可能已经出过片，删了就是把成片连着记录一起抹掉。
 EpisodeSync sync_episodes_to_chapters(const ProjectStore& store, const Story& story) {
+    // 读项目→对齐→存回，一把锁（见 ProjectStore::lock）。
+    const auto guard = store.lock();
     EpisodeSync out;
     if (story.chapters.empty()) return out;                 // 还没有章节
 
@@ -1355,6 +1396,9 @@ ApiResult post_story_revise(const json& body, llm::Client& client,
 ApiResult post_story_revise_apply(const json& body) {
     forbid_extra(body, {"project", "chapter_id", "from_char", "to_char", "text"});
     ProjectStore store = open_project(body);
+    // 读→拼进这一段→存→对齐，一把锁（ProjectStore::lock）。手改稿子每 1.5 秒
+    // 存一次，正好是最容易和别的对话写的那一章撞上的一条。
+    const auto store_guard = store.lock();
     load_or_400(store);
     const Story story = load_story_or_400(store);
 
