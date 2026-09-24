@@ -222,4 +222,15 @@ struct Output {
 };
 Output task_output(std::uint64_t id, std::uint64_t ver = 0);
 
+/// 那一行想了多少字、写出来的东西换过几次。**给长跑任务那份名单用**
+///（`JobTable::running_jobs`）：长跑那一行的思考和写的东西都记在这本账上，
+/// 而那份名单是任务表自己拼的，不问一声就报不出来——批量写正文想了一个钟头，
+/// 界面上一个字都看不到（2026-09-24 用户：「正文写作也要实时显示思考和写作
+/// 内容」）。找不到（已经结完账）就是两个 0。
+struct LiveCounts {
+    int thinking_chars = 0;
+    std::uint64_t output_ver = 0;
+};
+LiveCounts task_live_counts(std::uint64_t id);
+
 }  // namespace changji::pipeline

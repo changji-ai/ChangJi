@@ -359,6 +359,14 @@ Thinking task_thinking(std::uint64_t id, std::size_t from) {
     return out;
 }
 
+LiveCounts task_live_counts(std::uint64_t id) {
+    Board& b = board();
+    std::lock_guard lg(b.mu);
+    auto it = b.live.find(id);
+    if (it == b.live.end()) return {};
+    return {static_cast<int>(text::utf8_len(it->second->thinking)), it->second->output_ver};
+}
+
 Output task_output(std::uint64_t id, std::uint64_t ver) {
     Board& b = board();
     std::lock_guard lg(b.mu);

@@ -507,8 +507,9 @@ bool JobTable::cancel_by_task(std::uint64_t task_id) {
 }
 
 json JobTable::running_jobs() const {
-    std::lock_guard lg(mu_);
     json out = json::array();
+    {
+    std::lock_guard lg(mu_);
     for (const Slot* sl : all_slots()) {
         const JobState& s = sl->state;
         const JobKind k = sl->kind;
@@ -549,6 +550,20 @@ json JobTable::running_jobs() const {
             // 已经跑了多久。和短活那份同一个字段名，界面一套代码画两边。
             {"seconds", round1(elapsed)},
         });
+    }
+    }
+    // **想了多少字、写的东西换过几次**：这两样记在账本那一行上（批量写正文的
+    // 思考、边写边排的正文都挂在这一件的 Activity 上），界面拿它们判断要不要去
+    // `/api/task/thinking` 取。同短活那份（`running_activities`）的字段名。
+    //
+    // ⚠️ **出了任务表的锁再问账本。** 两把锁套着拿就是一个固定顺序，早晚和
+    // 反过来拿的那一处撞上（`cancel_task` 上那段同一个理由）。
+    for (auto& j : out) {
+        const auto id = j.value("id", std::uint64_t{0});
+        if (id == 0) continue;
+        const LiveCounts c = task_live_counts(id);
+        j["thinking_chars"] = c.thinking_chars;
+        j["output_ver"] = c.output_ver;
     }
     return out;
 }

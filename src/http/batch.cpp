@@ -19,6 +19,7 @@
 #include "http/episodes.hpp"
 #include "http/planning.hpp"
 #include "pipeline/activity.hpp"
+#include "pipeline/task_board.hpp"
 #include "stages/story_from_web.hpp"
 #include "stages/web_tools.hpp"
 #include "http/scripting.hpp"
@@ -375,6 +376,16 @@ ApiResult post_story_chapters(const json& body,
             // 不出来，界面上就是"AI 写作没有热更新"，后端不报任何错。
             stages::JsonFieldStreamer field(stages::kChapterBodyField, true);
                         int seq = 0;
+                        // **写到哪儿了也挂到这件活的账上**（`Task::set_output`），
+                        // 桌面端不订那条 "write" 频道，它看的是账本。前面带一行
+                        // 章名，人看得出是哪一章。
+                        std::string shown;
+                        {
+                            const Chapter* ch = cur.chapter_by_id(id);
+                            shown = "【" + (ch == nullptr || ch->title.empty() ? id : ch->title) +
+                                    "】\n";
+                        }
+                        pipeline::Activity* on_board = pipeline::current_activity();
                         // ⚠️ **令牌要给这个任务真正的那一个（p.token()）。**
                         //
                         // 这里原来是一个当场新建的 `CancelToken dummy`——
@@ -393,6 +404,8 @@ ApiResult post_story_chapters(const json& body,
                             use, p.token(), [&](const std::string& piece) {
                                 const std::string fresh = field.feed(piece);
                                 if (fresh.empty()) return;
+                                shown += fresh;
+                                if (on_board != nullptr) on_board->task().set_output(shown);
                                 // **带上项目。** 这条流广播在 "write" 这个
                                 // 槽上（客户端只订得到类名），而槽是全局
                                 // 的一个：界面那头常驻一条连接收它。人在
