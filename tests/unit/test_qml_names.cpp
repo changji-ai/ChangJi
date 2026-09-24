@@ -60,6 +60,8 @@ const std::map<std::string, std::vector<std::string>>& taken() {
          {"RowLayout", "ColumnLayout", "GridLayout", "StackLayout", "Layout"}},
         {"QtQuick.Window", {"Window", "Screen"}},
         {"QtQuick.Effects", {"MultiEffect", "RectangularShadow"}},
+        {"QtQuick.Shapes", {"Shape", "ShapePath", "PathSvg", "PathText",
+                             "LinearGradient", "RadialGradient", "ConicalGradient"}},
         {"QtQuick.Dialogs", {"FileDialog", "FolderDialog", "MessageDialog",
                               "ColorDialog", "FontDialog"}},
         {"QtMultimedia",
