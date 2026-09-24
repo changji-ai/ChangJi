@@ -459,7 +459,13 @@ TEST_CASE("Child：env 里改了 PATH，就先按改过的 PATH 找程序") {
     auto c = proc::Child::start(o, &err);
     REQUIRE_MESSAGE(c != nullptr, err);
     CHECK(c->write_line("via env PATH"));
-    CHECK(c->read_line(5000) == std::optional<std::string>("via env PATH"));
+    // 等得宽一点、红了说清拿到的是什么：2026-09-24 刚编完跑的第一遍红过一次，
+    // 单独跑、十二份并行跑都绿，而 `{?} == {?}` 分不出是超时还是回错了话。
+    // 这条要多起一个 cmd.exe、跑一个刚写出来的 .cmd——刚落地的文件第一次跑会被
+    // 扫一遍，最慢的正是这一步。绿的时候一回就返回，等得宽不花时间。
+    const auto got = c->read_line(15000);
+    const std::string seen = got ? "got \"" + *got + "\"" : "got nothing within 15 s";
+    CHECK_MESSAGE(got == std::optional<std::string>("via env PATH"), seen);
 }
 
 TEST_CASE("Child：在指定目录里起，目录名带中文和空格也行") {
