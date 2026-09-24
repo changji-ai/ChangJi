@@ -30,6 +30,7 @@
 #include "http/offload.hpp"
 #include "http/prompt_peek.hpp"
 #include "pipeline/activity.hpp"
+#include "pipeline/task_board.hpp"
 #include "stages/json_partial.hpp"
 #include "stages/json_stream.hpp"
 #include "stages/story_revise.hpp"
@@ -408,6 +409,51 @@ json outline_progress_payload(const json& snap) {
             {"chapters", chapters}};
 }
 
+/// 大纲**边写边排成人读的样子**，挂到任务那一行上（`Task::set_output`）。
+///
+/// 用户 2026-09-24：「写大纲也要实时显示思考和写作内容」。网页那头订着
+/// `outline_progress` 那条流，桌面端看的是账本——同一份快照
+///（`outline_progress_payload` 挑出来的那几栏）排成几行字：一句话梗概、人物、
+/// 一章一段（章名 + 摘要）。**还没写到的栏不摆**，模型写这份 JSON 的键序每次
+/// 都不一样，先写到哪栏就先出哪栏。
+static std::string outline_progress_text(const json& p) {
+    const auto str_of = [](const json& j, const char* key) -> std::string {
+        const auto it = j.find(key);
+        return (it != j.end() && it->is_string()) ? it->get<std::string>() : std::string();
+    };
+    std::string out;
+    const auto line = [&](const std::string& s) {
+        if (s.empty()) return;
+        if (!out.empty()) out += "\n";
+        out += s;
+    };
+    line(str_of(p, "logline"));
+    if (const auto it = p.find("characters"); it != p.end() && it->is_array() && !it->empty()) {
+        std::string who;
+        for (const auto& c : *it) {
+            const std::string name = str_of(c, "name");
+            if (name.empty()) continue;
+            if (!who.empty()) who += SAY("、");
+            const std::string id = str_of(c, "identity");
+            who += id.empty() ? name : SAYF("%1（%2）", name, id);
+        }
+        if (!who.empty()) line(SAYF("人物：%1", who));
+    }
+    if (const auto it = p.find("chapters"); it != p.end() && it->is_array()) {
+        int n = 0;
+        for (const auto& c : *it) {
+            ++n;
+            const std::string title = str_of(c, "title");
+            const std::string summary = str_of(c, "summary");
+            if (title.empty() && summary.empty()) continue;
+            if (!out.empty()) out += "\n";
+            line(SAYF("【第 %1 章】%2", std::to_string(n), title));
+            line(summary);
+        }
+    }
+    return out;
+}
+
 // 声明在 story_api.hpp 上（一键成片那条也调它）。
 json write_outline(ProjectStore& store, const Project& project,
                    const Story& existing, std::string premise, StoryScale scale,
@@ -489,6 +535,8 @@ json write_outline(ProjectStore& store, const Project& project,
                 const json snap = partial.snapshot();
                 if (!snap.is_object()) return;   // 这一帧补不出来，跳过
                 json msg = outline_progress_payload(snap);
+                // 同一份快照排成字挂到账上，桌面端看的是那儿（见 `outline_progress_text`）。
+                act.task().set_output(outline_progress_text(msg));
                 // **到此为止收了多少字。空窗期唯一看得见的活口。**
                 //
                 // 上面挑的那几栏（logline / 人物 / 章节）要等模型写到那一栏
@@ -505,6 +553,14 @@ json write_outline(ProjectStore& store, const Project& project,
                 msg["seq"] = seq++;
                 job_relay(stream_id, std::move(msg));
             });
+        }
+        // 写完了：按整份再排一遍（节流可能把最后那一截吞了）。
+        if (!stream_id.empty()) {
+            stages::PartialJson whole;
+            whole.feed(raw);
+            if (const json snap = whole.snapshot(); snap.is_object()) {
+                act.task().set_output(outline_progress_text(outline_progress_payload(snap)));
+            }
         }
         story = stages::parse_outline(raw, premise, scale);
     } catch (const stages::StoryError& e) {
