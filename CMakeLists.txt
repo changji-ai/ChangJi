@@ -1424,6 +1424,7 @@ if(CHANGJI_BUILD_TESTS)
         tests/unit/test_task_slot.cpp
         tests/unit/test_chat_id.cpp
         tests/unit/test_window_place.cpp
+        tests/unit/test_app_place.cpp
         tests/unit/test_paper_merge.cpp
         tests/unit/test_worker_proto.cpp
         tests/unit/test_worker_roster.cpp
