@@ -210,6 +210,14 @@ bool JobTable::start(JobKind kind, const std::string& episode_id, Body body,
         //   · **思考自动接上**——`thinking_sink` 认的是"当前线程在干的那件
         //     活"，而底下每一次大模型调用都跑在这条线程上。
         //   · 令牌挂到这个槽的令牌上，页面上按「结束」等于按顶栏那个停。
+        // **这条线程上写盘的是谁**（`util/writer.hpp`）：写作记在派活的那一道
+        // 名下，存盘时认得出"盖了别人"；出片只是回填状态、路径，不算作者。
+        //
+        // ⚠️ **要立在 `Activity` 前面**：账本上那一件在构造那一刻从线程上读
+        // "哪一道派的"（`Task` 的 `lane`）。立在后面的话，这件长跑自己记成
+        // "没人派的"，对话那头报「跑完了」时认不出这是自己的。
+        const util::WriterScope writer{util::Writer{
+            lane, /*derived=*/kind == JobKind::Run, task_title, {}}};
         pipeline::Activity act{to_string(kind), project, std::string{},
                                task_title};
         act.task().token().link(&sp->token);
@@ -221,10 +229,6 @@ bool JobTable::start(JobKind kind, const std::string& episode_id, Body body,
             sp->task_id = act.task().id();
         }
         JobProgress progress(this, kind, sp, job_id, project, lane);
-        // **这条线程上写盘的是谁**（`util/writer.hpp`）：写作记在派活的那一道
-        // 名下，存盘时认得出"盖了别人"；出片只是回填状态、路径，不算作者。
-        const util::WriterScope writer{util::Writer{
-            lane, /*derived=*/kind == JobKind::Run, task_title, {}}};
         try {
             body(progress);
         } catch (const std::exception& e) {

@@ -1,6 +1,7 @@
 #include "pipeline/task_board.hpp"
 
 #include "util/task_slot.hpp"
+#include "util/writer.hpp"
 #include "util/say.hpp"
 
 #include "util/text.hpp"   // utf8_len：思考那个数报字，不报字节
@@ -43,6 +44,10 @@ struct Row {
     std::string episode_id;
     /// 界面上哪一格（`story` / `shots` / …）。见 `Task` 的构造。
     std::string slot;
+    /// 哪一道派的（`util::Writer::lane`：`chat:<编号>` = 那条对话）。**构造那一刻
+    /// 从线程上读**：派活的线程开工时立了 `WriterScope`。空 = 没立（人按的钮，
+    /// 或者没走对话那条路的活）。
+    std::string lane;
     std::string target;
     std::string thinking;
     /// `thinking` 里第一个字的**绝对位置**（从这件活开工算起）。
@@ -128,6 +133,8 @@ nlohmann::json to_json_locked(Board& b, const Row& r, Clock::time_point now) {
         {"slot", r.slot},
         {"target", r.target},
         {"state", to_string(r.state)},
+        // 哪一道派的（见 `Row::lane`）。空着就是没记上，认的那头按老规矩办。
+        {"lane", r.lane},
         // 真在干，还是只是被领走了在等位置。见 Task::begin。
         {"working", r.working},
         // 这一行是"一整件长跑"（出片、写全片），它底下那些镜头是另外几行。
@@ -207,6 +214,7 @@ Task::Task(std::string kind, std::string title, std::string project,
     row->episode_id = std::move(episode_id);
     // 没自己说就按 kind 算。**只有 `image` 需要自己说**（一词两用）。
     row->slot = slot.empty() ? util::slot_of_task_kind(row->kind) : std::move(slot);
+    row->lane = util::current_writer().lane;
     row->queued_at = Clock::now();
     b.live.emplace(id_, std::move(row));
 }
