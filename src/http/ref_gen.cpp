@@ -467,6 +467,10 @@ struct RefQueue {
 
     bool active = false;
     std::string project;          ///< 正在跑的那个项目目录
+    /// 谁起的这一批：空 = 页面上那颗按钮，`chat:<编号>` = 那条对话
+    ///（`pipeline::chat_lane`）。**对话说「停」只停自己起的**——同出片、写作
+    /// 那两样按道分（CLAUDE.md 第十四条）。
+    std::string lane;
     std::vector<QueueItem> items;
     std::size_t next = 0;         ///< 下一件派谁
     std::size_t done = 0;
@@ -743,6 +747,7 @@ ApiResult post_references_generate_all(const json& body) {
             return {200, {{"total", 0}, {"started", false}}};
         }
         q.project = project_path;
+        q.lane = opt_str(body, "lane");
         enroll(items, project_path);
         q.items = std::move(items);
         q.next = 0;
@@ -768,6 +773,10 @@ ApiResult post_references_generate_all_stop(const json& body) {
         std::lock_guard<std::mutex> lg(q.mu);
         if (!q.active) return {200, {{"stopped", false}}};
         if (!project.empty() && !same_project(q.project, project)) {
+            return {200, {{"stopped", false}}};
+        }
+        // 带了道的（对话那头）只停自己那一道起的；不带的是人按的按钮，照停。
+        if (body.contains("lane") && opt_str(body, "lane") != q.lane) {
             return {200, {{"stopped", false}}};
         }
         q.tok.request();
