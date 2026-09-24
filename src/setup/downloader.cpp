@@ -9,6 +9,7 @@
 #include <system_error>
 #include <vector>
 
+#include "config/model_index.hpp"
 #include "setup/catalog.hpp"
 #include "util/paths.hpp"
 #include "util/proc.hpp"
@@ -223,6 +224,7 @@ json Snapshot::to_json() const {
         items_json.push_back({{"group", it.group},
                               {"option", it.option},
                               {"name", it.name},
+                              {"path", it.path},
                               {"note", it.note},
                               {"total", it.total},
                               {"downloaded", it.downloaded},
@@ -246,24 +248,35 @@ std::size_t adopt_finished_parts(const fs::path& models_dir) {
     std::size_t n = 0;
     for (const auto& g : catalog()) {
         for (const auto& o : g.options) {
-            for (const auto& f : o.files) {
+            // 替换档（小一档的编码器、VAE）也要看：人挑了它、下到一半被杀，
+            // 盘上躺着的正是那一份。
+            std::vector<FileSpec> files = o.files;
+            for (const auto& alt : o.alts) {
+                files.insert(files.end(), alt.choices.begin(), alt.choices.end());
+            }
+            for (const auto& f : files) {
                 if (f.bytes == 0) continue;
-                const fs::path dest = models_dir / paths::from_utf8(f.name);
-                const fs::path part =
-                    dest.parent_path() / (paths::to_utf8(dest.filename()) + ".part");
-                if (file_size_or_zero(part) != f.bytes) continue;
-                if (file_size_or_zero(dest) == f.bytes) {
-                    // 正式的那份也全：`.part` 是多余的，扔掉
-                    std::error_code rm;
-                    fs::remove(part, rm);
-                    continue;
+                // 老位置和新位置都看：这一版之前下的平铺在根上，之后的进了类型目录。
+                const std::string where[] = {f.name, download_rel(g.key, f)};
+                for (const auto& rel : where) {
+                    const fs::path dest = models_dir / paths::from_utf8(rel);
+                    const fs::path part =
+                        dest.parent_path() / (paths::to_utf8(dest.filename()) + ".part");
+                    if (file_size_or_zero(part) != f.bytes) continue;
+                    if (file_size_or_zero(dest) == f.bytes) {
+                        // 正式的那份也全：`.part` 是多余的，扔掉
+                        std::error_code rm;
+                        fs::remove(part, rm);
+                        continue;
+                    }
+                    std::error_code mv;
+                    fs::rename(part, dest, mv);
+                    if (!mv) ++n;
                 }
-                std::error_code mv;
-                fs::rename(part, dest, mv);
-                if (!mv) ++n;
             }
         }
     }
+    if (n > 0) config::forget_model_index();
     return n;
 }
 
@@ -305,6 +318,7 @@ bool Downloader::start(std::vector<Item> items, const fs::path& dir,
             p.group = it.group;
             p.option = it.option;
             p.name = it.file.name;
+            p.path = it.rel.empty() ? it.file.name : it.rel;
             p.note = it.file.note;
             p.total = it.file.bytes;
             snap_.items.push_back(std::move(p));
@@ -361,8 +375,9 @@ void Downloader::run(std::vector<Item> items, fs::path dir,
                 const std::size_t i = next.fetch_add(1);
                 if (i >= items.size()) return;
                 if (cancel_) { any_canceled = true; return; }
-                const fs::path dest = dir / paths::from_utf8(items[i].file.name);
-                if (!fetch_one(items[i], dest, i)) {
+                const fs::path dest = dir / paths::from_utf8(
+                    items[i].rel.empty() ? items[i].file.name : items[i].rel);
+                if (!fetch_one(items[i], dir, dest, i)) {
                     std::lock_guard<std::mutex> lock(mu_);
                     if (snap_.items[i].state == ItemState::Canceled) {
                         any_canceled = true;
@@ -410,7 +425,8 @@ void Downloader::run(std::vector<Item> items, fs::path dir,
     running_ = false;
 }
 
-bool Downloader::fetch_one(const Item& item, const fs::path& dest, std::size_t index) {
+bool Downloader::fetch_one(const Item& item, const fs::path& dir, const fs::path& dest,
+                           std::size_t index) {
     const auto set = [&](auto&& fn) {
         std::lock_guard<std::mutex> lock(mu_);
         fn(snap_.items[index]);
@@ -423,13 +439,31 @@ bool Downloader::fetch_one(const Item& item, const fs::path& dest, std::size_t i
     const std::uint64_t want = item.file.bytes;
     // 盘上已经有一份对得上的就跳过。**这就是"重来一次不会重下"**：
     // 用户中途取消、或者上一轮有几个失败了，再点一次只补缺的那几个。
-    if (file_size_or_zero(dest) == want && want > 0) {
-        set([&](ItemProgress& p) {
-            p.state = ItemState::Present;
-            p.downloaded = want;
-            p.speed_bps = 0.0;
-        });
-        return true;
+    //
+    // **在整个模型目录里找，不只看要落的那个位置。** 这一版之前下的平铺在根上，
+    // 人自己拷进来的哪儿都有——只看 `<类型>/` 底下的话，那几份全要重下一遍，
+    // 几十 GB。大小要恰好对上才算（截断的同名文件不算）。
+    // 旁边还躺着 aria2 的控制文件的不算：那是老版本直接写在正式名字上、按全长
+    // 预分配好的半截（同 setup_api 的 download_in_progress）。
+    const auto in_progress = [](const fs::path& p) {
+        fs::path ctrl = p;
+        ctrl += ".aria2";
+        std::error_code ec;
+        return fs::exists(ctrl, ec);
+    };
+    if (want > 0) {
+        if (const auto have = config::find_model(dir, item.file.name, want);
+            have && !in_progress(*have)) {
+            std::string at = paths::to_utf8(have->lexically_relative(dir));
+            std::replace(at.begin(), at.end(), '\\', '/');
+            set([&](ItemProgress& p) {
+                p.state = ItemState::Present;
+                p.path = at;
+                p.downloaded = want;
+                p.speed_bps = 0.0;
+            });
+            return true;
+        }
     }
 
     std::error_code ec;
@@ -450,12 +484,45 @@ bool Downloader::fetch_one(const Item& item, const fs::path& dest, std::size_t i
     const fs::path part =
         dest.parent_path() / (paths::to_utf8(dest.filename()) + ".part");
 
+    // **老位置上下了一半的，挪过来接着下。** 这一版之前是平铺在根上下的
+    // （`<目录>/<名字>.part`），现在落到 `<类型>/` 底下。不挪的话新位置从 0 开始，
+    // 老位置那半截（可能几十 GB）就白下了，还一直占着盘。
+    // 同一个盘里改名，不搬字节。aria2 的控制文件跟着走，不然它认不出续传。
+    if (const fs::path old = dir / paths::from_utf8(item.file.name); old != dest) {
+        const fs::path old_part =
+            old.parent_path() / (paths::to_utf8(old.filename()) + ".part");
+        if (file_size_or_zero(part) == 0) {
+            fs::path from;
+            if (file_size_or_zero(old_part) > 0) {
+                from = old_part;
+            } else if (const auto n = file_size_or_zero(old); n > 0 && n < want) {
+                // 更老的版本连 `.part` 都没有，半截就躺在正式名字上。
+                from = old;
+            }
+            if (!from.empty()) {
+                std::error_code mk;
+                fs::create_directories(part.parent_path(), mk);
+                std::error_code mv;
+                fs::rename(from, part, mv);
+                if (!mv) {
+                    fs::path ctrl_from = from;
+                    ctrl_from += ".aria2";
+                    fs::path ctrl_to = part;
+                    ctrl_to += ".aria2";
+                    std::error_code cm;
+                    if (fs::exists(ctrl_from, cm)) fs::rename(ctrl_from, ctrl_to, cm);
+                }
+            }
+        }
+    }
+
     // `.part` 已经下全了、只差改名（上一轮父进程被杀，见
     // adopt_finished_parts）：改个名就是了，一个字节都不用再下。
     if (want > 0 && file_size_or_zero(part) == want) {
         std::error_code mv;
         fs::rename(part, dest, mv);
         if (!mv) {
+            config::forget_model_index();
             set([&](ItemProgress& p) {
                 p.state = ItemState::Present;
                 p.downloaded = want;
@@ -648,6 +715,8 @@ bool Downloader::fetch_one(const Item& item, const fs::path& dest, std::size_t i
                 });
                 return false;
             }
+            // 索引里那份是改名之前扫的，扔掉：下一次 `resolve` 要看得见它。
+            config::forget_model_index();
             set([&](ItemProgress& p) {
                 p.state = ItemState::Done;
                 p.downloaded = want == 0 ? got : want;

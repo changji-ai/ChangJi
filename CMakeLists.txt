@@ -852,6 +852,7 @@ add_library(changji_core STATIC
     src/util/sysstat.cpp
     src/net/ws_client.cpp
     src/config/settings.cpp
+    src/config/model_index.cpp
     src/config/model_patch.cpp
     src/config/writeback.cpp
     src/config/runtime.cpp
@@ -1638,6 +1639,7 @@ if(CHANGJI_BUILD_TESTS)
         src/llm/local_client.cpp
         src/llm/call_log.cpp
         src/config/settings.cpp
+        src/config/model_index.cpp
         src/config/model_patch.cpp
         src/config/writeback.cpp
         src/config/runtime.cpp

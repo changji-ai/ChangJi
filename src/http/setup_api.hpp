@@ -58,6 +58,14 @@ ApiResult get_setup_progress();
 /// POST /bff/setup/cancel —— 停下。已经下好的留着，下次接着下。
 ApiResult post_setup_cancel();
 
+/// GET /bff/setup/index —— 模型目录里**实际有**哪些模型文件，每一个认不认得。
+///
+/// 重扫一遍（不走缓存：人按「索引」就是因为刚往里放了东西）。每一个文件报
+/// 它在哪、多大，以及和清单比对的结果：`known`（名字和大小都对得上清单里
+/// 某一份）、`size`（名字对得上、大小不对——下了一半，或者是别的版本）、
+/// `unknown`（清单里没有，人自己放的）。认得的顺带说是哪一组的。
+ApiResult get_setup_index(const config::Settings& settings);
+
 /// 这一组配齐了没有。
 ///
 /// 编剧和配音有另一条出路：接外面的服务。那时候本机一个模型文件都没有

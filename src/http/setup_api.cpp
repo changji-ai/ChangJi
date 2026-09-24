@@ -9,6 +9,7 @@
 #include <system_error>
 #include <vector>
 
+#include "config/model_index.hpp"
 #include "config/runtime.hpp"
 #include "config/writeback.hpp"
 #include "config/model_patch.hpp"
@@ -41,6 +42,55 @@ std::uint64_t size_of(const fs::path& p) {
     std::error_code ec;
     const auto n = fs::file_size(p, ec);
     return ec ? 0 : static_cast<std::uint64_t>(n);
+}
+
+std::string file_name_of(const std::string& rel) {
+    const auto slash = rel.find_last_of("/\\");
+    return slash == std::string::npos ? rel : rel.substr(slash + 1);
+}
+
+/// 相对模型目录、`/` 分隔的那一串，界面上照着印。
+std::string rel_to(const fs::path& dir, const fs::path& full) {
+    std::string s = paths::to_utf8(full.lexically_relative(dir));
+    std::replace(s.begin(), s.end(), '\\', '/');
+    return s;
+}
+
+/// 清单里的一个文件在盘上是什么样。
+struct OnDisk {
+    bool present = false;     ///< 下全了（大小恰好对上、没在下）
+    std::uint64_t have = 0;   ///< 下了多少（全了就是全长）
+    std::string at;           ///< 在哪 / 要落在哪，相对模型目录
+};
+
+/// **在整个模型目录里找，不只看一个位置**：新下的在 `<类型>/` 底下，老版本下的
+/// 平铺在根上，人自己拷进来的哪儿都有（见 config/model_index.hpp）。
+/// 下载器判"已经有了"走的是同一个 `find_model`——两处判据不一样的话，界面说
+/// "齐了"、点下去又开始下，或者反过来。
+OnDisk on_disk(const fs::path& dir, const std::string& group_key, const setup::FileSpec& f) {
+    OnDisk out;
+    out.at = setup::download_rel(group_key, f);
+    if (f.bytes == 0) return out;
+    if (const auto hit = config::find_model(dir, f.name, f.bytes);
+        hit && !download_in_progress(*hit)) {
+        out.present = true;
+        out.have = f.bytes;
+        out.at = rel_to(dir, *hit);
+        return out;
+    }
+    // 下了一半的：新位置、老位置的 `.part`，或者更老的版本留在正式名字上的半截。
+    // **预分配的那种算不出来**（文件已经是最终大小，真下了多少只有 .aria2 里的
+    // 位图知道），那种记 0——进度偏小，比显示"已完成"好。
+    for (const std::string& rel : {out.at, f.name}) {
+        const fs::path full = dir / paths::from_utf8(rel);
+        fs::path part = full;
+        part += ".part";
+        for (const fs::path& p : {part, full}) {
+            const auto n = size_of(p);
+            if (n > 0 && n < f.bytes && n > out.have) out.have = n;
+        }
+    }
+    return out;
 }
 
 
@@ -110,36 +160,27 @@ json option_json(const Option& o, const fs::path& models_dir, double vram_gb,
     bool complete = !use.empty();
     std::uint64_t total = 0;
     for (const auto& f : use) {
-        const fs::path full = models_dir / paths::from_utf8(f.name);
-        const std::uint64_t on_disk = size_of(full);
-        // 还在下就一律不算齐，哪怕大小已经对上了（预分配，见上面）。
-        const bool present =
-            f.bytes > 0 && on_disk == f.bytes && !download_in_progress(full);
-        if (present) have += f.bytes;
-        // 下了一半的也算上。**预分配的那种算不出来**：文件已经是最终大小，
-        // 真下了多少只有 .aria2 里的位图知道。那种情况这里记 0，
-        // 界面上进度偏小——比显示"已完成"好，后者会让人拿一份零文件去出片。
-        else if (on_disk > 0 && on_disk < f.bytes) have += on_disk;
-        if (!present) complete = false;
+        // 还在下就一律不算齐，哪怕大小已经对上了（预分配，见 on_disk）。
+        const OnDisk d = on_disk(models_dir, group_key, f);
+        have += d.have;
+        if (!d.present) complete = false;
         total += f.bytes;
         files.push_back({{"name", f.name},
+                         {"path", d.at},
                          {"note", SAY(f.note)},
                          {"bytes", f.bytes},
-                         {"haveBytes", on_disk},
-                         {"present", present}});
+                         {"haveBytes", d.have},
+                         {"present", d.present}});
     }
     // 可以换的那几个角色，连同每一份的名字、大小、说明、在不在盘上。
     json alts = json::array();
     for (const auto& alt : o.alts) {
         json choices = json::array();
         for (const auto& c : alt.choices) {
-            const fs::path full = models_dir / paths::from_utf8(c.name);
-            choices.push_back(
-                {{"name", c.name},
-                 {"note", SAY(c.note)},
-                 {"bytes", c.bytes},
-                 {"present", c.bytes > 0 && size_of(full) == c.bytes &&
-                                 !download_in_progress(full)}});
+            choices.push_back({{"name", c.name},
+                               {"note", SAY(c.note)},
+                               {"bytes", c.bytes},
+                               {"present", on_disk(models_dir, group_key, c).present}});
         }
         alts.push_back({{"role", alt.role},
                         {"title", SAY(alt.title)},
@@ -243,6 +284,14 @@ std::string current_option(const Group& g, const config::Settings& s) {
     for (const auto& o : g.options) {
         for (const auto& f : o.files) {
             if (f.role == g.owned_roles.front() && f.name == *primary) return o.id;
+        }
+    }
+    // 配置里写的带了别的目录（`image/…`、人手填的 `D:/models/…`）：按文件名再认
+    // 一遍。**先整串、后文件名**——整串对得上的那一档永远优先。
+    const std::string mine = file_name_of(*primary);
+    for (const auto& o : g.options) {
+        for (const auto& f : o.files) {
+            if (f.role == g.owned_roles.front() && file_name_of(f.name) == mine) return o.id;
         }
     }
     return {};
@@ -351,10 +400,27 @@ ApiResult get_setup_state(const config::Settings& settings,
         // 这一页会把它换回推荐的那档，而他多半不会注意到。
         const std::string current = current_option(g, settings);
         const auto rec = recommended.find(g.key);
+        // **还没配、但盘上已经有一整档的，先选它。** 人把模型拷进目录（或者按了
+        // 「索引」）之后，这一页该指着他已经有的那一份，而不是推荐另一档让他再下
+        // 几十 GB。几档都齐就挑 rank 最高的。
+        std::string on_hand;
+        if (current.empty()) {
+            int best = -1;
+            for (std::size_t i = 0; i < g.options.size(); ++i) {
+                const Option& o = g.options[i];
+                if (o.files.empty() || !options[i].value("complete", false)) continue;
+                if (o.rank > best) {
+                    best = o.rank;
+                    on_hand = o.id;
+                }
+            }
+        }
         const std::string pick =
             !current.empty()
                 ? current
-                : (rec == recommended.end() ? std::string() : rec->second);
+                : !on_hand.empty()
+                      ? on_hand
+                      : (rec == recommended.end() ? std::string() : rec->second);
         selected[g.key] = pick;
 
         // **替换档（编码器、VAE）也要回填。**
@@ -641,8 +707,8 @@ ApiResult post_setup_download(const config::Settings& settings, const json& body
         // **和写配置走同一份解析。** 只改一处的话会出现"下的是小编码器、
         // 配置里写的是大编码器"。
         for (const auto& f : setup::effective_files(g.key, *opt, selections)) {
-            items.push_back(
-                {g.key, opt->id, f, setup::resolve_url(source, f.repo, f.path)});
+            items.push_back({g.key, opt->id, f, setup::download_rel(g.key, f),
+                             setup::resolve_url(source, f.repo, f.path)});
         }
     }
 
@@ -752,6 +818,68 @@ ApiResult get_setup_progress() {
 ApiResult post_setup_cancel() {
     setup::Downloader::instance().cancel();
     return {200, setup::Downloader::instance().snapshot().to_json()};
+}
+
+ApiResult get_setup_index(const config::Settings& settings) {
+    const fs::path dir = settings.models.dir_path(settings.workspace_path());
+    const config::ModelIndex idx = config::index_models(dir, /*fresh=*/true);
+
+    // 清单里每一份，按文件名记（替换档也算：小一档的编码器也是认得的）。
+    struct Known {
+        const Group* group;
+        const setup::FileSpec* file;
+    };
+    std::multimap<std::string, Known> by_name;
+    for (const auto& g : catalog()) {
+        for (const auto& o : g.options) {
+            for (const auto& f : o.files) by_name.emplace(file_name_of(f.name), Known{&g, &f});
+            for (const auto& alt : o.alts) {
+                for (const auto& c : alt.choices) {
+                    by_name.emplace(file_name_of(c.name), Known{&g, &c});
+                }
+            }
+        }
+    }
+
+    json files = json::array();
+    std::size_t known = 0;
+    std::uint64_t bytes = 0;
+    for (const auto& f : idx.files) {
+        bytes += f.bytes;
+        json one{{"path", f.rel}, {"bytes", f.bytes}, {"status", "unknown"}};
+        const auto [lo, hi] = by_name.equal_range(file_name_of(f.rel));
+        const Known* hit = nullptr;
+        const Known* near = nullptr;
+        for (auto it = lo; it != hi; ++it) {
+            if (it->second.file->bytes == f.bytes) { hit = &it->second; break; }
+            if (near == nullptr) near = &it->second;
+        }
+        if (hit != nullptr) {
+            ++known;
+            one["status"] = "known";
+            one["group"] = hit->group->key;
+            one["groupTitle"] = SAY(hit->group->title);
+            one["note"] = SAY(hit->file->note);
+        } else if (near != nullptr) {
+            // 名字对得上、大小不对：多半是没下完，或者同名的另一个版本。
+            // **不算认得**——拿它去出片，加载时报的是"权重读不对"。
+            one["status"] = "size";
+            one["group"] = near->group->key;
+            one["groupTitle"] = SAY(near->group->title);
+            one["expectBytes"] = near->file->bytes;
+        }
+        files.push_back(std::move(one));
+    }
+
+    std::error_code ec;
+    return {200,
+            {{"dir", paths::to_utf8(dir)},
+             {"exists", fs::is_directory(dir, ec)},
+             {"truncated", idx.truncated},
+             {"count", idx.files.size()},
+             {"known", known},
+             {"bytes", bytes},
+             {"files", files}}};
 }
 
 }  // namespace changji::http

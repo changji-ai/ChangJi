@@ -16,6 +16,7 @@
 // 只为了 `ProjectPaths::assets_file()` 和 `StyleProfile` 那个初值：没写
 // `[video]` 的老项目，画幅要从它自己的 assets.json 推（见
 // orientation_from_assets）。文件名和初值都从这儿拿，不在这边再抄一份。
+#include "config/model_index.hpp"
 #include "models/project.hpp"
 #include "stages/limits.hpp"
 #include "util/paths.hpp"
@@ -436,9 +437,19 @@ fs::path ModelsConfig::resolve(const std::string& entry,
     fs::path p = paths::expand_user(entry);
     // 绝对路径原样用。多台机器共享一个网络盘时会这么填。
     if (p.is_absolute()) return p;
+    const fs::path root = dir_path(workspace);
     std::error_code ec;
-    fs::path abs = fs::absolute(dir_path(workspace) / p, ec);
-    return ec ? dir_path(workspace) / p : abs;
+    fs::path abs = fs::absolute(root / p, ec);
+    if (ec) abs = root / p;
+    // **拼出来的位置上没有，就按文件名在模型目录里找一遍。** 新下的按类型进了
+    // 子目录（`image/Qwen_Image-Q8_0.gguf`），配置里记的还是那个名字；老版本
+    // 下的平铺在根上；人自己拷进来的放哪儿都有。理由写在 model_index.hpp 上。
+    // 哪儿都没有就照旧回拼出来的那个——体检拿它说"缺哪个文件、该放哪儿"。
+    std::error_code ex;
+    if (!fs::exists(abs, ex)) {
+        if (auto hit = find_model(root, paths::to_utf8(p))) return *hit;
+    }
+    return abs;
 }
 
 std::vector<std::string> ModelsConfig::validate() const {

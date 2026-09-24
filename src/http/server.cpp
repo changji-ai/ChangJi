@@ -2008,6 +2008,13 @@ void run(const config::Settings& settings, const Options& opts) {
             return json_response(r.body, r.status);
         });
 
+    // 模型目录里实际有什么。**只读**：扫一遍、比对清单，不挪文件、不写配置——
+    // 配置那头不用改，`ModelsConfig::resolve` 自己会按文件名找到它们。
+    CROW_ROUTE(app, "/bff/setup/index")([] {
+        auto r = guard([&] { return get_setup_index(config::runtime().snapshot()); });
+        return json_response(r.body, r.status);
+    });
+
     // ---- 任意一台机器的装模型：本机走本地那份，别的机器转发过去 ----
     //
     // **界面只跟本机的引擎说话。** 浏览器连不上那几台（地址可能只有引擎

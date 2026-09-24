@@ -19,6 +19,8 @@
 #endif
 
 #include <chrono>
+#include <map>
+#include <mutex>
 #include <thread>
 #include <vector>
 
@@ -53,6 +55,41 @@ int fd_upper_bound() {
 
 void close_inherited_fds(int upper) {
     for (int fd = STDERR_FILENO + 1; fd < upper; ++fd) ::close(fd);
+}
+#endif
+
+#ifdef _WIN32
+/// `spawn` 起的每一个进程各配一个**作业对象**（Job Object），按进程 id 记着。
+///
+/// **为什么要有。** 原来的杀法是先 `GenerateConsoleCtrlEvent` 再 `TerminateProcess`
+/// 那**一个**进程——够不着它的子进程。scoop / chocolatey 装的 `aria2c.exe` 是个
+/// 垫片，真干活的那个 aria2c 是它拉起来的孙子：杀掉垫片，孙子照下不误；再点一次
+/// 下载又开一个，两个进程往同一个 `.part` 里写，文件越写越大（downloader.cpp 里
+/// 「比应有的还大」那一段在 Linux 上就是这么栽的，那边是 setsid 出来的孤儿）。
+/// 2026-09-24 修「下载模型停不下来」时一并堵上。
+///
+/// 进了作业对象之后：
+///   · 杀的时候 `TerminateJobObject`，**整棵树一起走**；
+///   · 设了 KILL_ON_JOB_CLOSE：引擎自己没了（崩了、被任务管理器结束），句柄
+///     一关，底下的也跟着走，不留孤儿接着写盘、接着占端口。
+///
+/// 加不进去（老系统上外面那层作业不许嵌套）就退回原来那样只杀一个，不拦着起。
+std::mutex& jobs_mu() {
+    static std::mutex m;
+    return m;
+}
+std::map<DWORD, HANDLE>& jobs() {
+    static std::map<DWORD, HANDLE> m;
+    return m;
+}
+/// 取走这个进程的作业对象（取走就不在表上了），没有回空。
+HANDLE take_job(DWORD pid) {
+    std::lock_guard<std::mutex> lock(jobs_mu());
+    const auto it = jobs().find(pid);
+    if (it == jobs().end()) return nullptr;
+    const HANDLE h = it->second;
+    jobs().erase(it);
+    return h;
 }
 #endif
 
@@ -522,15 +559,49 @@ ProcHandle spawn(const std::string& exe, const std::vector<std::string>& args,
                             OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     }
     const HANDLE log_h = out != INVALID_HANDLE_VALUE ? out : nullptr;
+
+    // 作业对象，理由见 jobs() 上面那段。
+    HANDLE job = ::CreateJobObjectW(nullptr, nullptr);
+    if (job != nullptr) {
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION info{};
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        if (!::SetInformationJobObject(job, JobObjectExtendedLimitInformation, &info,
+                                       sizeof(info))) {
+            ::CloseHandle(job);
+            job = nullptr;
+        }
+    }
+
+    // ⚠️ **CREATE_NO_WINDOW 不能少。** 桌面端是个窗口程序，自己没有控制台；
+    // 窗口程序起一个控制台程序（curl、aria2c）而不带这一条，系统就给它**新开
+    // 一个终端窗口**——下模型时一路一个，四路就是四个黑框（2026-09-24 用户报的
+    // 「下载模型的时候弹出终端」）。人去关那几个框，下载器被关掉、这边当它断了
+    // 重试，**又弹一个**。输出本来就接到日志文件里，那个窗口里什么都没有。
+    //
+    // CREATE_SUSPENDED：先挂起、进了作业再放它跑。不挂起的话，它在进作业之前
+    // 那一瞬间拉起的子进程就不在作业里，杀不到。
     PROCESS_INFORMATION pi{};
     const bool ok =
-        create_process_std(nullptr, mutable_cmd.data(), CREATE_NEW_PROCESS_GROUP, nullptr,
-                           nullptr, nullptr, log_h, log_h, &pi.hProcess, &pi.hThread,
-                           &pi.dwProcessId) == 0;
+        create_process_std(nullptr, mutable_cmd.data(),
+                           CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW | CREATE_SUSPENDED,
+                           nullptr, nullptr, nullptr, log_h, log_h, &pi.hProcess,
+                           &pi.hThread, &pi.dwProcessId) == 0;
     if (out != INVALID_HANDLE_VALUE) ::CloseHandle(out);
-    if (!ok) return 0;
+    if (!ok) {
+        if (job != nullptr) ::CloseHandle(job);
+        return 0;
+    }
+    if (job != nullptr && !::AssignProcessToJobObject(job, pi.hProcess)) {
+        ::CloseHandle(job);
+        job = nullptr;
+    }
+    ::ResumeThread(pi.hThread);
     ::CloseHandle(pi.hThread);
     ::CloseHandle(pi.hProcess);
+    if (job != nullptr) {
+        std::lock_guard<std::mutex> lock(jobs_mu());
+        jobs()[pi.dwProcessId] = job;
+    }
     return static_cast<ProcHandle>(pi.dwProcessId);
 #else
     // 同上：fork 之前算好。
@@ -577,10 +648,17 @@ bool alive(ProcHandle h) {
 #ifdef _WIN32
     HANDLE p = ::OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE,
                              static_cast<DWORD>(h));
-    if (p == nullptr) return false;
     DWORD code = 0;
-    const bool ok = ::GetExitCodeProcess(p, &code) && code == STILL_ACTIVE;
-    ::CloseHandle(p);
+    const bool ok = p != nullptr && ::GetExitCodeProcess(p, &code) && code == STILL_ACTIVE;
+    if (p != nullptr) ::CloseHandle(p);
+    // 退了就把它那个作业对象收掉。**关句柄会带走它留下的子进程**
+    // （KILL_ON_JOB_CLOSE）——头一个都退了，底下还在跑的只会是没人管的孤儿。
+    // 下载器每下一个文件起一个进程，不收的话句柄一直攒着。
+    if (!ok) {
+        if (const HANDLE job = take_job(static_cast<DWORD>(h)); job != nullptr) {
+            ::CloseHandle(job);
+        }
+    }
     return ok;
 #else
     // 先收尸，否则僵尸进程 kill(0) 仍然返回 0，永远"活着"。
@@ -593,12 +671,31 @@ bool alive(ProcHandle h) {
 void kill_spawned(ProcHandle h, int grace_ms) {
     if (h == 0) return;
 #ifdef _WIN32
-    // Windows 上没有 SIGTERM 的对应物。CTRL_BREAK 只对同一个控制台组里的
-    // 进程有用，而我们用 CREATE_NEW_PROCESS_GROUP 起的，收得到。
-    ::GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, static_cast<DWORD>(h));
+    // **Windows 上没有"客气地要求退出"。** 原来这儿发 CTRL_BREAK：它只到得了
+    // 和我们共用一个控制台的进程，而 spawn 起的都带 CREATE_NO_WINDOW（各有各的
+    // 隐形控制台），桌面端自己更是连控制台都没有——那一下从来没送到过，只是白等
+    // 宽限期。收到了也一样：默认的处理就是当场 ExitProcess，不比下面这一下客气。
+    //
+    // 所以直接来：整个作业一起结束（它和它拉起的一切），没有作业就只结束它自己。
+    const HANDLE job = take_job(static_cast<DWORD>(h));
+    if (job != nullptr) {
+        ::TerminateJobObject(job, 1);
+    } else {
+        HANDLE p = ::OpenProcess(PROCESS_TERMINATE, FALSE, static_cast<DWORD>(h));
+        if (p != nullptr) {
+            ::TerminateProcess(p, 1);
+            ::CloseHandle(p);
+        }
+    }
+    // 等它真的没了再回去：调用方接着要改名、删 `.part`，文件还被占着就改不动。
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(grace_ms);
+    while (std::chrono::steady_clock::now() < deadline && alive(h)) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    if (job != nullptr) ::CloseHandle(job);
 #else
     ::kill(static_cast<pid_t>(h), SIGTERM);
-#endif
     // **等它自己收尾。** 工作进程收到信号会把当前这一镜取消掉再退，
     // 直接来硬的会留下半截的 mp4——那种文件比没有更麻烦，
     // 它看着像成品，要播一遍才发现是坏的。
@@ -608,13 +705,6 @@ void kill_spawned(ProcHandle h, int grace_ms) {
         if (!alive(h)) return;
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
-#ifdef _WIN32
-    HANDLE p = ::OpenProcess(PROCESS_TERMINATE, FALSE, static_cast<DWORD>(h));
-    if (p != nullptr) {
-        ::TerminateProcess(p, 1);
-        ::CloseHandle(p);
-    }
-#else
     ::kill(static_cast<pid_t>(h), SIGKILL);
     int status = 0;
     ::waitpid(static_cast<pid_t>(h), &status, 0);

@@ -880,6 +880,19 @@ std::string alt_key(const std::string& group_key, const std::string& role) {
     return group_key + "/" + role;
 }
 
+std::string type_dir(const std::string& group_key) {
+    if (group_key == "image_base") return "image";
+    // 另外四组的键本身就是英文的类型名。以后加一组，键就是它的目录——
+    // 不在这儿另起一张对照表，两张表迟早对不上。
+    return group_key;
+}
+
+std::string download_rel(const std::string& group_key, const FileSpec& f) {
+    const auto slash = f.name.find_last_of('/');
+    const std::string file = slash == std::string::npos ? f.name : f.name.substr(slash + 1);
+    return type_dir(group_key) + "/" + file;
+}
+
 std::vector<FileSpec> effective_files(
     const std::string& group_key, const Option& o,
     const std::map<std::string, std::string>& selections) {

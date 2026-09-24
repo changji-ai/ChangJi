@@ -209,6 +209,27 @@ config::Settings with_selections(
     const config::Settings& base,
     const std::map<std::string, std::string>& selections);
 
+/// 新下的文件放在模型目录下哪个子目录：`llm` / `video` / `image` / `tts`。
+///
+/// **按这一组管的是哪类模型分，名字用英文**（用户 2026-09-24：「下载模型应该
+/// 放到模型目录下相应类型的目录里，目录用英语」）。原来是平铺在模型目录根上，
+/// 一档 H3 五个文件、Qwen-Image 四个，混在一起分不清哪个是哪一组的。
+///
+/// 定妆和空景那一组（`image_base`）也进 `image`：它和首帧那一组是同一族图像
+/// 模型，分开放的话同一个家族散在两处。
+///
+/// ⚠️ **这只管"新下的放哪"，不管"去哪儿找"。** 配置里记的仍然是 `FileSpec::name`
+/// （机器无关，跟着项目的档位 id 走），找文件由 `ModelsConfig::resolve` 按名字
+/// 在整个模型目录里找（config/model_index.hpp）——所以老版本平铺在根上的那几份
+/// 不用挪、也不会重下。
+std::string type_dir(const std::string& group_key);
+
+/// 这个文件新下时落在哪，相对模型目录：`<type_dir>/<文件名>`。
+///
+/// 只取 `f.name` 的文件名那一段：`loras/x.safetensors` 落到 `video/x.safetensors`，
+/// `llm/Qwen3-…gguf` 还是 `llm/Qwen3-…gguf`。
+std::string download_rel(const std::string& group_key, const FileSpec& f);
+
 /// 这一组里那个"不下载"的选项 id。约定值，别处也用它比较。
 inline constexpr const char* kNoneOption = "none";
 

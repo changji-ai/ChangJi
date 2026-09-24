@@ -12,7 +12,9 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string>
+#include <thread>
 
 #include "scoped_env.hpp"
 #include "util/paths.hpp"
@@ -355,3 +357,76 @@ TEST_CASE("喂标准输入：对面读够了就关掉，父进程不能被打死
 #endif
 }
 
+
+// ---------------------------------------------------------------------------
+// spawn：下模型那几个 curl / aria2c、多卡的工作进程都是它起的
+// ---------------------------------------------------------------------------
+
+namespace {
+
+std::uint64_t size_or_zero(const fs::path& p) {
+    std::error_code ec;
+    const auto n = fs::file_size(p, ec);
+    return ec ? 0 : static_cast<std::uint64_t>(n);
+}
+
+std::string slurp_file(const fs::path& p) {
+    std::ifstream in(p, std::ios::binary);
+    return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+}
+
+}  // namespace
+
+TEST_CASE("spawn：停下的时候，它拉起的子进程也一起停") {
+#ifdef _WIN32
+    // 「下模型停不下来」那一族（2026-09-24）：scoop / chocolatey 装的 aria2c 是个
+    // 垫片，真在下的是它拉起的那一个；只杀垫片的话，下载照跑、接着往盘上写。
+    // 这儿拿 cmd 当垫片、ping 当真干活的：ping 每秒往日志里写一行（它继承了 cmd
+    // 那个接到日志文件上的标准输出）——**杀完之后日志还在长，就是孙子没杀到**。
+    using namespace std::chrono_literals;
+    const fs::path dir = fs::temp_directory_path() / "changji_spawn_tree";
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+    fs::create_directories(dir, ec);
+    const fs::path log = dir / "ping.log";
+
+    const auto h = proc::spawn("cmd.exe", {"/c", "ping", "-n", "30", "127.0.0.1"}, log);
+    REQUIRE(h != 0);
+    // 等 ping 真的开始写了再杀：cmd 还没来得及拉起它就杀，这条什么都证明不了。
+    const auto t0 = std::chrono::steady_clock::now();
+    while (size_or_zero(log) == 0 && std::chrono::steady_clock::now() - t0 < 10s) {
+        std::this_thread::sleep_for(100ms);
+    }
+    REQUIRE(size_or_zero(log) > 0);
+    std::this_thread::sleep_for(1200ms);
+
+    proc::kill_spawned(h, 3000);
+    CHECK_FALSE(proc::alive(h));
+    const auto at_kill = size_or_zero(log);
+    std::this_thread::sleep_for(2500ms);
+    CHECK_MESSAGE(size_or_zero(log) == at_kill,
+                  "杀完之后日志还在长：cmd 没了，它拉起的 ping 还在跑");
+    fs::remove_all(dir, ec);
+#else
+    WARN("POSIX 上 spawn 起的自己开一个会话，这条是 Windows 作业对象那一档的，跳过");
+#endif
+}
+
+TEST_CASE("spawn：Windows 上起的子进程不开窗口、进作业对象") {
+    // 桌面端是窗口程序，自己没有控制台：起一个 curl 不带 CREATE_NO_WINDOW，系统就
+    // 给它新开一个黑框（用户 2026-09-24：「下载模型的时候弹出终端」）。**用例在控制台
+    // 里跑，复现不出那个框**——子进程直接用了父进程的控制台——所以这一条钉源码：
+    // spawn 调 create_process_std 的那一下，标志里得有它。
+    const std::string src = slurp_file(fs::path{CHANGJI_SRC_DIR} / "util" / "proc.cpp");
+    const auto at = src.find("ProcHandle spawn(");
+    REQUIRE(at != std::string::npos);
+    const auto end = src.find("#else", at);
+    REQUIRE(end != std::string::npos);
+    const std::string body = src.substr(at, end - at);
+    const auto call = body.find("create_process_std(");
+    REQUIRE(call != std::string::npos);
+    const std::string args = body.substr(call, body.find("==", call) - call);
+    CHECK(args.find("CREATE_NO_WINDOW") != std::string::npos);
+    CHECK(args.find("CREATE_SUSPENDED") != std::string::npos);
+    CHECK(body.find("AssignProcessToJobObject") != std::string::npos);
+}

@@ -65,7 +65,10 @@ const char* to_string(ItemState v);
 struct ItemProgress {
     std::string group;   ///< 属于哪一组（video / image / …）
     std::string option;  ///< 属于哪个选项
-    std::string name;    ///< 相对模型目录的路径
+    std::string name;    ///< 清单里的名字（`FileSpec::name`），认"这是哪一个文件"用
+    /// 落在哪（或者已经在哪），相对模型目录。新下的是 `<类型>/<文件名>`
+    /// （见 setup::type_dir）；盘上本来就有的，是它实际所在的那个位置。
+    std::string path;
     std::string note;
     std::uint64_t total = 0;
     std::uint64_t downloaded = 0;
@@ -106,6 +109,8 @@ struct Item {
     std::string group;
     std::string option;
     FileSpec file;
+    /// 下到哪，相对模型目录（`setup::download_rel`）。空 = 就用 `file.name`。
+    std::string rel;
     /// 算好的下载地址。**清单里存的是仓库和路径**，域名由当前的源决定
     /// （见 setup/source.hpp）——所以地址在派活的时候才拼出来，
     /// 不在清单里。
@@ -167,8 +172,9 @@ private:
     void run(std::vector<Item> items, std::filesystem::path dir,
              std::function<void(const Item&)> on_item_done);
     /// 下一个文件，返回是否成功。进度直接写进 snap_.items[index]。
-    bool fetch_one(const Item& item, const std::filesystem::path& dest,
-                   std::size_t index);
+    /// `dir` 是模型目录：下之前先在整个目录里找一遍有没有现成的。
+    bool fetch_one(const Item& item, const std::filesystem::path& dir,
+                   const std::filesystem::path& dest, std::size_t index);
 
     mutable std::mutex mu_;
     Snapshot snap_;
@@ -187,7 +193,8 @@ private:
 /// 一次下载才收编。启动时扫一遍，就不用人再点。
 ///
 /// 只认清单里有、字节数**恰好**对上的；多了少了都不碰（那是续传和
-/// "写过头重下"的事，见 Downloader::fetch_one）。
+/// "写过头重下"的事，见 Downloader::fetch_one）。老位置（平铺在根上）和新位置
+/// （`<类型>/`，见 setup::type_dir）两处都看。
 std::size_t adopt_finished_parts(const std::filesystem::path& models_dir);
 
 }  // namespace changji::setup

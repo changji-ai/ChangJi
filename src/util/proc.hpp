@@ -108,14 +108,19 @@ Result run(const std::string& exe,
 /// 多张卡就是多个子进程，混在一起的日志分不清是哪张卡出的错。
 ///
 /// 返回 0 表示起不来。句柄在 POSIX 上是 pid，Windows 上是进程 id。
+///
+/// Windows 上**不开窗口**（CREATE_NO_WINDOW：桌面端是窗口程序，不带这一条的话
+/// 每起一个 curl 就弹一个黑框），而且进一个作业对象：杀的时候连它拉起的子进程
+/// 一起杀，引擎自己没了它们也跟着走。理由写在 proc.cpp 的 `jobs()` 上。
 using ProcHandle = std::uint64_t;
 ProcHandle spawn(const std::string& exe, const std::vector<std::string>& args,
                  const std::filesystem::path& log);
 
 /// 杀掉 `spawn` 起的那个。已经退了的话什么都不做。
 ///
-/// 先客气地要求退出（POSIX 是 SIGTERM，Windows 直接 Terminate——那边没有
-/// 对应的东西），等 `grace_ms`，还活着就来硬的。
+/// 先客气地要求退出（POSIX 是 SIGTERM，Windows 直接结束它那一整个作业——
+/// 那边没有对应的东西），等 `grace_ms`，还活着就来硬的。Windows 上 `grace_ms`
+/// 是"最多等它退干净多久"：调用方接着要动它写过的文件，还被占着就动不了。
 /// **要留出宽限期**：工作进程收到 SIGTERM 会把当前这一镜取消掉再退，
 /// 直接 SIGKILL 会留下半截的 mp4。
 void kill_spawned(ProcHandle h, int grace_ms = 5000);

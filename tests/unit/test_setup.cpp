@@ -22,12 +22,16 @@
 #include <doctest/doctest.h>
 
 #include <algorithm>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <map>
 #include <set>
 #include <string>
+#include <thread>
+#include <vector>
 
+#include "config/model_index.hpp"
 #include "config/settings.hpp"
 #include "http/setup_api.hpp"
 #include "setup/autostart.hpp"
@@ -35,6 +39,7 @@
 #include "setup/catalog.hpp"
 #include "setup/downloader.hpp"
 #include "setup/source.hpp"
+#include "util/paths.hpp"
 
 #include "scoped_env.hpp"
 
@@ -930,4 +935,295 @@ TEST_CASE("state 里的 selected 要带上替换档，不然弹窗一开就弹�
         CHECK_MESSAGE(sel.contains(k), "selected 里没有替换档的键：" << k);
         if (sel.contains(k)) CHECK(sel.at(k).get<std::string>() == v);
     }
+}
+
+// ---------------------------------------------------------------------------
+// 模型放哪、去哪儿找（2026-09-24）
+// ---------------------------------------------------------------------------
+//
+// 用户那天的三句话：「下载模型应该放到模型目录下相应类型的目录里，目录用英语」
+// 「增加索引目录下所有模型文件的功能」「增加下载模型选择模型存放目录」。
+//
+// 盯的是"错了不报错"的那两样：**新下的换了位置之后，老位置上那几份还认不认**
+// （不认 = 几十 GB 重下一遍），和**人自己放进来的认不认**。
+
+namespace {
+
+namespace fs = std::filesystem;
+
+void put_file(const fs::path& p, std::uint64_t bytes) {
+    std::error_code ec;
+    fs::create_directories(p.parent_path(), ec);
+    { std::ofstream(p, std::ios::binary).put('x'); }
+    fs::resize_file(p, bytes);
+}
+
+std::string base_name(const std::string& rel) {
+    const auto slash = rel.find_last_of('/');
+    return slash == std::string::npos ? rel : rel.substr(slash + 1);
+}
+
+bool same_file(const fs::path& a, const fs::path& b) {
+    std::error_code ec;
+    return fs::equivalent(a, b, ec);
+}
+
+}  // namespace
+
+TEST_CASE("新下的按类型放进模型目录下的英文子目录") {
+    CHECK(setup::type_dir("llm") == "llm");
+    CHECK(setup::type_dir("video") == "video");
+    CHECK(setup::type_dir("image") == "image");
+    // 定妆和空景那一组和首帧那一组是同一族图像模型，放一处。
+    CHECK(setup::type_dir("image_base") == "image");
+    CHECK(setup::type_dir("tts") == "tts");
+
+    for (const auto& g : setup::catalog()) {
+        for (const auto& o : g.options) {
+            std::vector<setup::FileSpec> files = o.files;
+            for (const auto& alt : o.alts) {
+                files.insert(files.end(), alt.choices.begin(), alt.choices.end());
+            }
+            for (const auto& f : files) {
+                const std::string rel = setup::download_rel(g.key, f);
+                CAPTURE(g.key);
+                CAPTURE(rel);
+                const auto slash = rel.find('/');
+                REQUIRE(slash != std::string::npos);
+                // **只一层**：`<类型>/<文件名>`。清单里带的子目录（`loras/`）不跟着走。
+                CHECK(rel.find('/', slash + 1) == std::string::npos);
+                CHECK(rel.substr(slash + 1) == base_name(f.name));
+                // 类型那一段是英文：小写字母和下划线，一个汉字都没有。
+                const std::string dir = rel.substr(0, slash);
+                CHECK(!dir.empty());
+                CHECK(std::all_of(dir.begin(), dir.end(), [](char c) {
+                    return (c >= 'a' && c <= 'z') || c == '_';
+                }));
+            }
+        }
+    }
+
+    // 编剧那一组本来就在 `llm/` 底下：落点和原来一模一样，老用户那份不用挪。
+    for (const auto& g : setup::catalog()) {
+        if (g.key != "llm") continue;
+        for (const auto& o : g.options) {
+            for (const auto& f : o.files) {
+                CAPTURE(f.name);
+                CHECK(setup::download_rel(g.key, f) == f.name);
+            }
+        }
+    }
+}
+
+TEST_CASE("模型目录按名字找：新位置、老位置、人自己放的都认") {
+    const fs::path tmp = fs::temp_directory_path() / paths::from_utf8("changji_模型索引");
+    std::error_code ec;
+    fs::remove_all(tmp, ec);
+    put_file(tmp / "video" / "a.gguf", 10);                     // 新位置
+    put_file(tmp / "b.safetensors", 5);                         // 老位置，平铺在根上
+    put_file(tmp / "mine" / "deep" / "c.gguf", 7);              // 人自己放的
+    put_file(tmp / ".cache" / "d.gguf", 3);                     // 点开头的目录不扫
+    put_file(tmp / "video" / "e.gguf.part", 4);                 // 下到一半的不算
+    put_file(tmp / "readme.txt", 2);                            // 不是模型
+    put_file(tmp / "x" / "same.gguf", 1);                       // 同名两份：浅的那份优先
+    put_file(tmp / "y" / "z" / "same.gguf", 1);
+    put_file(tmp / paths::from_utf8("图像") / paths::from_utf8("中文名.gguf"), 6);
+    config::forget_model_index();
+
+    SUBCASE("索引里只有模型文件，路径用 / 分隔、UTF-8") {
+        const auto idx = config::index_models(tmp, /*fresh=*/true);
+        std::set<std::string> rels;
+        for (const auto& f : idx.files) rels.insert(f.rel);
+        const std::set<std::string> want{"b.safetensors", "mine/deep/c.gguf", "video/a.gguf",
+                                         "x/same.gguf", "y/z/same.gguf", "图像/中文名.gguf"};
+        CHECK(rels == want);
+        CHECK_FALSE(idx.truncated);
+    }
+
+    SUBCASE("按文件名找，名字里带的子目录不算数") {
+        auto hit = config::find_model(tmp, "a.gguf");
+        REQUIRE(hit.has_value());
+        CHECK(same_file(*hit, tmp / "video" / "a.gguf"));
+        // 清单里写的是 `loras/a.gguf`、文件在 `video/` 底下：照样认。
+        hit = config::find_model(tmp, "loras/a.gguf");
+        REQUIRE(hit.has_value());
+        CHECK(same_file(*hit, tmp / "video" / "a.gguf"));
+        hit = config::find_model(tmp, "c.gguf");
+        REQUIRE(hit.has_value());
+        CHECK(same_file(*hit, tmp / "mine" / "deep" / "c.gguf"));
+        hit = config::find_model(tmp, "中文名.gguf");
+        REQUIRE(hit.has_value());
+        CHECK(same_file(*hit, tmp / paths::from_utf8("图像") / paths::from_utf8("中文名.gguf")));
+        hit = config::find_model(tmp, "same.gguf");
+        REQUIRE(hit.has_value());
+        CHECK(same_file(*hit, tmp / "x" / "same.gguf"));
+    }
+
+    SUBCASE("给了大小就只认大小恰好对上的") {
+        CHECK(config::find_model(tmp, "a.gguf", 10).has_value());
+        // 截断的同名文件不算：拿它去出片，加载时报的是"权重读不对"。
+        CHECK_FALSE(config::find_model(tmp, "a.gguf", 11).has_value());
+    }
+
+    SUBCASE("点开头的目录、下到一半的、不存在的：都找不到") {
+        CHECK_FALSE(config::find_model(tmp, "d.gguf").has_value());
+        CHECK_FALSE(config::find_model(tmp, "e.gguf").has_value());
+        CHECK_FALSE(config::find_model(tmp, "没有这个.gguf").has_value());
+    }
+
+    SUBCASE("resolve：拼出来的位置上没有，就按名字在目录里找") {
+        config::ModelsConfig m;
+        m.dir = paths::to_utf8(tmp);
+        const fs::path ws = tmp / "ws";
+        CHECK(same_file(m.resolve("a.gguf", ws), tmp / "video" / "a.gguf"));
+        // 原位置上有的照旧回原位置。
+        CHECK(same_file(m.resolve("b.safetensors", ws), tmp / "b.safetensors"));
+        // 哪儿都没有：照旧回拼出来的那个（体检拿它说"该放哪儿"）。
+        CHECK(m.resolve("nothere.gguf", ws).lexically_normal() ==
+              fs::absolute(tmp / "nothere.gguf").lexically_normal());
+    }
+
+    SUBCASE("挪走之后不认旧的：缓存里那份过时了就重扫") {
+        REQUIRE(config::find_model(tmp, "c.gguf").has_value());
+        fs::rename(tmp / "mine" / "deep" / "c.gguf", tmp / "video" / "c.gguf");
+        const auto hit = config::find_model(tmp, "c.gguf");
+        REQUIRE(hit.has_value());
+        CHECK(same_file(*hit, tmp / "video" / "c.gguf"));
+    }
+
+    config::forget_model_index();
+    fs::remove_all(tmp, ec);
+}
+
+TEST_CASE("索引接口：认得的、大小不对的、不认得的，各说各的") {
+    // 清单里最小的两个文件，一个按真大小摆（认得），一个只摆 1 字节（大小不对）。
+    const setup::Group* g_small = nullptr;
+    const setup::FileSpec* small = nullptr;
+    for (const auto& g : setup::catalog())
+        for (const auto& o : g.options)
+            for (const auto& f : o.files)
+                if (f.bytes > 0 && (!small || f.bytes < small->bytes)) {
+                    small = &f;
+                    g_small = &g;
+                }
+    REQUIRE(small != nullptr);
+    const setup::FileSpec* other = nullptr;
+    for (const auto& g : setup::catalog())
+        for (const auto& o : g.options)
+            for (const auto& f : o.files)
+                if (f.bytes > 0 && base_name(f.name) != base_name(small->name)) other = &f;
+    REQUIRE(other != nullptr);
+
+    const fs::path tmp = fs::temp_directory_path() / "changji_index_api";
+    std::error_code ec;
+    fs::remove_all(tmp, ec);
+    put_file(tmp / paths::from_utf8(setup::download_rel(g_small->key, *small)), small->bytes);
+    put_file(tmp / "old" / base_name(other->name), 1);
+    put_file(tmp / "mine.gguf", 3);
+
+    config::Settings s;
+    s.models.dir = paths::to_utf8(tmp);
+    const auto r = http::get_setup_index(s);
+    REQUIRE(r.status == 200);
+    const json& j = r.body;
+    CHECK(j["exists"] == true);
+    CHECK(j["count"] == 3);
+    CHECK(j["known"] == 1);
+    std::map<std::string, json> by;
+    for (const auto& f : j["files"]) by[f["path"].get<std::string>()] = f;
+    const std::string known_at = setup::download_rel(g_small->key, *small);
+    REQUIRE(by.count(known_at) == 1);
+    CHECK(by[known_at]["status"] == "known");
+    CHECK(by[known_at]["group"] == g_small->key);
+    REQUIRE(by.count("old/" + base_name(other->name)) == 1);
+    CHECK(by["old/" + base_name(other->name)]["status"] == "size");
+    CHECK(by["old/" + base_name(other->name)]["expectBytes"] == other->bytes);
+    REQUIRE(by.count("mine.gguf") == 1);
+    CHECK(by["mine.gguf"]["status"] == "unknown");
+
+    SUBCASE("目录还不存在：不报错，回一份空的") {
+        config::Settings none;
+        none.models.dir = paths::to_utf8(tmp / "没有这个目录");
+        const auto e = http::get_setup_index(none);
+        CHECK(e.status == 200);
+        CHECK(e.body["exists"] == false);
+        CHECK(e.body["count"] == 0);
+    }
+
+    config::forget_model_index();
+    fs::remove_all(tmp, ec);
+}
+
+TEST_CASE("下载器：老位置上已经有的不重下，下了一半的挪到新位置接着下") {
+    if (setup::pick_tool().empty()) {
+        WARN("这台机器上没有 aria2c / curl，下载器起不来，跳过");
+        return;
+    }
+    const fs::path tmp = fs::temp_directory_path() / "changji_dl_legacy";
+    std::error_code ec;
+    fs::remove_all(tmp, ec);
+    // 一份平铺在根上、大小对得上的（这一版之前下的）；一份平铺在根上、`.part`
+    // 已经下全只差改名的（上一轮父进程被杀）。**两份都不该发起任何下载**——
+    // 地址指着一个连不上的端口，真去下的话这一项会报失败。
+    put_file(tmp / "legacy.gguf", 16);
+    put_file(tmp / "half.gguf.part", 12);
+    config::forget_model_index();
+
+    const auto spec = [](const std::string& name, std::uint64_t bytes) {
+        setup::FileSpec f;
+        f.name = name;
+        f.bytes = bytes;
+        return f;
+    };
+    std::vector<setup::Item> items;
+    items.push_back({"video", "x", spec("legacy.gguf", 16), "video/legacy.gguf",
+                     "http://127.0.0.1:9/never"});
+    items.push_back({"video", "x", spec("half.gguf", 12), "video/half.gguf",
+                     "http://127.0.0.1:9/never"});
+    auto& d = setup::Downloader::instance();
+    REQUIRE(d.start(items, tmp, "modelscope", {}));
+    for (int i = 0; i < 100 && d.running(); ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    REQUIRE_FALSE(d.running());
+    const auto snap = d.snapshot();
+    CHECK(snap.state == setup::RunState::Done);
+    REQUIRE(snap.items.size() == 2);
+
+    // 老位置上那份：认出来就算有，**不挪、不复制**，报它实际在哪。
+    CHECK(snap.items[0].state == setup::ItemState::Present);
+    CHECK(snap.items[0].path == "legacy.gguf");
+    CHECK(fs::exists(tmp / "legacy.gguf"));
+    CHECK_FALSE(fs::exists(tmp / "video" / "legacy.gguf"));
+
+    // 下全了的 `.part`：挪到新位置、改成正式名字。
+    CHECK(snap.items[1].state == setup::ItemState::Present);
+    CHECK(fs::file_size(tmp / "video" / "half.gguf") == 12);
+    CHECK_FALSE(fs::exists(tmp / "half.gguf.part"));
+
+    config::forget_model_index();
+    fs::remove_all(tmp, ec);
+}
+
+TEST_CASE("下全了没改名的 .part：新位置（类型目录）底下的也收编") {
+    const setup::Group* grp = nullptr;
+    const setup::FileSpec* pick = nullptr;
+    for (const auto& g : setup::catalog())
+        for (const auto& o : g.options)
+            for (const auto& f : o.files)
+                if (f.bytes > 0 && (!pick || f.bytes < pick->bytes)) {
+                    pick = &f;
+                    grp = &g;
+                }
+    REQUIRE(pick != nullptr);
+    const fs::path dir = fs::temp_directory_path() / "changji_adopt_typed";
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+    const fs::path dest = dir / paths::from_utf8(setup::download_rel(grp->key, *pick));
+    const fs::path part = dest.parent_path() / (dest.filename().string() + ".part");
+    put_file(part, pick->bytes);
+    CHECK(setup::adopt_finished_parts(dir) == 1);
+    CHECK(fs::file_size(dest) == pick->bytes);
+    CHECK_FALSE(fs::exists(part));
+    fs::remove_all(dir, ec);
 }
