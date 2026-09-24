@@ -1177,6 +1177,10 @@ json write_one_chapter(ProjectStore& store, const Project& project, Story story,
     next.plan = stages::plan_episodes(next, next.episode_duration_s);
     validate_or_400(next);
     store.save_story(next);
+    // 正文写完，这一章值多长就变了——章节记录跟着对齐（同批量写正文那一处）。
+    // 原来这一条路不对，章节记录里的时长一直是默认那 60 秒，而批量拆分镜、重写
+    // 剧本读的正是它。还拿着存盘锁（`story_guard`），和存 story 是一口气。
+    sync_episodes_to_chapters(store, next);
 
     json out = story_response(next);
     out["chapter_id"] = chapter_id;

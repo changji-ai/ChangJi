@@ -3831,6 +3831,51 @@ TEST_CASE("一段话写两遍就打回") {
     CHECK_NOTHROW(changji::stages::parse_chapter(make(true), 0, false));
 }
 
+TEST_CASE("按场收稿：去重之后正文和场次表还是同一份，占位符那一道重拼也不把重复带回来") {
+    // 原来去重只改正文（d.text），场次表里那一段还在；占位符那一道按场次表重拼
+    // 正文，重复又回来了——复读守卫量的是去过重的那一份，按构造就放过去了；
+    // 场的段落数也比正文多一段，落库时后面每一场的位置都往后错一段。
+    json paras = json::array();
+    for (int i = 0; i < 14; ++i) {
+        paras.push_back("第" + std::to_string(i) +
+                        "段：她把抹布拧干，水滴落在地板上，溅出细小的一圈。");
+    }
+    paras.push_back("他停在门口，手扶着门框：“伞我带来了。”");
+    paras.push_back("她没抬头，抹布在台面上又抹了一遍：“放那儿吧。”");
+    paras.push_back("第3段：她把抹布拧干，水滴落在地板上，溅出细小的一圈。");   // 原样重复
+    paras.push_back("turn_sentence_from_above_repeated_here");                 // 占位符
+    json scenes = json::array();
+    scenes.push_back({{"where", "深夜，便利店，冷柜的白光"},
+                      {"pov", "林晚"},
+                      {"goal", "把伞要回来"},
+                      {"obstacle", "他不认这把伞"},
+                      {"turn", "伞柄上刻着别人的名字"},
+                      {"paragraphs", paras},
+                      {"last_line", "她把伞柄转过来，刻着的不是她的名字。"}});
+    const std::string raw = json{{"scenes", scenes}}.dump();
+
+    // 最后一次（软闸）照收：收下来的那一份里重复只剩一处，占位符没了。
+    const auto d = changji::stages::parse_chapter(raw, 0, false);
+    const std::string dup = "第3段：她把抹布拧干，水滴落在地板上，溅出细小的一圈。";
+    const auto first = d.text.find(dup);
+    REQUIRE(first != std::string::npos);
+    CHECK(d.text.find(dup, first + 1) == std::string::npos);
+    CHECK(d.text.find("turn_sentence") == std::string::npos);
+
+    // 正文就是场次表的段落顺次拼起来——一个字都不能差。
+    std::string joined;
+    for (const auto& sc : d.scenes) {
+        for (const auto& p : sc.paragraphs) {
+            if (!joined.empty()) joined += "\n";
+            joined += p;
+        }
+    }
+    CHECK(joined == d.text);
+
+    // 严格那几次照旧打回（「整段原样重复」那道软闸），不因为这儿去了重就放过去。
+    CHECK_THROWS_AS(changji::stages::parse_chapter(raw), changji::stages::StoryError);
+}
+
 TEST_CASE("整章一句对白都没有就打回") {
     // 2026-09-12 实跑四章里有一章通篇零对白（65 段全是叙述）。下一步是把
     // 这段正文改成剧本——正文里没人说话，那一章出来就是默片。和剧本那边

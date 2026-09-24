@@ -5,9 +5,11 @@
 #include <algorithm>
 #include <cctype>
 #include <map>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "stages/prompts.inc.hpp"
@@ -934,6 +936,28 @@ static std::string strip_json_echo(const std::string& para) {
     return rest;
 }
 
+/// 正文按场次表重拼：场里的段落顺次接起来（分隔符同 `push_text`）。一段都不剩的
+/// 场一起摘掉（理由同收稿时「一段都没写出来的场不留」）。
+///
+/// ⚠️ **有场次表的时候，场次表才是正文的源头**：落库时按每一场的段落数数出场的
+/// 位置（`apply_chapter`），占位符那一道也是按段落重拼的正文。只改 `d.text` 的清洗
+/// 会被后面那一次重拼整个抹掉——复读、成串引号又回到正文里，而守卫量的是清洗过的
+/// 那一份，于是按构造就放过去了；场的段落数也和正文对不上，场的位置往后错。
+/// 所以有场次表时，每一道清洗都改段落，再拿这个重拼。
+static void rebuild_text_from_scenes(ChapterDraft& d) {
+    d.scenes.erase(std::remove_if(d.scenes.begin(), d.scenes.end(),
+                                  [](const DraftScene& sc) { return sc.paragraphs.empty(); }),
+                   d.scenes.end());
+    std::string t;
+    for (const DraftScene& sc : d.scenes) {
+        for (const std::string& p : sc.paragraphs) {
+            if (!t.empty()) t += "\n";
+            t += p;
+        }
+    }
+    d.text = std::move(t);
+}
+
 ChapterDraft parse_chapter(const std::string& raw, int min_chars, bool strict) {
     json data;
     try {
@@ -951,6 +975,8 @@ ChapterDraft parse_chapter(const std::string& raw, int min_chars, bool strict) {
     const auto reject = [&problems](const char* code, std::string what) {
         problems.push_back({code, std::move(what)});
     };
+    /// 按场去重时丢掉的第一段够长的原样重复（第几场、哪一段），见 `para_dup`。
+    std::optional<std::pair<std::size_t, std::string>> dropped_dup;
 
     // 一段落进正文。**分隔符必须和 JsonFieldStreamer::kArraySeparator 一致**，
     // 否则编辑器里边写边看的那一版和最后落库的段距对不上。
@@ -1031,23 +1057,25 @@ ChapterDraft parse_chapter(const std::string& raw, int min_chars, bool strict) {
     } else {
         d.text = text::strip_ws(get_str(data, "text"));
     }
-    d.text = strip_quote_runs(d.text);
+    if (!d.scenes.empty()) {
+        for (DraftScene& sc : d.scenes) {
+            std::vector<std::string> kept;
+            for (const std::string& p : sc.paragraphs) {
+                std::string one = text::strip_ws(strip_quote_runs(p));
+                if (!one.empty()) kept.push_back(std::move(one));
+            }
+            sc.paragraphs = std::move(kept);
+        }
+        rebuild_text_from_scenes(d);
+    } else {
+        d.text = strip_quote_runs(d.text);
+    }
     normalize_quotes(d);
     if (d.text.empty()) throw StoryError("大模型没写出正文", "no_body");
     // 失控往下写个没完的时候截住。这段正文会整份存进 story.json，
     // 而且后面每一章的提示词都要读它。
     d.text = text::truncate_utf8(d.text, prompt::chapter_write::kMaxChars);
 
-    // **短得离谱的不收。** 见 kChapterMinRatio：模型会把章标题填进正文
-    // 字段，一两个字也是合法 JSON，静默存下去的话故事看着有几章、
-    // 实际全是空壳，到写剧本那一步才发现无米下锅。
-    const int got = static_cast<int>(text::utf8_len(d.text));
-    if (min_chars > 0 && got < min_chars) {
-        reject("too_short", "正文只写出 " + std::to_string(got) + " 个字，至少要 " +
-                                std::to_string(min_chars) +
-                                " 个：每一场都要写成场面，靠对白往返和感官细节撑起来，"
-                                "不是多塞几件事");
-    }
 
     // **模型的自言自语：摘掉那一段，别废整章。**
     //
@@ -1168,7 +1196,29 @@ ChapterDraft parse_chapter(const std::string& raw, int min_chars, bool strict) {
     // 丢一个和前面一字不差的段落，不可能丢错东西——那就是"写了两遍"的
     // 定义。**只挑够长的丢**：短段落原样重复是正当的手法（「"嗯。"」
     // 「他没说话。」），阈值借句级那道的 kRepeatMinSentenceChars。
-    {
+    if (!d.scenes.empty()) {
+        // 有场次表：在段落上丢，再重拼（见 `rebuild_text_from_scenes`）。
+        std::set<std::string> seen_para;
+        for (std::size_t k = 0; k < d.scenes.size(); ++k) {
+            std::vector<std::string> kept;
+            for (std::string& p : d.scenes[k].paragraphs) {
+                const std::string trimmed = text::strip_ws(p);
+                if (trimmed.empty()) continue;
+                if (text::utf8_len(trimmed) >= kRepeatMinSentenceChars &&
+                    !seen_para.insert(bare(trimmed)).second) {
+                    // 丢了照样要记：「整段原样重复」那道软闸（`para_dup`）靠它。
+                    // 原来这道闸量的是没去过重的场次表，丢在这儿之后它就量不到了。
+                    if (!dropped_dup && text::utf8_len(bare(trimmed)) >= 20) {
+                        dropped_dup = std::make_pair(k, trimmed);
+                    }
+                    continue;
+                }
+                kept.push_back(trimmed);
+            }
+            d.scenes[k].paragraphs = std::move(kept);
+        }
+        rebuild_text_from_scenes(d);
+    } else {
         std::set<std::string> seen_para;
         std::string kept;
         std::istringstream in(d.text);
@@ -1196,12 +1246,13 @@ ChapterDraft parse_chapter(const std::string& raw, int min_chars, bool strict) {
         std::set<std::string> seen_para;
         std::string kept;
         std::string line;
-        const auto take_line = [&](const std::string& one) {
-            if (text::strip_ws(one).empty()) return;
+        // 一段摘完剩下什么（整段丢掉就回空）。按行摘和按场里的段落摘共用这一个。
+        const auto clean_para = [&](const std::string& one) -> std::string {
+            if (text::strip_ws(one).empty()) return {};
             // **整段原样重复的，不管句子多短都丢。** 句级那道有 8 字下限
             // （短句重复是正常的），于是「他没说话。」这种整段重复会漏过去
             // ——实跑的重复段中位一直是 1（0~3），就是这么剩下的。
-            if (!seen_para.insert(bare(one)).second) return;
+            if (!seen_para.insert(bare(one)).second) return {};
             std::string keep_para;
             for (const std::string& sent : split_sentences(one)) {
                 // **键和长度都得用守卫那一个（repeat_key）。**
@@ -1225,21 +1276,44 @@ ChapterDraft parse_chapter(const std::string& raw, int min_chars, bool strict) {
                 }
                 keep_para += sent;
             }
-            if (text::strip_ws(keep_para).empty()) return;
-            if (!kept.empty()) kept += "\n";
-            kept += text::strip_ws(keep_para);
+            return text::strip_ws(keep_para);
         };
-        for (const char c : d.text) {
-            if (c != '\n') {
-                line += c;
-                continue;
+        const auto take_line = [&](const std::string& one) {
+            const std::string para = clean_para(one);
+            if (para.empty()) return;
+            if (!kept.empty()) kept += "\n";
+            kept += para;
+        };
+        if (!d.scenes.empty()) {
+            // 有场次表：在场里的段落上摘，再重拼（见 `rebuild_text_from_scenes`）。
+            // 规矩同下面按行那一支：摘到只剩一半以下就不动。
+            ChapterDraft trial = d;
+            for (DraftScene& sc : trial.scenes) {
+                std::vector<std::string> keep;
+                for (const std::string& p : sc.paragraphs) {
+                    std::string para = clean_para(p);
+                    if (!para.empty()) keep.push_back(std::move(para));
+                }
+                sc.paragraphs = std::move(keep);
+            }
+            rebuild_text_from_scenes(trial);
+            if (text::utf8_len(trial.text) >= text::utf8_len(d.text) / 2) {
+                d.scenes = std::move(trial.scenes);
+                d.text = std::move(trial.text);
+            }
+        } else {
+            for (const char c : d.text) {
+                if (c != '\n') {
+                    line += c;
+                    continue;
+                }
+                take_line(line);
+                line.clear();
             }
             take_line(line);
-            line.clear();
+            // 摘到只剩一半以下就别要了——那说明整章就是一段复读，留着也没用。
+            if (text::utf8_len(kept) >= text::utf8_len(d.text) / 2) d.text = kept;
         }
-        take_line(line);
-        // 摘到只剩一半以下就别要了——那说明整章就是一段复读，留着也没用。
-        if (text::utf8_len(kept) >= text::utf8_len(d.text) / 2) d.text = kept;
     }
 
     if (const auto rep = check_repetition(d.text); !rep.ok) {
@@ -1395,7 +1469,12 @@ ChapterDraft parse_chapter(const std::string& raw, int min_chars, bool strict) {
     // **整段原样重复不收（软闸）。** 复读守卫要一句出现三次才响，而实跑
     // 里常见的是同一段二十几个字的话在一章里出现**两次**——够不着那道
     // 闸，却已经是读者能看出来的原地打转。
-    if (strict) {
+    if (strict && dropped_dup) {
+        reject("para_dup",
+               "有一段原样写了两遍（第 " + std::to_string(dropped_dup->first + 1) +
+                   " 场里的「" + text::truncate_utf8(dropped_dup->second, 24) +
+                   "…」）：一章里同一段话不该出现第二次，把后一处改掉");
+    } else if (strict) {
         std::set<std::string> seen;
         bool found = false;
         for (std::size_t k = 0; k < d.scenes.size() && !found; ++k) {
@@ -1535,6 +1614,23 @@ ChapterDraft parse_chapter(const std::string& raw, int min_chars, bool strict) {
             }
             d.text = cleaned;
         }
+    }
+
+    // **字数闸摆在所有就地清洗之后。** 原来它排在最前头：后面摘自言自语、摘复读、
+    // 摘占位符、按场次表重拼，摘到不够长的一章它早就量过了、放过去了——而占位
+    // 符那一段的注释写着"摘到不够长了，下面的字数闸会拦"，下面其实没有闸。
+    //
+    // 重拼会把前面那一刀截长也抹掉，这儿再截一次。
+    d.text = text::truncate_utf8(d.text, prompt::chapter_write::kMaxChars);
+    // **短得离谱的不收。** 见 kChapterMinRatio：模型会把章标题填进正文
+    // 字段，一两个字也是合法 JSON，静默存下去的话故事看着有几章、
+    // 实际全是空壳，到写剧本那一步才发现无米下锅。
+    const int got = static_cast<int>(text::utf8_len(d.text));
+    if (min_chars > 0 && got < min_chars) {
+        reject("too_short", "正文只写出 " + std::to_string(got) + " 个字，至少要 " +
+                                std::to_string(min_chars) +
+                                " 个：每一场都要写成场面，靠对白往返和感官细节撑起来，"
+                                "不是多塞几件事");
     }
 
     const auto hooks = data.find("hooks");
