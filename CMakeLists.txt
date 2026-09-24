@@ -977,6 +977,7 @@ add_library(changji_core STATIC
     src/setup/update_check.cpp
     src/setup/source.cpp
     src/setup/downloader.cpp
+    src/setup/mover.cpp
     src/http/setup_api.cpp
     src/http/server.cpp
 )
@@ -1671,6 +1672,7 @@ if(CHANGJI_BUILD_TESTS)
         src/setup/update_check.cpp
         src/setup/source.cpp
         src/setup/downloader.cpp
+        src/setup/mover.cpp
         src/http/setup_api.cpp
     )
     # Crow 的头目录：ws.cpp 要 <crow/websocket.h>。Crow 是纯头文件库，

@@ -38,6 +38,7 @@
 #include "setup/update_check.hpp"
 #include "setup/catalog.hpp"
 #include "setup/downloader.hpp"
+#include "setup/mover.hpp"
 #include "setup/source.hpp"
 #include "util/paths.hpp"
 
@@ -1226,4 +1227,143 @@ TEST_CASE("下全了没改名的 .part：新位置（类型目录）底下的也
     CHECK(fs::file_size(dest) == pick->bytes);
     CHECK_FALSE(fs::exists(part));
     fs::remove_all(dir, ec);
+}
+
+// ---------------------------------------------------------------------------
+// 换目录时把原来的模型搬过去（2026-09-24）
+// ---------------------------------------------------------------------------
+//
+// 用户原话：「换目录的时候如果有模型文件询问是否把原来的模型搬过去」。
+// 盯三件"错了不报错"的：**搬丢**（半截复制被当成搬完、原来那份先删了）、
+// **搬重**（复制过去了原来那份删不掉，盘上两份）、**盖掉**（新目录里同名不同大小的被覆盖）。
+
+TEST_CASE("搬之前数一遍：模型和下到一半的算，日志、点目录、新目录底下的不算") {
+    const fs::path from = fs::temp_directory_path() / paths::from_utf8("changji_搬_plan");
+    std::error_code ec;
+    fs::remove_all(from, ec);
+    put_file(from / "video" / "a.gguf", 10);
+    put_file(from / "video" / "b.gguf.part", 7);
+    put_file(from / "video" / "b.gguf.part.aria2", 1);
+    put_file(from / "video" / ".b.gguf.log", 3);          // 下载器的日志：不搬
+    put_file(from / ".cache" / "c.gguf", 5);              // 点开头的目录：不搬
+    put_file(from / "readme.txt", 2);                     // 不是模型：不搬
+    put_file(from / "new" / "d.gguf", 4);                 // 新目录就在里面：那一截不算
+    put_file(from / paths::from_utf8("图像") / paths::from_utf8("中文.safetensors"), 6);
+
+    const auto plan = setup::plan_move(from, from / "new");
+    const std::vector<std::string> want{"video/a.gguf", "video/b.gguf.part",
+                                        "video/b.gguf.part.aria2", "图像/中文.safetensors"};
+    std::vector<std::string> got = plan.files;
+    std::sort(got.begin(), got.end());
+    std::vector<std::string> sorted_want = want;
+    std::sort(sorted_want.begin(), sorted_want.end());
+    CHECK(got == sorted_want);
+    CHECK(plan.bytes == 10 + 7 + 1 + 6);
+    CHECK(plan.same_volume);
+    CHECK(plan.to_json()["fits"] == true);
+
+    // 同一个目录、不存在的目录：什么都不搬。
+    CHECK(setup::plan_move(from, from).files.empty());
+    CHECK(setup::plan_move(from / "没有", from / "new").files.empty());
+    fs::remove_all(from, ec);
+}
+
+TEST_CASE("搬一个文件：改名、复制、叫停、撞名") {
+    const fs::path tmp = fs::temp_directory_path() / "changji_move_one";
+    std::error_code ec;
+    fs::remove_all(tmp, ec);
+
+    SUBCASE("同一块盘：改名过去，原来那份没了") {
+        put_file(tmp / "a" / "x.gguf", 1000);
+        CHECK(setup::move_one(tmp / "a" / "x.gguf", tmp / "b" / "video" / "x.gguf", {}, nullptr)
+                  .empty());
+        CHECK_FALSE(fs::exists(tmp / "a" / "x.gguf"));
+        CHECK(fs::file_size(tmp / "b" / "video" / "x.gguf") == 1000);
+    }
+    SUBCASE("跨盘那条：复制、核对、删原来那份，不留 .moving") {
+        // 内容要对得上，不只是大小：拿一段有花样的字节。
+        {
+            fs::create_directories(tmp / "a");
+            std::ofstream f(tmp / "a" / "y.gguf", std::ios::binary);
+            for (int i = 0; i < 20000; ++i) f.put(static_cast<char>(i * 7 % 251));
+        }
+        std::uint64_t last = 0;
+        const auto progress = [&last](std::uint64_t d) { last = d; return true; };
+        bool canceled = true;
+        CHECK(setup::move_one(tmp / "a" / "y.gguf", tmp / "b" / "y.gguf", progress, &canceled,
+                              /*force_copy=*/true)
+                  .empty());
+        CHECK_FALSE(canceled);
+        CHECK(last == 20000);
+        CHECK_FALSE(fs::exists(tmp / "a" / "y.gguf"));
+        CHECK_FALSE(fs::exists(tmp / "b" / "y.gguf.moving"));
+        std::ifstream f(tmp / "b" / "y.gguf", std::ios::binary);
+        std::string bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+        REQUIRE(bytes.size() == 20000);
+        bool same = true;
+        for (int i = 0; i < 20000; ++i) same = same && bytes[i] == static_cast<char>(i * 7 % 251);
+        CHECK(same);
+    }
+    SUBCASE("复制到一半叫停：半截删掉，原来那份一个字节不动") {
+        put_file(tmp / "a" / "z.gguf", 20u << 20);   // 两段多，停在第一段后面
+        bool canceled = false;
+        const auto why = setup::move_one(tmp / "a" / "z.gguf", tmp / "b" / "z.gguf",
+                                         [](std::uint64_t) { return false; }, &canceled,
+                                         /*force_copy=*/true);
+        CHECK(canceled);
+        CHECK_FALSE(why.empty());
+        CHECK(fs::file_size(tmp / "a" / "z.gguf") == (20u << 20));
+        CHECK_FALSE(fs::exists(tmp / "b" / "z.gguf"));
+        CHECK_FALSE(fs::exists(tmp / "b" / "z.gguf.moving"));
+    }
+    SUBCASE("新目录里已经有一样大的：算搬过了，原来那份删掉") {
+        put_file(tmp / "a" / "w.gguf", 64);
+        put_file(tmp / "b" / "w.gguf", 64);
+        CHECK(setup::move_one(tmp / "a" / "w.gguf", tmp / "b" / "w.gguf", {}, nullptr).empty());
+        CHECK_FALSE(fs::exists(tmp / "a" / "w.gguf"));
+        CHECK(fs::file_size(tmp / "b" / "w.gguf") == 64);
+    }
+    SUBCASE("新目录里有同名、大小不一样的：两份都不动，照实说") {
+        put_file(tmp / "a" / "v.gguf", 64);
+        put_file(tmp / "b" / "v.gguf", 65);
+        CHECK_FALSE(
+            setup::move_one(tmp / "a" / "v.gguf", tmp / "b" / "v.gguf", {}, nullptr).empty());
+        CHECK(fs::file_size(tmp / "a" / "v.gguf") == 64);
+        CHECK(fs::file_size(tmp / "b" / "v.gguf") == 65);
+    }
+    fs::remove_all(tmp, ec);
+}
+
+TEST_CASE("整个目录搬过去：子目录照原样，搬空的子目录收掉，原来那个目录留着") {
+    const fs::path from = fs::temp_directory_path() / "changji_move_all" / "old";
+    const fs::path to = fs::temp_directory_path() / "changji_move_all" / "new";
+    std::error_code ec;
+    fs::remove_all(from.parent_path(), ec);
+    put_file(from / "video" / "a.gguf", 11);
+    put_file(from / "image" / "b.safetensors", 12);
+    put_file(from / "c.gguf", 13);
+    put_file(from / "notes.txt", 1);   // 不是模型，留在原处
+
+    auto& m = setup::Mover::instance();
+    bool called = false;
+    REQUIRE(m.start(from, to, [&called] { called = true; }));
+    for (int i = 0; i < 200 && m.running(); ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    REQUIRE_FALSE(m.running());
+    const auto snap = m.snapshot();
+    CHECK(snap.state == setup::MoveState::Done);
+    CHECK(snap.count == 3);
+    CHECK(snap.moved == 3);
+    CHECK(snap.done == 36);
+    CHECK(called);
+
+    CHECK(fs::file_size(to / "video" / "a.gguf") == 11);
+    CHECK(fs::file_size(to / "image" / "b.safetensors") == 12);
+    CHECK(fs::file_size(to / "c.gguf") == 13);
+    CHECK_FALSE(fs::exists(from / "video"));     // 搬空了，收掉
+    CHECK_FALSE(fs::exists(from / "image"));
+    CHECK(fs::exists(from / "notes.txt"));       // 别的东西原样留着
+    CHECK(fs::is_directory(from));               // 原来那个目录本身不动
+    fs::remove_all(from.parent_path(), ec);
 }

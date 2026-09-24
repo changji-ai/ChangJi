@@ -13,7 +13,10 @@
 #include "config/runtime.hpp"
 #include "config/writeback.hpp"
 #include "config/model_patch.hpp"
+#include "infer/scheduler.hpp"
+#include "pipeline/task_board.hpp"
 #include "setup/downloader.hpp"
+#include "setup/mover.hpp"
 #include "setup/source.hpp"
 #include "util/paths.hpp"
 #include "util/say.hpp"
@@ -561,6 +564,11 @@ ApiResult post_setup_download(const config::Settings& settings, const json& body
                            "文件」。"));
     }
 
+    // **搬着模型的时候不许下、不许换目录**：搬的那一头正拿着老目录和新目录两个
+    // 路径在挪文件，这会儿再改一次目录，搬完的东西就落在一个配置已经不指着的地方。
+    if (setup::Mover::instance().running()) {
+        throw ApiError(409, SAY("正在搬模型，搬完再说。"));
+    }
     if (setup::Downloader::instance().running()) {
         // 409 而不是静默忽略：用户点了第二次而界面什么都没变的话，
         // 他会以为第一次没点上。
@@ -818,6 +826,81 @@ ApiResult get_setup_progress() {
 ApiResult post_setup_cancel() {
     setup::Downloader::instance().cancel();
     return {200, setup::Downloader::instance().snapshot().to_json()};
+}
+
+namespace {
+
+fs::path target_dir(const std::string& raw) {
+    std::error_code ec;
+    const fs::path p = fs::absolute(paths::expand_user(raw), ec);
+    return ec ? paths::expand_user(raw) : p;
+}
+
+fs::path normal_dir(const fs::path& p) {
+    std::error_code ec;
+    const fs::path c = fs::weakly_canonical(p, ec);
+    return ec ? p.lexically_normal() : c;
+}
+
+}  // namespace
+
+ApiResult get_setup_move_plan(const config::Settings& settings, const std::string& to) {
+    if (to.empty()) throw ApiError(400, SAY("缺新目录"));
+    const fs::path from = settings.models.dir_path(settings.workspace_path());
+    return {200, setup::plan_move(from, target_dir(to)).to_json()};
+}
+
+ApiResult post_setup_move(const config::Settings& settings, const json& body) {
+    const auto it = body.find("to");
+    if (it == body.end() || !it->is_string() || it->get<std::string>().empty()) {
+        throw ApiError(400, SAY("缺新目录"));
+    }
+    const fs::path from = settings.models.dir_path(settings.workspace_path());
+    const fs::path to = target_dir(it->get<std::string>());
+    if (normal_dir(from) == normal_dir(to)) {
+        throw ApiError(400, SAY("新目录和原来的是同一个，不用搬。"));
+    }
+    if (setup::Mover::instance().running()) {
+        throw ApiError(409, SAY("正在搬模型，搬完再说。"));
+    }
+    if (setup::Downloader::instance().running()) {
+        throw ApiError(409, SAY("已经在下了。要换选择先点进度条旁边那颗「停下」。"));
+    }
+    // **有活在跑就不搬。** 出片、出图、写东西都可能正握着一个模型文件，搬走它
+    // 那一件就在半路读不到权重。账本上排着的也算：它一开工就要去读。
+    const json board = pipeline::task_board();
+    const auto busy = [&board](const char* k) {
+        const auto f = board.find(k);
+        return f != board.end() && f->is_array() && !f->empty();
+    };
+    if (busy("running") || busy("queued")) {
+        throw ApiError(409, SAY("有活在跑，等它跑完或者停下再搬模型。"));
+    }
+
+    // 没人用着的模型先卸掉。**Windows 上加载着的文件改不了名、删不掉**，不卸的话
+    // 编剧模型（进程内那条）这种一直常驻的，搬的时候必然报「搬不动」。
+    // 还被借着的不会被卸（evict_all 只卸没人借的），那几个照实报错。
+    infer::scheduler().evict_all();
+
+    // **先把目录写进配置，再开搬。** 人已经挑了新目录；搬到一半关掉程序的话，下次
+    // 打开它指着的也是新目录，没搬完的那几个在老目录里——比反过来（配置还指着老的、
+    // 文件已经有一半到了新的）好认，而且「换一个…」再挑一次老目录就能接着搬回去。
+    try {
+        persist(json{{"models", {{"dir", paths::to_utf8(to)}}}});
+    } catch (const std::exception& e) {
+        throw ApiError(500, SAYF("配置写不进去：%1", e.what()));
+    }
+    setup::Mover::instance().start(from, to);
+    return {200, setup::Mover::instance().snapshot().to_json()};
+}
+
+ApiResult get_setup_move() {
+    return {200, setup::Mover::instance().snapshot().to_json()};
+}
+
+ApiResult post_setup_move_cancel() {
+    setup::Mover::instance().cancel();
+    return {200, setup::Mover::instance().snapshot().to_json()};
 }
 
 ApiResult get_setup_index(const config::Settings& settings) {

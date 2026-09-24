@@ -37,6 +37,10 @@ inline constexpr std::string_view kBffRoutes[] = {
     "/bff/setup/progress",
     "/bff/setup/cancel",
     "/bff/setup/index",
+    "/bff/setup/move-plan",
+    "/bff/setup/move",
+    "/bff/setup/move-progress",
+    "/bff/setup/move-cancel",
     // 投递那一套 **2026-09-12 随 Node 那层一起删了**（不是"还没搬进来"：
     // webapp/server 整个目录已经不在仓库里，见 webapp/README.md）。但这几条
     // 仍然要答——回空形状加一句说明，而不是 404。前端 Promise.all 一挂

@@ -66,6 +66,22 @@ ApiResult post_setup_cancel();
 /// `unknown`（清单里没有，人自己放的）。认得的顺带说是哪一组的。
 ApiResult get_setup_index(const config::Settings& settings);
 
+/// GET /bff/setup/move-plan?to=… —— 换到 `to` 之前问一声：原来的模型目录里有几个
+/// 模型文件、一共多大、是不是同一块盘（改名一瞬间 / 跨盘要复制）、新盘装不装得下。
+/// 界面拿它决定问不问人「要不要搬过去」。
+ApiResult get_setup_move_plan(const config::Settings& settings, const std::string& to);
+
+/// POST /bff/setup/move `{to}` —— 把模型目录换成 `to`，**并且**把原来那儿的模型搬过去
+/// （后台搬，见 setup/mover.hpp）。只换不搬走的是 `/bff/setup/download` 的
+/// `download:false`。有活在跑、在下模型、已经在搬，都回 409。
+ApiResult post_setup_move(const config::Settings& settings, const nlohmann::json& body);
+
+/// GET /bff/setup/move-progress —— 搬到哪儿了。
+ApiResult get_setup_move();
+
+/// POST /bff/setup/move-cancel —— 停下。搬过去的留在新目录，没搬的留在原处。
+ApiResult post_setup_move_cancel();
+
 /// 这一组配齐了没有。
 ///
 /// 编剧和配音有另一条出路：接外面的服务。那时候本机一个模型文件都没有

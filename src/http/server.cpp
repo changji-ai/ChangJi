@@ -2008,6 +2008,31 @@ void run(const config::Settings& settings, const Options& opts) {
             return json_response(r.body, r.status);
         });
 
+    // 换模型目录时把原来那儿的搬过去：先问（plan），再搬（move），盯着（progress），
+    // 叫停（cancel）。实现在 setup_api / setup/mover。
+    CROW_ROUTE(app, "/bff/setup/move-plan")([](const crow::request& req) {
+        auto r = guard([&] {
+            return get_setup_move_plan(config::runtime().snapshot(), query(req, "to"));
+        });
+        return json_response(r.body, r.status);
+    });
+    CROW_ROUTE(app, "/bff/setup/move")
+        .methods("POST"_method)([](const crow::request& req) {
+            auto r = guard([&] {
+                return post_setup_move(config::runtime().snapshot(), parse_body(req.body));
+            });
+            return json_response(r.body, r.status);
+        });
+    CROW_ROUTE(app, "/bff/setup/move-progress")([] {
+        auto r = guard([&] { return get_setup_move(); });
+        return json_response(r.body, r.status);
+    });
+    CROW_ROUTE(app, "/bff/setup/move-cancel")
+        .methods("POST"_method)([](const crow::request&) {
+            auto r = guard([&] { return post_setup_move_cancel(); });
+            return json_response(r.body, r.status);
+        });
+
     // 模型目录里实际有什么。**只读**：扫一遍、比对清单，不挪文件、不写配置——
     // 配置那头不用改，`ModelsConfig::resolve` 自己会按文件名找到它们。
     CROW_ROUTE(app, "/bff/setup/index")([] {
