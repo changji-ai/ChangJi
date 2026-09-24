@@ -873,6 +873,10 @@ ApiResult get_run_preview(const std::string& path,
         const models::AssetLibrary assets = store.load_assets();
         for (const Episode* ep : episodes) {
             for (const auto& id : stages::shots_without_refs(ep->shots, assets)) {
+                // ⚠️ **只做前 n 分钟时只算前缀那几镜**，和 `post_run` 挡的是同一批
+                //（它那头按前缀判）。原来这儿数整章：第 40 镜缺一张图，
+                //「只做前 2 分钟」的按钮就灰着，而真按下去引擎是收的。
+                if (!only_preview.empty() && only_preview.count(id) == 0) continue;
                 bare_shots.push_back(id);
             }
         }
