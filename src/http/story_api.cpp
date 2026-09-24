@@ -1462,7 +1462,7 @@ ApiResult post_story_revise(const json& body, llm::Client& client,
 }
 
 ApiResult post_story_revise_apply(const json& body) {
-    forbid_extra(body, {"project", "chapter_id", "from_char", "to_char", "text"});
+    forbid_extra(body, {"project", "chapter_id", "from_char", "to_char", "text", "before"});
     ProjectStore store = open_project(body);
     // 读→拼进这一段→存→对齐，一把锁（ProjectStore::lock）。手改稿子每 1.5 秒
     // 存一次，正好是最容易和别的对话写的那一章撞上的一条。
@@ -1473,6 +1473,18 @@ ApiResult post_story_revise_apply(const json& body) {
     const stages::Span span = need_span(body, story);
     const std::string text_in = text::strip_ws(need_str(body, "text"));
     if (text_in.empty()) throw ApiError(400, SAY("要写回去的那一段是空的"));
+
+    // ⚠️ **范围是对着哪一版算的，要对得上。** 编辑器自动存是「从 0 到我手上那
+    // 份的长度」整段换；那一章在人打字的当口被别的对话改长了的话，这个范围照样
+    // 合法（没超出末尾），于是只换掉开头那一截——存下去的是「人手上那份 + 新
+    // 正文的后半截」，从半句话接上。带了 `before`（它改的是哪一段原文）就核一下，
+    // 对不上回 409，让它先重新读一遍。不带的老客户端照旧。
+    if (const auto b = body.find("before"); b != body.end() && b->is_string()) {
+        if (stages::span_text(story, span) != b->get<std::string>()) {
+            throw ApiError(409, SAY("这一章在你改的时候已经变了（别的对话或另一个窗口写过它），"
+                                    "先重新读一遍再存"));
+        }
+    }
 
     Story next = stages::apply_revision(story, span, text_in);
     // **章节计划跟着重算。** 正文长度变了，后面每一条的字符区间都错位了；

@@ -1281,6 +1281,7 @@
   "这一版引擎没有记忆": "This engine build has no memory",
   "这一章": "This chapter",
   "这一章 %1 还没有分镜表": "Chapter %1 has no shot list yet",
+  "这一章在你改的时候已经变了（别的对话或另一个窗口写过它），先重新读一遍再存": "This chapter changed while you were editing it (another conversation or window wrote to it). Reload it before saving.",
   "这一章在跑的过程中被删掉了": "this chapter was deleted while the run was going",
   "这一章在跑的过程中被删掉了，这一轮的进度没有写回项目文件（已经出来的文件还在磁盘上）": "This chapter was deleted while the run was going, so this round’s progress was not written back to the project file (the files already produced are still on disk)",
   "这一章多长由它自己的内容定：按配音定下时长后不再压回目标尺寸，这一章 %1": "How long this chapter runs is up to its own content: once the voice fixes the timings, nothing is squeezed back to a target size — this chapter is %1",

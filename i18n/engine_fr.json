@@ -1281,6 +1281,7 @@
   "这一版引擎没有记忆": "Cette version du moteur n’a pas de mémoire",
   "这一章": "Ce chapitre",
   "这一章 %1 还没有分镜表": "Le chapitre %1 n’a pas encore de découpage",
+  "这一章在你改的时候已经变了（别的对话或另一个窗口写过它），先重新读一遍再存": "Ce chapitre a changé pendant que vous le modifiiez (une autre conversation ou fenêtre l’a réécrit). Rechargez-le avant d’enregistrer.",
   "这一章在跑的过程中被删掉了": "ce chapitre a été supprimé pendant l’exécution",
   "这一章在跑的过程中被删掉了，这一轮的进度没有写回项目文件（已经出来的文件还在磁盘上）": "Ce chapitre a été supprimé pendant l’exécution : la progression de ce tour n’a pas été réécrite dans le fichier du projet (les fichiers déjà produits sont toujours sur le disque)",
   "这一章多长由它自己的内容定：按配音定下时长后不再压回目标尺寸，这一章 %1": "La durée de ce chapitre est décidée par son contenu : une fois les durées fixées par la voix, rien n’est ramené à une taille cible — ce chapitre fait %1",

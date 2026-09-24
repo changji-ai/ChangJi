@@ -1281,6 +1281,7 @@
   "这一版引擎没有记忆": "Diese Engine-Version hat kein Gedächtnis",
   "这一章": "Dieses Kapitel",
   "这一章 %1 还没有分镜表": "Kapitel %1 hat noch keine Shotliste",
+  "这一章在你改的时候已经变了（别的对话或另一个窗口写过它），先重新读一遍再存": "Dieses Kapitel hat sich geändert, während du es bearbeitet hast (ein anderes Gespräch oder Fenster hat es geschrieben). Lade es neu, bevor du speicherst.",
   "这一章在跑的过程中被删掉了": "dieses Kapitel wurde während des Laufs gelöscht",
   "这一章在跑的过程中被删掉了，这一轮的进度没有写回项目文件（已经出来的文件还在磁盘上）": "Dieses Kapitel wurde während des Laufs gelöscht, der Fortschritt dieser Runde wurde also nicht in die Projektdatei zurückgeschrieben (die bereits erzeugten Dateien liegen weiter auf der Platte)",
   "这一章多长由它自己的内容定：按配音定下时长后不再压回目标尺寸，这一章 %1": "Wie lang dieses Kapitel wird, entscheidet sein Inhalt: sobald die Stimme die Längen festgelegt hat, wird nichts mehr auf eine Zielgröße zurückgedrückt — dieses Kapitel ist %1",

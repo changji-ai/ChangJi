@@ -33,6 +33,7 @@
 #include "http/batch.hpp"
 #include "http/episodes.hpp"
 #include "http/planning.hpp"
+#include "http/readonly.hpp"
 #include "http/scripting.hpp"
 #include "http/story_api.hpp"
 #include "llm/client.hpp"
@@ -5780,6 +5781,53 @@ TEST_CASE("POST /api/story/chapters：写的当口人把那一章写上了，不
     CHECK(saved.chapters[1].text == "人自己写的第二章。");
     // 让开就是让开：不当退稿再掷两次。
     CHECK(client->calls() == 2);
+
+    std::error_code ec;
+    fs::remove_all(root, ec);
+}
+
+
+TEST_CASE("POST /api/story/revise/apply：带着 before 的，那一段对不上就 409，不拼") {
+    // 编辑器自动存是「从 0 到我手上那份的长度」整段换。那一章在人打字的当口被别的
+    // 对话改长了，这个范围照样合法（没超出末尾），原来就只换掉开头那一截——存下去的
+    // 是「人手上那份 + 新正文的后半截」。
+    const fs::path root = fresh_project("改的时候变了");
+    ProjectStore store(root);
+    Story s = parse_outline(good_outline().dump(), "梗概", StoryScale::MEDIUM);
+    s.chapters[0].text = "他推门进来。";
+    store.save_story(s);
+    const std::string id = s.chapters[0].chapter_id;
+    const std::string old_text = "他推门进来。";
+
+    // 别的对话把这一章重写了（写长了，开头也变了）。
+    s.chapters[0].text = "屋里没开灯，只有冰箱在响。他推门进来。她坐在黑暗里，一动不动。";
+    store.save_story(s);
+
+    const json stale = {{"project", p_str(root)},
+                        {"chapter_id", id},
+                        {"from_char", 0},
+                        {"to_char", 6},   // 人手上那份的长度
+                        {"text", "他推门进来，没敲门。"},
+                        {"before", old_text}};
+    const auto r = http::guard([&] { return http::post_story_revise_apply(stale); });
+    CHECK(r.status == 409);
+    // 盘上那一章一个字没动。
+    CHECK(store.load_story().chapters[0].text ==
+          "屋里没开灯，只有冰箱在响。他推门进来。她坐在黑暗里，一动不动。");
+
+    // 对得上就照存。
+    json fresh = stale;
+    fresh["before"] = "屋里没开灯，";   // 重读之后，那 6 个字现在是这一段
+    const auto ok = http::guard([&] { return http::post_story_revise_apply(fresh); });
+    CHECK(ok.status == 200);
+    CHECK(store.load_story().chapters[0].text.rfind("他推门进来，没敲门。", 0) == 0);
+
+    // 不带 before 的老客户端照旧。
+    json legacy = stale;
+    legacy.erase("before");
+    legacy["text"] = "他推门进来，没敲门，也没开灯。";
+    const auto old_client = http::guard([&] { return http::post_story_revise_apply(legacy); });
+    CHECK(old_client.status == 200);
 
     std::error_code ec;
     fs::remove_all(root, ec);
