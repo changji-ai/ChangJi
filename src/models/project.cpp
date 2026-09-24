@@ -14,6 +14,7 @@
 #include <set>
 #include <sstream>
 #include <stdexcept>
+#include <thread>
 
 // 只为了新项目那份画幅：`create` 要把内置默认的比例钉进 assets.json，
 // 而那个默认只有一处（config::VideoConfig），不在这边抄一份。见 create()。
@@ -105,6 +106,19 @@ void write_json_atomic(const fs::path& path, const json& data) {
     // fs::rename 在标准里要求目标存在时替换掉它（POSIX 语义），
     // MSVC 底层走的是 MoveFileEx 加 MOVEFILE_REPLACE_EXISTING。
     fs::rename(tmp, path, ec);
+#ifdef _WIN32
+    // ⚠️ **Windows 上有人正读着它，替换就失败（拒绝访问）。** 读的那一头
+    //（`load_story` / `load_project`，不拿存盘锁）用 std::ifstream 开文件，MSVC
+    // 开的时候不给"允许删除"那一档共享，MoveFileEx 替换就回 ERROR_ACCESS_DENIED
+    //（实测：开着是 5，关了就成）。页面每隔几秒就拉一次 /api/project、/api/story，
+    // 撞上的话这一次存盘整个抛掉——写一章是一两分钟的模型输出，批量写作是整件活
+    // 当场停下。读一个 JSON 是几毫秒的事，等一下再试。
+    for (int i = 0; ec && i < 25; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        ec.clear();
+        fs::rename(tmp, path, ec);
+    }
+#endif
     if (ec) {
         fs::remove(tmp, ec);
         throw std::runtime_error(SAY("替换文件失败：") + paths::to_utf8(path));

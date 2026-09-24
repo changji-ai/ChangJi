@@ -342,6 +342,10 @@ ApiResult get_story(const std::string& path) {
 ApiResult post_story(const json& body) {
     forbid_extra(body, {"project", "premise", "scale", "episode_duration_s"});
     ProjectStore store = open_project(body);
+    // **读→改→存在一把锁里**（CLAUDE.md 第十四条）。原来这儿不拿锁：读完、存之前
+    // 那一下另一件活（批量写正文、对话里写一章）正好存了一章，这边整份存回去就把
+    // 那一章冲回旧样子——多半是空的，一声不响。
+    const auto guard = store.lock();
     Project project = load_or_400(store);
     Story story = load_story_or_400(store);
 
@@ -727,6 +731,10 @@ ApiResult post_story_outline(const json& body_in, llm::Client& client,
 ApiResult post_story_chapter_delete(const json& body) {
     forbid_extra(body, {"project", "chapter_id"});
     ProjectStore store = open_project(body);
+    // **读→改→存在一把锁里**（CLAUDE.md 第十四条）。原来这儿不拿锁：读完、存之前
+    // 那一下另一件活（批量写正文、对话里写一章）正好存了一章，这边整份存回去就把
+    // 那一章冲回旧样子——多半是空的，一声不响。
+    const auto guard = store.lock();
     load_or_400(store);
     const std::string chapter_id = opt_str(body, "chapter_id", "");
     if (chapter_id.empty()) {
@@ -1527,6 +1535,10 @@ ApiResult post_story_from_episodes(const json& body) {
 ApiResult post_story_plan(const json& body) {
     forbid_extra(body, {"project", "duration_s"});
     ProjectStore store = open_project(body);
+    // **读→改→存在一把锁里**（CLAUDE.md 第十四条）。原来这儿不拿锁：读完、存之前
+    // 那一下另一件活（批量写正文、对话里写一章）正好存了一章，这边整份存回去就把
+    // 那一章冲回旧样子——多半是空的，一声不响。
+    const auto guard = store.lock();
     load_or_400(store);
     Story story = load_story_or_400(store);
 

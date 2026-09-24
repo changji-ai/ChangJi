@@ -251,7 +251,7 @@ ApiResult post_story_chapters(const json& body,
     const models::StyleLine style = project.style_line;
     const bool started = pipeline::jobs().start(
         pipeline::JobKind::Write, "",
-        [store, client, todo, style, client_project](pipeline::JobProgress& p) {
+        [store, client, todo, style, client_project, overwrite](pipeline::JobProgress& p) {
             p.set_total(static_cast<int>(todo.size()));
             // 推流式正文要用它。**按类订阅也收得到**：Hub 把 job_id 里第一个
             // '-' 之前的部分当类名（"write-a3f…" → "write"），而客户端只订
@@ -275,7 +275,11 @@ ApiResult post_story_chapters(const json& body,
                 // 快照的话，每一章都以为自己接的是空的上一章。
                 Story cur = store.load_story();
                 const Chapter* me = cur.chapter_by_id(id);
-                if (me == nullptr) {
+                // ⚠️ **"缺正文"是开工那一刻挑的，走到这一章时可能已经有了**——人在
+                // 编辑器里自己写了、另一条对话写了。不是「重写」那一档就不碰它：
+                // 原来照写不误，人刚写的那一章被整章换掉，而页面按钮派的活和人手改
+                // 记在同一个名下，版本账不认为是"盖了别人"，连底都不留。
+                if (me == nullptr || (!overwrite && !text::strip_ws(me->text).empty())) {
                     p.set_done(++done);
                     continue;
                 }
@@ -320,6 +324,8 @@ ApiResult post_story_chapters(const json& body,
                 Story next;
                 std::string last_error;
                 bool last_hopeless = false;
+                /// 生成回来一看，这一章已经不归这件活了（删了、被人写上了）。
+                bool stepped_aside = false;
                 // 上一轮被打回的稿；空 = 上一轮没留下能改的稿（或者还没跑）。
                 std::optional<stages::ChapterRejected> rejected;
                 // **读→改→存在一把锁里**（`ProjectStore::lock`）：从下面重读
@@ -434,8 +440,19 @@ ApiResult post_story_chapters(const json& body,
                         // 正文"这种没法补救的事不会发生。
                         call_id = llm::take_last_call_id();
                         story_guard = store.lock();
+                        Story latest = store.load_story();
+                        // 生成那一两分钟里：这一章被删了，或者（不是「重写」那一档）
+                        // 被人写上了。**让开**——删了的不是闸门没过，别当退稿再掷两次、
+                        // 往闸门记录里记三笔假的；写上了的见上面循环开头那段。
+                        const Chapter* still = latest.chapter_by_id(id);
+                        if (still == nullptr ||
+                            (!overwrite && !text::strip_ws(still->text).empty())) {
+                            stepped_aside = true;
+                            last_error.clear();
+                            break;
+                        }
                         next = stages::apply_chapter(
-                            store.load_story(), id,
+                            std::move(latest), id,
                             stages::parse_chapter(raw, floor_chars, strict));
                         note_chapter_gate(call_id, id, attempt + 1, kAttempts,
                                           strict, nullptr, revising);
@@ -457,6 +474,11 @@ ApiResult post_story_chapters(const json& body,
                         if (last_hopeless) break;
                     }
                     if (p.cancelled()) break;
+                }
+                if (stepped_aside) {
+                    if (story_guard.owns_lock()) story_guard.unlock();
+                    p.set_done(++done);
+                    continue;
                 }
                 if (!last_error.empty()) {
                     if (story_guard.owns_lock()) story_guard.unlock();

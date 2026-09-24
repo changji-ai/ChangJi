@@ -16,6 +16,7 @@
 #include <fstream>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <mutex>
@@ -5690,6 +5691,51 @@ TEST_CASE("POST /api/story/outline：章数不像样就 422，一个字都不发
         }
         CHECK(client.calls().empty());
     }
+    std::error_code ec;
+    fs::remove_all(root, ec);
+}
+
+namespace {
+/// 写第二章的那一次调用里，人在编辑器里把第二章自己写上了。
+class HandTypingClient : public llm::Client {
+public:
+    explicit HandTypingClient(fs::path root) : root_(std::move(root)) {}
+    std::string complete(const llm::Request&, pipeline::CancelToken&) override {
+        const int n = ++calls_;
+        if (n == 2) {
+            ProjectStore st(root_);
+            Story s = st.load_story();
+            s.chapters[1].text = "人自己写的第二章。";
+            st.save_story(s);
+        }
+        return json{{"text", long_body(n == 1 ? "第一章写出来了。" : "第二章写出来了。")}}.dump();
+    }
+    int calls() const { return calls_; }
+
+private:
+    fs::path root_;
+    std::atomic<int> calls_{0};
+};
+}  // namespace
+
+TEST_CASE("POST /api/story/chapters：写的当口人把那一章写上了，不许整章换掉") {
+    // "缺正文"是开工那一刻挑的。原来走到那一章照写不误，人刚写的整章被换掉——
+    // 页面按钮派的活和人手改记在同一个名下，版本账不认为是"盖了别人"，连底都不留。
+    const fs::path root = fresh_project("写的当口人写上了");
+    ProjectStore store(root);
+    store.save_story(parse_outline(good_outline().dump(), "梗概", StoryScale::MEDIUM));
+
+    auto client = std::make_shared<HandTypingClient>(root);
+    const auto r = http::post_story_chapters(json{{"project", p_str(root)}}, client);
+    REQUIRE(r.status == 200);
+    wait_writer_done();
+
+    const Story saved = store.load_story();
+    CHECK(saved.chapters[0].text.find("第一章写出来了") != std::string::npos);
+    CHECK(saved.chapters[1].text == "人自己写的第二章。");
+    // 让开就是让开：不当退稿再掷两次。
+    CHECK(client->calls() == 2);
+
     std::error_code ec;
     fs::remove_all(root, ec);
 }
