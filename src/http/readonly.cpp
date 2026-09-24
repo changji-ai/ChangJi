@@ -437,6 +437,11 @@ ApiResult get_dirs(const std::string& path, const config::Settings& settings) {
     if (fs::is_directory(models, ec) && models != ws && models != home) {
         roots.push_back(dir_entry(models, SAY("现在的模型目录")));
     }
+    // **每一块盘也是一个起点。** 只有上面三条的话，它们全在系统盘上——从用户目录
+    // 一级级往上翻能翻到 `C:\`，却翻不到 `D:\`，模型就只能放在最挤的那块盘上
+    // （用户 2026-09-24：「模型目录要可以选择到别的地方」）。盘符自己就说清了是什么，
+    // 不另配一行小字。
+    for (const auto& v : paths::volume_roots()) roots.push_back(dir_entry(v));
 
     if (text::strip_ws(path).empty()) {
         return {200, {{"path", ""}, {"parent", nullptr},

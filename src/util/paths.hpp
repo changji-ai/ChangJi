@@ -27,6 +27,14 @@ namespace changji::paths {
 /// 是同一个——测试自己再算一遍就可能算出别的来。
 std::filesystem::path home_dir();
 
+/// 这台机器上的几块盘：Windows 是每个盘符的根（`C:\`、`D:\`，连映射的网络盘），
+/// macOS 是 `/` 加 `/Volumes` 底下挂着的，Linux 是 `/` 加 `/mnt`、`/media`、
+/// `/run/media` 底下挂着的。**只回此刻进得去的**：光驱没放盘、网络盘断了的不回。
+///
+/// 给「挑一个目录」那条接口当起点：模型动辄几十 GB，人要挑的正是"哪块盘装得下"，
+/// 而起点只有家目录的话，别的盘得一级一级往上翻、翻到根也翻不过去。
+std::vector<std::filesystem::path> volume_roots();
+
 std::filesystem::path user_config_dir(const std::string& app_name);
 
 /// 用户数据目录。

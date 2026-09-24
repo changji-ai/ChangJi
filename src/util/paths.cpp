@@ -1,5 +1,6 @@
 #include "util/paths.hpp"
 
+#include <algorithm>
 #include <cstdlib>
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
@@ -159,6 +160,51 @@ fs::path home_dir() {
     std::string p = env("HOME");
     return p.empty() ? fs::path("/tmp") : from_utf8(p);
 #endif
+}
+
+std::vector<fs::path> volume_roots() {
+    std::vector<fs::path> out;
+    std::error_code ec;
+#ifdef _WIN32
+    // 光驱没盘、读卡器空着的时候去碰它，老一点的系统会弹「驱动器中没有磁盘」的框。
+    // 这一段只问、不该弹任何东西。
+    DWORD old_mode = 0;
+    ::SetThreadErrorMode(SEM_FAILCRITICALERRORS, &old_mode);
+    const DWORD mask = ::GetLogicalDrives();
+    for (int i = 0; i < 26; ++i) {
+        if ((mask & (1u << i)) == 0) continue;
+        const std::wstring root = std::wstring(1, static_cast<wchar_t>(L'A' + i)) + L":\\";
+        const UINT type = ::GetDriveTypeW(root.c_str());
+        if (type == DRIVE_UNKNOWN || type == DRIVE_NO_ROOT_DIR) continue;
+        // **网络盘不去碰**：断开的那种一碰要等二三十秒，挑目录那个框就卡在那儿。
+        // 点进去不在，那一头会照实说「这个目录不在」。
+        if (type != DRIVE_REMOTE && !fs::is_directory(fs::path(root), ec)) continue;
+        out.emplace_back(root);
+    }
+    ::SetThreadErrorMode(old_mode, nullptr);
+#else
+    out.emplace_back("/");
+    // 挂载点底下一层就是一块盘（或者 `/media/<用户>` 那一层，再点一下就到）。
+    // **软链不算**：macOS 的 `/Volumes/Macintosh HD` 指回 `/`，再列一遍就是重复。
+#ifdef __APPLE__
+    const char* const mounts[] = {"/Volumes"};
+#else
+    const char* const mounts[] = {"/mnt", "/media", "/run/media"};
+#endif
+    for (const char* m : mounts) {
+        std::vector<fs::path> here;
+        for (const auto& e : fs::directory_iterator(
+                 m, fs::directory_options::skip_permission_denied, ec)) {
+            std::error_code sec;
+            if (e.is_symlink(sec) || !e.is_directory(sec)) continue;
+            here.push_back(e.path());
+        }
+        ec.clear();
+        std::sort(here.begin(), here.end());
+        out.insert(out.end(), here.begin(), here.end());
+    }
+#endif
+    return out;
 }
 
 

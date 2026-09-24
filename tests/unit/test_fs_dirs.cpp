@@ -105,6 +105,31 @@ TEST_CASE("路径为空：给几个起点，不是报错") {
     CHECK(has_why);
 }
 
+TEST_CASE("起点里有每一块盘：模型能放到系统盘以外的地方") {
+    // 只给家目录、项目库、模型目录三个起点的话，它们全在系统盘上：往上翻能翻到
+    // 系统盘的根，翻不到别的盘（用户 2026-09-24：「模型目录要可以选择到别的地方」）。
+    config::Settings s;
+    const auto r = get_dirs("", s);
+    REQUIRE(r.status == 200);
+    std::vector<std::string> roots;
+    for (const auto& e : r.body.at("roots")) roots.push_back(e.at("path").get<std::string>());
+
+    const auto vols = paths::volume_roots();
+    REQUIRE_FALSE(vols.empty());
+    for (const auto& v : vols) {
+        CAPTURE(paths::to_utf8(v));
+        CHECK(std::find(roots.begin(), roots.end(), paths::to_utf8(v)) != roots.end());
+    }
+    // 家目录所在的那块盘一定在里面。
+    const fs::path home_root = paths::home_dir().root_path();
+    CHECK(std::find(vols.begin(), vols.end(), home_root) != vols.end());
+
+    // 从一块盘的根点进去列得出东西，而且根上没有上一级。
+    const auto top = get_dirs(paths::to_utf8(home_root), s);
+    REQUIRE(top.status == 200);
+    CHECK(top.body.at("parent").is_null());
+}
+
 TEST_CASE("「不在」和「不是目录」要分开说") {
     // 前者多半是敲错了，后者是选了一个文件——两种要做的事不一样。
     const auto root = fresh("bad");
