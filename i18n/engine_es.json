@@ -1238,6 +1238,7 @@
   "跑完了却没有结果": "terminó pero no hay resultado",
   "跑提示词时失败": "falló al ejecutar el prompt",
   "跑本机的 %1": "ejecutando el %1 local",
+  "跨机派来的活，输入只收 blob:（先上传再引用），不收这台盘上的路径": "Los trabajos enviados desde otra máquina solo pueden usar entradas blob: (súbelas primero y luego haz referencia), no rutas de esta máquina",
   "路径不合法": "la ruta no es válida",
   "路径不在项目目录内，存进项目会破坏可移植性：%1\n请先把文件复制进 %2": "La ruta está fuera de la carpeta del proyecto, y guardarla ahí rompería la portabilidad: %1\nCopia antes el archivo a %2",
   "路径不对：%1": "la ruta no cuadra: %1",

@@ -1238,6 +1238,7 @@
   "跑完了却没有结果": "er ist durchgelaufen, aber es gibt kein Ergebnis",
   "跑提示词时失败": "das Ausführen des Prompts ist fehlgeschlagen",
   "跑本机的 %1": "führt das lokale %1 aus",
+  "跨机派来的活，输入只收 blob:（先上传再引用），不收这台盘上的路径": "Aufträge von einem anderen Rechner dürfen nur blob:-Eingaben verwenden (erst hochladen, dann referenzieren), keine Pfade auf diesem Rechner",
   "路径不合法": "der Pfad ist ungültig",
   "路径不在项目目录内，存进项目会破坏可移植性：%1\n请先把文件复制进 %2": "Der Pfad liegt außerhalb des Projektordners; ihn im Projekt zu speichern würde die Portabilität zerstören: %1\nKopier die Datei zuerst nach %2",
   "路径不对：%1": "der Pfad stimmt nicht: %1",

@@ -20,6 +20,7 @@
 #include <crow.h>
 
 #include "config/runtime.hpp"
+#include "http/request_guard.hpp"
 #include "http/setup_api.hpp"
 #include "infer/blob.hpp"
 #include "infer/node_status.hpp"
@@ -530,6 +531,30 @@ void mount_worker_api_impl(http::EngineApp& app,
                 return json_res({{"detail", SAYF("任务读不懂：%1",
                                                  text::sanitize_utf8(e.what()))}},
                                 400);
+            }
+
+            // ⚠️ **不是本机来的，产物只落沙箱、输入只认 blob。**
+            //
+            // `dest` 和参考图、首尾帧原来是照单全收的路径：只拿着一张局域网
+            // 通行证（它的意思只是"借我的卡用一下"）就能让这台往任意路径写一个
+            // png / mp4 / wav（盖掉配置、project.json），或者读这台盘上任意一张图
+            // 喂进出图。同机的子进程（`worker_farm`，回环来的）照旧直接写 dest——
+            // 那是同一个文件系统，省一次搬运，而且派它的就是这台自己。
+            if (!http::is_loopback_host(req.remote_ip_address)) {
+                task.return_artifact = true;
+                const auto plain_path = [](const std::string& s) {
+                    return !s.empty() && s.rfind("blob:", 0) != 0;
+                };
+                bool bad = false;
+                for (const auto& r : task.prompts.reference_images) bad = bad || plain_path(r);
+                if (task.start_image) bad = bad || plain_path(*task.start_image);
+                if (task.end_image) bad = bad || plain_path(*task.end_image);
+                if (bad) {
+                    return json_res({{"detail", SAY("跨机派来的活，输入只收 blob:（先上传再引用），"
+                                                    "不收这台盘上的路径")},
+                                     {"shot_id", task.shot_id}},
+                                    400);
+                }
             }
 
             // **先自检再排队。** 干不成就当场说——这一条是烧过一次换来的。

@@ -151,9 +151,15 @@ TaskResult run_task_locally(const Task& t, const config::Settings& base,
                 throw std::runtime_error(
                     SAYF("建不出沙箱：%1", paths::to_utf8(sandbox)));
             }
-            const auto name = dest.filename();
-            dest = sandbox / (name.empty() ? std::filesystem::path("out")
-                                           : name);
+            // ⚠️ **只要那个文件名，而且洗过。** 对面给的是它自己的路径，这儿只拿
+            // 扩展名有用；但名字本身也是对面说了算——`..` 就是沙箱的上一层，
+            // Windows 上 `x/C:foo` 的文件名是 `C:foo`，拼到沙箱后面落到的是 C 盘。
+            std::string name = paths::to_utf8(dest.filename());
+            for (char& c : name) {
+                if (c == ':' || c == '/' || c == '\\') c = '_';
+            }
+            if (name.empty() || name == "." || name == "..") name = "out";
+            dest = sandbox / paths::from_utf8(name);
         }
 
         models::Shot shot;
