@@ -162,6 +162,13 @@ bool JobTable::start(JobKind kind, const std::string& episode_id, Body body,
     // 不先把 running 立起来的话，那个窗口里第二个 start() 会看到
     // running==false 一起挤进来，两条线程抢同一个槽。
     s.state.running = true;
+    // **这一次占坑的号，在 join 之前就领。** 上一件被按了停之后 running 早就是
+    // false，可它的线程还在收尾；收尾那一段原来无条件把 running 写回 false——
+    // 正好把这儿刚占的坑抹掉，接着叫"槽空了"的钩子，队列里下一件跟着挤进来，
+    // 两个 start() 一起去 join 同一条线程（标准说这是未定义行为，实际就是
+    // terminate，整个引擎没了）。线程收尾时对一下号，号不是自己的就不碰这两格。
+    s.seq = ++next_seq_;
+    const std::uint64_t my_seq = s.seq;
 
     // 上一轮的线程可能还没退——正常跑完没来得及 join，或者被手动停止后
     // 还在收尾（那种情况 running 早就是 false 了）。这里一定要等到它真的结束：
@@ -187,7 +194,6 @@ bool JobTable::start(JobKind kind, const std::string& episode_id, Body body,
     s.state.started_at = std::chrono::steady_clock::now();
     s.state.stop_message = stop_message;
     s.active = true;
-    s.seq = ++next_seq_;
 
     const std::string job_id = s.state.job_id;
     Slot* sp = &s;
@@ -197,7 +203,7 @@ bool JobTable::start(JobKind kind, const std::string& episode_id, Body body,
         : kind == JobKind::Run ? SAY("出片")
                                : SAY("批量写作");
     s.state.title = task_title;
-    s.worker = std::thread([this, kind, sp, job_id, project, lane, task_title,
+    s.worker = std::thread([this, kind, sp, job_id, project, lane, task_title, my_seq,
                             body = std::move(body)]() {
         // **长跑任务也要进那本任务账。**
         //
@@ -243,11 +249,15 @@ bool JobTable::start(JobKind kind, const std::string& episode_id, Body body,
         {
             std::lock_guard lg(mu_);
             Slot& sl = *sp;
-            sl.state.running = false;
-            sl.active = false;
-            // 跑完了就没有"还没落定"的了。留着的话下一次页面一进来，
-            // 会把上一轮剩下的当成还在排队。
-            sl.state.pending.clear();
+            // 号对得上才收：对不上是下一件已经占了这个槽、正等着这条线程退
+            //（见 start() 里领号那段），这两格是它的了。
+            if (sl.seq == my_seq) {
+                sl.state.running = false;
+                sl.active = false;
+                // 跑完了就没有"还没落定"的了。留着的话下一次页面一进来，
+                // 会把上一轮剩下的当成还在排队。
+                sl.state.pending.clear();
+            }
             // done / error 是终止消息，**不受节流影响**——
             // 被节流掉的话前端会永远停在"跑着"的状态。
             //

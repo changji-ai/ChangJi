@@ -1232,3 +1232,50 @@ TEST_CASE("按道要快照：没起过的道是空闲那份，老客户端不带
     release = true;
     t.wait_idle();
 }
+
+TEST_CASE("停了一件马上再起一件：上一件收尾时不许把新占的坑抹掉") {
+    // 上一件被按了停，running 立刻是 false，可它的线程还在收尾（这儿拿 200 毫秒
+    // 模拟：命令行后端一收尾就是一次完整的生成）。这时候再起一件，新的那件占了坑、
+    // 在等旧线程退。旧线程收尾那一下原来无条件写 running = false——把新占的坑
+    // 抹掉，接着叫"槽空了"的钩子，队列里下一件就挤进来，两个 start() 一起去 join
+    // 同一条线程。这儿钉的是：钩子响的那一刻，槽照旧是"在跑"。
+    JobTable t;
+    std::atomic<bool> a_going{false};
+    t.start(JobKind::Run, "ep_a", [&](JobProgress& p) {
+        a_going = true;
+        while (!p.cancelled()) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));   // 收尾很慢
+    });
+    while (!a_going.load()) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+
+    std::atomic<bool> first_hook{true};
+    std::atomic<bool> running_at_hook{false};
+    t.set_idle_hook([&](JobKind k) {
+        if (k != JobKind::Run) return;
+        bool expected = true;
+        if (first_hook.compare_exchange_strong(expected, false)) {
+            running_at_hook = t.running(JobKind::Run);
+        }
+    });
+
+    REQUIRE(t.cancel(JobKind::Run));
+    std::atomic<bool> b_going{false};
+    std::atomic<bool> release_b{false};
+    // start() 会在 join 旧线程那儿等上 200 毫秒，放到另一条线程上。
+    std::thread starter([&] {
+        CHECK(t.start(JobKind::Run, "ep_b", [&](JobProgress&) {
+            b_going = true;
+            while (!release_b.load()) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }));
+    });
+    starter.join();
+    while (!b_going.load()) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+
+    CHECK_FALSE(first_hook.load());            // 旧那件收尾时钩子响过
+    CHECK(running_at_hook.load());             // 响的那一刻，新占的坑还在
+    CHECK(t.running(JobKind::Run));
+
+    release_b = true;
+    t.wait_idle();
+    t.set_idle_hook(nullptr);
+}
