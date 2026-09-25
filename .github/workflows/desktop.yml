@@ -55,9 +55,14 @@
 name: Desktop release
 
 on:
+  # ⚠️ **No branch pushes here (2026-09-25).** Since that date the sources live
+  # in the product repo (integemjack/changji), and a branch push to THIS repo
+  # paired by name: `main` here took the product repo's `main` — a different,
+  # stale line — and would have shipped it as beta over the good one. Beta
+  # builds come from the product repo's `触发打包.yml` dispatch, which always
+  # names the product ref. Tags stay: they are how a
+  # desktop release is cut.
   push:
-    # **main is excluded**; every other branch is included.
-    branches-ignore: ['main']
     tags: ['desktop-v*']
   workflow_dispatch:
     inputs:
@@ -158,6 +163,12 @@ jobs:
             ref="$WANT"
           elif has "$GITHUB_REF_NAME"; then
             ref="$GITHUB_REF_NAME"
+          elif [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            # **A release tag never falls back.** The product repo's default
+            # branch is not what was tagged, and shipping it as a release is
+            # the worst version of "built the wrong sources".
+            echo "::error::$REPO has no tag $GITHUB_REF_NAME — tag the same commit there too"
+            exit 1
           else
             echo "::notice::$REPO has no $GITHUB_REF_NAME; falling back to its default branch $default"
             ref="$default"
@@ -185,6 +196,7 @@ jobs:
       - id: v
         env:
           WANT: ${{ inputs.version }}
+          PRODUCT_REF: ${{ steps.pref.outputs.ref }}
         run: |
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
             # `desktop-v1.2` → version `v1.2`, tag unchanged.
@@ -201,10 +213,10 @@ jobs:
             #
             # The version comes from the prefix in CMake (same as the engine
             # pipeline; the rule lives in `cpp/tools/version.sh`) with the
-            # branch name appended — the same commit may have been built on two
-            # branches. Slashes become dashes, since this ends up in filenames.
+            # product repo's branch appended — the same commit may have been
+            # built on two branches. Slashes become dashes, since this ends up in filenames.
             echo "tag=desktop-beta" >> "$GITHUB_OUTPUT"
-            echo "version=$(sh changji/cpp/tools/version.sh)-${GITHUB_REF_NAME//\//-}" >> "$GITHUB_OUTPUT"
+            echo "version=$(sh changji/cpp/tools/version.sh)-${PRODUCT_REF//\//-}" >> "$GITHUB_OUTPUT"
             echo "channel=beta" >> "$GITHUB_OUTPUT"
           fi
           echo "product_sha=$(git -C changji rev-parse HEAD)" >> "$GITHUB_OUTPUT"
@@ -1076,11 +1088,9 @@ jobs:
             fi
             echo "| | |"
             echo "|---|---|"
-            echo "| Branch | \`${GITHUB_REF_NAME}\` |"
             # **Everything in this package — shell, web UI and engine — is
-            # built from the product repo** (see the meta job in release.yml).
-            # The branch above is this pipeline's; without this line the notes
-            # say "main" while the sources came from a feature branch.
+            # built from the product repo** (see the meta job in release.yml),
+            # so its branch is the one named here, not this pipeline's `main`.
             echo "| Built from | \`$PRODUCT_REF\` @ ${PRODUCT_SHA} |"
             echo "| Workflow commit | ${GITHUB_SHA} |"
             echo "| Built | $(date -u '+%Y-%m-%d %H:%M UTC') |"
@@ -1090,7 +1100,7 @@ jobs:
           PRE=""
           [ "$CHANNEL" = "beta" ] && PRE="--prerelease"
           TITLE="Desktop $VER"
-          [ "$CHANNEL" = "beta" ] && TITLE="Desktop beta (${GITHUB_REF_NAME})"
+          [ "$CHANNEL" = "beta" ] && TITLE="Desktop beta (${PRODUCT_REF})"
           gh release create "$TAG" \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \

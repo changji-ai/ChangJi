@@ -831,9 +831,16 @@ bool is_log_line(const std::string& l) {
                           // %TEMP%\changji-setup.log，给查问题的人看，不上界面。
                           "util::log("})
         if (l.find(c) != std::string::npos) return true;
-    // 同一个文件里（core/Util.cpp）不带命名空间直接调的那种：只认打头的。
-    const std::size_t head = l.find_first_not_of(" \t");
-    return head != std::string::npos && l.compare(head, 4, "log(") == 0;
+    // 同一个文件里（core/Util.cpp）不带命名空间直接调的那种。**不只认打头的**：
+    // `if (!ok) log(L"…")` 这种挂在 if 后面的也是日志（2026-09-25 CI 上红的就是
+    // 这三句）。前一个字符得是空白、`)`、`{`、`;` 或行首——`dialog(`、`catalog(`、
+    // `m.log(` 这种名字里带 log 的不算。
+    for (std::size_t p = l.find("log("); p != std::string::npos; p = l.find("log(", p + 1)) {
+        if (p == 0) return true;
+        const char b = l[p - 1];
+        if (b == ' ' || b == '\t' || b == ')' || b == '{' || b == ';') return true;
+    }
+    return false;
 }
 
 /// 不是界面、是构建机上跑的命令行小工具：打包工具、打包前跑的回归门禁。
@@ -855,7 +862,13 @@ TEST_CASE("多语言 · 界面上不许有没包起来的中文") {
         const std::string ext = e.path().extension().string();
         if (ext != ".qml" && ext != ".cpp" && ext != ".hpp") continue;
         if (is_build_tool(e.path())) continue;
-        const std::string t = no_comments(slurp(e.path()));
+        // ⚠️ **去掉 `\r` 再按行判**：Windows 上 autocrlf 检出的是 CRLF，而底下
+        // 靠「行尾是 `;`」结束一段日志。行尾成了 `\r`，一段日志就永远结束不了，
+        // 一个文件里出现过一次 `log(` 之后整个文件都被放过——2026-09-25 这条
+        // 守卫在 Linux/macOS 上红了两天，在 Windows 上一直是绿的。
+        // （不改 `slurp` 本身：`.qm` 是二进制，也走它读。）
+        std::string t = no_comments(slurp(e.path()));
+        t.erase(std::remove(t.begin(), t.end(), '\r'), t.end());
         // `say8(` / `sayw(`：安装器里不走 Qt 的那几句（installer/core/Words.h），
         // 查的是 words.inc 那张表——表齐不齐由下一条用例管。
         const auto spans = wrapped_spans(t, {"qsTr(", "tr(", "say8(", "sayw("});

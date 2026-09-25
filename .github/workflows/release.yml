@@ -2,10 +2,13 @@
 #
 # **Two roads; which one you take depends on what you pushed:**
 #
-#   a `v*` tag     → a proper Release, the tag is the version
-#                      git tag v1.2.0 && git push origin v1.2.0
-#   any branch     → a rolling prerelease, **always on the same `beta` tag**
-#   run by hand    → same, also beta
+#   a `ci-v*` tag  → a proper Release; the version is the tag minus `ci-`
+#                      (`ci-v2.3.0` → `v2.3.0`). **Push the same tag to the
+#                      product repo too** — that is where the sources come
+#                      from, and a tag it does not have fails the run:
+#                        git tag ci-v2.3.0 && git push origin ci-v2.3.0
+#   dispatched     → a rolling prerelease, **always on the same `beta` tag**
+#                      (from the product repo's push, or run by hand)
 #
 # The beta road is "last push wins": each run deletes the `beta` Release and
 # its tag and rebuilds them against this commit. So there is only ever one set
@@ -46,9 +49,16 @@
 name: Release
 
 on:
+  # ⚠️ **No branch pushes here (2026-09-25).** Since that date the sources live
+  # in the product repo (integemjack/changji), and a branch push to THIS repo
+  # paired by name: `main` here took the product repo's `main` — a different,
+  # stale line — and would have shipped it as beta over the good one. Beta
+  # builds come from the product repo's `触发打包.yml` dispatch, which always
+  # names the product ref. Tags stay: they are how a
+  # release is cut (`ci-v*`; the `ci-` keeps them apart from anything else
+  # named `v…`).
   push:
-    branches: ['**']
-    tags: ['v*']
+    tags: ['ci-v*']
   workflow_dispatch:
     inputs:
       product_ref:
@@ -159,6 +169,12 @@ jobs:
             ref="$WANT"
           elif has "$GITHUB_REF_NAME"; then
             ref="$GITHUB_REF_NAME"
+          elif [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            # **A release tag never falls back.** The product repo's default
+            # branch is not what was tagged, and shipping it as a release is
+            # the worst version of "built the wrong sources".
+            echo "::error::$REPO has no tag $GITHUB_REF_NAME — tag the same commit there too"
+            exit 1
           else
             echo "::notice::$REPO has no $GITHUB_REF_NAME; falling back to its default branch $default"
             ref="$default"
@@ -202,6 +218,7 @@ jobs:
         env:
           # Empty on a push event — only a manual run sets it.
           SKIP_GPU: ${{ inputs.skip_gpu }}
+          PRODUCT_REF: ${{ steps.pref.outputs.ref }}
         run: |
           # **The four GPU cells run by default**, for tags and branch pushes
           # alike: beta is what people actually try, and a CPU-only beta means
@@ -215,7 +232,10 @@ jobs:
             echo "gpu=true"  >> "$GITHUB_OUTPUT"
           fi
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
-            echo "version=${GITHUB_REF_NAME}"  >> "$GITHUB_OUTPUT"
+            # `ci-v2.3.0` → `v2.3.0`: what `changji --version` prints, and what
+            # the update check recognises as a release ("v, then only digits
+            # and dots").
+            echo "version=${GITHUB_REF_NAME#ci-}"  >> "$GITHUB_OUTPUT"
             echo "channel=release"             >> "$GITHUB_OUTPUT"
           else
             # **The version comes from the prefix in CMake** (decided
@@ -223,11 +243,12 @@ jobs:
             # changing the prefix restarts the count at 0. The rule and the
             # algorithm live in `cpp/tools/version.sh`.
             #
-            # The branch name is appended: the same commit may have been built
-            # on two branches, and whoever downloads it needs to tell them
-            # apart. Slashes become dashes — this ends up in a filename, and a
+            # The product repo's branch is appended (not this repo's — that is
+            # always `main` and says nothing about the sources): the same commit
+            # may have been built on two branches, and whoever downloads it needs
+            # to tell them apart. Slashes become dashes — this ends up in a filename, and a
             # slash in a filename bites eventually.
-            echo "version=$(sh changji/cpp/tools/version.sh)-${GITHUB_REF_NAME//\//-}" >> "$GITHUB_OUTPUT"
+            echo "version=$(sh changji/cpp/tools/version.sh)-${PRODUCT_REF//\//-}" >> "$GITHUB_OUTPUT"
             echo "channel=beta" >> "$GITHUB_OUTPUT"
           fi
           echo "product_sha=$(git -C changji rev-parse HEAD)" >> "$GITHUB_OUTPUT"
@@ -1609,7 +1630,7 @@ jobs:
       # program would have to page through the API and guess which is newest
       # (and `--generate-notes` output is not pleasant to parse either).
       #
-      # No version information is lost: the `v*` tag stays in git history, and
+      # No version information is lost: the `ci-v*` (earlier `v*`) tag stays in git history, and
       # both the Release title and the `version` field in `version.json` are
       # that tag.
       #
@@ -1712,14 +1733,13 @@ jobs:
           gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/beta" --silent \
             || echo "no leftover beta tag; skipping"
           {
-            echo "**Rolling prerelease.** Built from the last branch push; the next one overwrites it."
-            echo "For a stable build, look for a v-prefixed entry under [Releases](https://github.com/$GITHUB_REPOSITORY/releases)."
+            echo "**Rolling prerelease.** Built from the last push to the product repo; the next one overwrites it."
+            echo "For a stable build, look for the `release` entry under [Releases](https://github.com/$GITHUB_REPOSITORY/releases)."
             echo
             echo "| | |"
             echo "|---|---|"
-            echo "| Branch | \`${GITHUB_REF_NAME}\` |"
             # See the note in the stable step: the sources are the product
-            # repo's; the branch above only names this pipeline's.
+            # repo's, so that is the branch named here.
             echo "| Built from | \`$PRODUCT_REF\` @ ${PRODUCT_SHA} |"
             echo "| Workflow commit | ${GITHUB_SHA} |"
             echo "| Version | \`${{ needs.meta.outputs.version }}\` (what \`changji --version\` prints) |"
@@ -1739,6 +1759,6 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
             --prerelease \
-            --title "beta (${GITHUB_REF_NAME})" \
+            --title "beta (${PRODUCT_REF})" \
             --notes-file body.md \
             dist/*

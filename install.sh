@@ -11,7 +11,7 @@
 # ⚠️ **Since 2026-09-17 there is only one Release** (the user: "from now on
 # there is only one release too"): stable is always published on the fixed
 # `release` tag, deleted and rebuilt each time. The old
-# `CHANGJI_VERSION=v1.2.0` spelling no longer resolves to anything (the `v*`
+# `CHANGJI_VERSION=v1.2.0` spelling no longer resolves to anything (the `v*` and `ci-v*`
 # tags are still in git history, but they have no Release behind them). For
 # stable, leave it unset or say `release`. The single fixed Release is what
 # **automatic updates** need: update checking has to have one address that does
