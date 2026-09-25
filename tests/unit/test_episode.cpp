@@ -11,6 +11,7 @@
 #include <doctest/doctest.h>
 
 #include <chrono>
+#include <functional>
 #include <mutex>
 #include <thread>
 
@@ -120,6 +121,8 @@ struct Recorder {
     /// 出到第几个视频时请求取消。0 表示不取消。
     int cancel_at_video = 0;
     pipeline::CancelToken* tok = nullptr;
+    /// 每张首帧开跑时叫一下。用来在"一轮跑到一半"的时候从外面改项目。
+    std::function<void(const std::string&)> on_frame;
 
     static void write_stub(const fs::path& dest, const char* what) {
         std::error_code ec;
@@ -136,6 +139,7 @@ struct Recorder {
                 std::lock_guard<std::mutex> lg(mu);
                 calls.push_back({"frame", shot.shot_id, false});
             }
+            if (on_frame) on_frame(shot.shot_id);
             if (frame_delay_ms > 0) {
                 std::this_thread::sleep_for(
                     std::chrono::milliseconds(frame_delay_ms));
@@ -352,6 +356,91 @@ TEST_CASE("每个阶段跑完立刻存盘") {
     REQUIRE(first != nullptr);
     CHECK(first->status == models::ShotStatus::DRAFT_DONE);
     CHECK(first->video_path.has_value());
+}
+
+TEST_CASE("出片途中人改了同一章的镜头：存盘不把那一笔冲回去") {
+    // 2026-09-25 之前 episode.cpp 的 save() 上写着「同一章的镜头在跑的过程
+    // 中被人改了，仍然会被这一轮盖掉」：一轮开跑时读一份，之后每次存盘把这
+    // 一章的 shots 整格换成手里这份——出片途中在镜头页改的字幕、首帧提示词
+    // 全被冲回去，全程 200。
+    const auto store = make_store("中途改", 3);
+    Recorder rec;
+    rec.on_frame = [&](const std::string& id) {
+        if (id != "ep01_sh001") return;
+        // 就是 /api/shot 干的事：一把锁里读、改、存。
+        const auto guard = store.lock();
+        models::Project p = store.load_project();
+        models::Episode* ep = p.episode_by_id("ep01");
+        // 只改字幕：不动画面，状态不退
+        ep->shot_by_id("ep01_sh002")->subtitle_text = "人改过的字幕";
+        // 改首帧提示词：画面变了，/api/shot 会把它退回 PLANNED
+        models::Shot* s3 = ep->shot_by_id("ep01_sh003");
+        s3->first_frame_prompt = "人改过的首帧";
+        s3->status = models::ShotStatus::PLANNED;
+        s3->attempts = 0;
+        store.save_project(p);
+    };
+    pipeline::CancelToken tok;
+    pipeline::RunOptions opts;
+    opts.episode_id = "ep01";
+    opts.skip_final = true;
+
+    std::vector<nlohmann::json> msgs;
+    run_it(store, opts, rec, tok, &msgs);
+
+    const models::Episode ep = reload(store);
+    const models::Shot* s2 = ep.shot_by_id("ep01_sh002");
+    const models::Shot* s3 = ep.shot_by_id("ep01_sh003");
+    REQUIRE(s2 != nullptr);
+    REQUIRE(s3 != nullptr);
+    // 字幕留下了，出片的进度也留下了
+    CHECK(s2->subtitle_text == "人改过的字幕");
+    CHECK(s2->status == models::ShotStatus::DRAFT_DONE);
+    CHECK(s2->video_path.has_value());
+    // 首帧提示词留下了，而且**没被推回草稿完成**——手里那版片子是按旧
+    // 提示词出的，推回去就是把「这一镜要重出」那个意思抹掉
+    CHECK(s3->first_frame_prompt == "人改过的首帧");
+    CHECK(s3->status == models::ShotStatus::PLANNED);
+    // 没人碰的那一镜照常推进
+    CHECK(ep.shot_by_id("ep01_sh001")->status == models::ShotStatus::DRAFT_DONE);
+
+    // 说了一声是哪几镜
+    bool said = false;
+    for (const auto& m : msgs) {
+        const std::string text = m.dump();
+        if (text.find("ep01_sh002") != std::string::npos &&
+            text.find("ep01_sh003") != std::string::npos) {
+            said = true;
+        }
+    }
+    CHECK(said);
+}
+
+TEST_CASE("出片那一轮自己开跑时的归位不算别人改的") {
+    // 合并判"别人改过"是拿盘上的和"自己上一次写下去的"比。开跑时那几笔
+    // 归位（降级了却没视频的退回配音完成）是这一轮自己干的——基线要取在
+    // 归位之前，不然盘上那个 FALLBACK 会被当成人改的状态、钉死不动。
+    const auto store = make_store("归位基线", 2);
+    {
+        models::Project p = store.load_project();
+        models::Episode* ep = p.episode_by_id("ep01");
+        for (auto& s : ep->shots) {
+            s.status = models::ShotStatus::FALLBACK;
+            s.attempts = 3;
+        }
+        store.save_project(p);
+    }
+    Recorder rec;
+    pipeline::CancelToken tok;
+    pipeline::RunOptions opts;
+    opts.episode_id = "ep01";
+    opts.skip_final = true;
+    run_it(store, opts, rec, tok);
+
+    for (const auto& s : reload(store).shots) {
+        CAPTURE(s.shot_id);
+        CHECK(s.status == models::ShotStatus::DRAFT_DONE);
+    }
 }
 
 TEST_CASE("状态一路推到成片") {

@@ -1303,6 +1303,7 @@
     "one": "This round wanted %n shot and only %1 made it into the film. Left out:",
     "other": "This round wanted %n shots and only %1 made it into the film. Left out:"
   },
+  "这一轮跑的时候 %1 被改过，存的是改过的那份；改了画面的那几镜退回了待出，下次出片会重出": "%1 was edited while this run was going. The edited version was kept; shots whose picture was changed went back to waiting and will be rendered again next time",
   "这一问已经过去了": "That question has already passed",
   "这一项刚被改过，重新看一眼再点「信任」": "This entry was just changed. Take another look, then click “Trust”",
   "这一项检查自己出错了：%1": "This check itself failed: %1",

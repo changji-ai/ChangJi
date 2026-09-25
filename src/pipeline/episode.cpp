@@ -2,6 +2,7 @@
 #include "pipeline/episode.hpp"
 
 #include "pipeline/shot_flow.hpp"
+#include "pipeline/shot_merge.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -631,6 +632,10 @@ RunReport run_episode(const ProjectStore& store,
 
     progress.set_episode_id(opts.episode_id);
 
+    // 「自己上一次写下去的」从盘上这一刻算起——**在下面那几笔归位之前**，
+    // 那几笔是这一轮自己改的，不能被当成别人中途改的。见 save()。
+    ShotWriteBack writeback(ep->shots);
+
     // **开跑之前把「降级了却一个视频都没有」的那些归位。**
     //
     // `fallback` 的意思是"重试用尽，留最后那一版"，所以它算终态、下一轮
@@ -686,9 +691,12 @@ RunReport run_episode(const ProjectStore& store,
     // 这一轮真正拥有的只有这一章的 shots（状态、产出路径、重试次数、拆出
     // 来的新镜头、重排过的时长），所以只换这一格。
     //
-    // 同一章的镜头在跑的过程中被人改了，仍然会被这一轮盖掉——那是真冲突，
-    // 不在这儿解决。
+    // 同一章的镜头在跑的过程中被人改了（镜头页、对话里的 /api/shot）：
+    // 那几栏以人的为准，这一轮后面每次存盘都保持住，见 pipeline/shot_merge.hpp。
+    // 2026-09-25 之前这儿写着「仍然会被这一轮盖掉——那是真冲突，不在这儿
+    // 解决」，于是出片途中改的字幕、台词整笔冲回去，全程 200。
     bool gone_said = false;
+    std::vector<Shot> last_written;
     const auto save = [&] {
         // 读→换这一格→存，一把锁（ProjectStore::lock）：同一部片子别的对话
         // 在拆另一章的分镜，各读各存的话后存的那份把前一份冲回去。
@@ -707,7 +715,8 @@ RunReport run_episode(const ProjectStore& store,
             }
             return;
         }
-        target->shots = ep->shots;
+        target->shots = writeback.merge(ep->shots, target->shots);
+        last_written = target->shots;
         store.save_project(latest);
     };
 
@@ -1242,6 +1251,14 @@ RunReport run_episode(const ProjectStore& store,
                      SAY("没有 ffmpeg，跳过装配。各镜头的视频已经在 shots/ 下，"
                          "装好之后单跑 assemble 阶段即可"));
             } else {
+                // 装配读的是手里这份：先存一次，把中途被人改过的那几栏
+                // （字幕、转场、退回待出的状态）同步回来——不然改过的字幕
+                // 写进了盘，成片里烧的还是旧的。这时候前面几层都收完了，
+                // 没有谁还拿着指向这些镜头的指针。
+                save();
+                if (!writeback.edited().empty() && !last_written.empty()) {
+                    ep->shots = last_written;
+                }
                 report.output = assemble_episode(store, settings, *ep,
                                              *backends.ffmpeg, progress);
                 ran = true;   // 见末尾那句「全部跳过」
@@ -1271,6 +1288,18 @@ RunReport run_episode(const ProjectStore& store,
     } catch (const std::exception& e) {
         // 存不进去也要说，但不能盖掉真正的错误——所以是追加不是替换。
         report.errors.push_back(SAYF("存盘失败：%1", e.what()));
+    }
+
+    if (!writeback.edited().empty()) {
+        std::string ids;
+        for (const auto& id : writeback.edited()) {
+            if (!ids.empty()) ids += "、";
+            ids += id;
+        }
+        emit(progress, last_stage_name(opts), "info",
+             SAYF("这一轮跑的时候 %1 被改过，存的是改过的那份；"
+                  "改了画面的那几镜退回了待出，下次出片会重出",
+                  ids));
     }
 
     report.elapsed_s = now_seconds() - started;

@@ -1303,6 +1303,7 @@
     "one": "Esta rodada ia montar %n plano e só %1 entraram no filme. Ficaram de fora:",
     "other": "Esta rodada ia montar %n planos e só %1 entraram no filme. Ficaram de fora:"
   },
+  "这一轮跑的时候 %1 被改过，存的是改过的那份；改了画面的那几镜退回了待出，下次出片会重出": "%1 foi editado enquanto esta rodada rodava. A versão editada foi mantida; os planos cuja imagem mudou voltaram para \"aguardando\" e serão gerados de novo na próxima vez",
   "这一问已经过去了": "Essa pergunta já passou",
   "这一项刚被改过，重新看一眼再点「信任」": "Esta entrada acabou de mudar. Veja de novo e depois clique em “Confiar”",
   "这一项检查自己出错了：%1": "Esta verificação falhou sozinha: %1",

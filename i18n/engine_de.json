@@ -1303,6 +1303,7 @@
     "one": "Diese Runde wollte %n Shot zusammenbauen, und nur %1 sind in den Film gekommen. Draußen geblieben:",
     "other": "Diese Runde wollte %n Shots zusammenbauen, und nur %1 sind in den Film gekommen. Draußen geblieben:"
   },
+  "这一轮跑的时候 %1 被改过，存的是改过的那份；改了画面的那几镜退回了待出，下次出片会重出": "%1 wurde während dieses Durchlaufs bearbeitet. Die bearbeitete Fassung wurde gespeichert; Einstellungen mit geändertem Bild stehen wieder auf „wartend“ und werden beim nächsten Mal neu erzeugt",
   "这一问已经过去了": "Diese Frage ist schon vorbei",
   "这一项刚被改过，重新看一眼再点「信任」": "Dieser Eintrag wurde gerade geändert. Bitte noch einmal ansehen und dann „Vertrauen“ klicken",
   "这一项检查自己出错了：%1": "Diese Prüfung ist selbst fehlgeschlagen: %1",

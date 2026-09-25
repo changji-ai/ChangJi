@@ -1303,6 +1303,7 @@
     "one": "Ce tour devait monter %n plan et seuls %1 sont entrés dans le film. Laissés de côté :",
     "other": "Ce tour devait monter %n plans et seuls %1 sont entrés dans le film. Laissés de côté :"
   },
+  "这一轮跑的时候 %1 被改过，存的是改过的那份；改了画面的那几镜退回了待出，下次出片会重出": "%1 a été modifié pendant cette passe. La version modifiée a été conservée ; les plans dont l’image a changé sont repassés « en attente » et seront refaits la prochaine fois",
   "这一问已经过去了": "Cette question est déjà passée",
   "这一项刚被改过，重新看一眼再点「信任」": "Cette entrée vient d’être modifiée. Relisez-la, puis cliquez sur « Faire confiance »",
   "这一项检查自己出错了：%1": "Cette vérification a échoué d’elle-même : %1",
