@@ -109,6 +109,16 @@ char32_t utf8_codepoint(const std::string& ch);
 /// nlohmann 遇到非法 UTF-8 会抛异常，于是"报错"这件事本身又炸一次。
 std::string truncate_utf8(const std::string& s, std::size_t n);
 
+/// **从头上截**，只留最后不超过 `max_bytes` 个字节，而且落在字的边界上。
+/// 返回从头上一共去掉了多少字节（调用方要记偏移时用）。
+///
+/// 「留最近那一截」的几处（思考那一栏）原来写的是
+/// `s.erase(0, s.size() - max)`——按字节截，截口正好劈在一个汉字中间时，
+/// 留下来的那一截**开头是半个字**。那一截要进 JSON，nlohmann 当场抛
+/// `invalid UTF-8 byte at index 0`：2026-09-25 实撞，场记想了四分钟，存这一句
+/// 话时整轮以「出错了：[json.exception.type_error.316]」收场。
+std::size_t keep_tail_utf8(std::string& s, std::size_t max_bytes);
+
 /// SHA-1，返回小写十六进制。
 ///
 /// 只为 slug() 的退路存在。不引第三方库是因为整个项目就这一处用到摘要，

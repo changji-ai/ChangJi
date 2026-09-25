@@ -19,6 +19,9 @@
 #include "pipeline/activity.hpp"
 #include "pipeline/jobs.hpp"
 #include "pipeline/task_board.hpp"
+#include "util/text.hpp"
+
+#include <nlohmann/json.hpp>
 
 using changji::pipeline::Activity;
 using changji::pipeline::running_activities;
@@ -345,6 +348,30 @@ TEST_CASE("思考按段取：只给新增，断了一截要说得出来") {
     // 问一个比现在还靠后的位置（不该发生，但别让它回出负数长度的段）
     const auto d = pipeline::task_thinking(t.id(), b.end + 999);
     CHECK(d.text.empty());
+}
+
+TEST_CASE("思考超了上限从头上截：截口落在字的边界上，读回来是合法的 UTF-8") {
+    // 原来按字节截：六万多个汉字的思考，截口劈在一个字中间，留下来那一截开头是
+    // 半个字——/api/task/thinking 序列化时 nlohmann 当场抛（2026-09-25 对话那头
+    // 同一种截法撞上 `invalid UTF-8 byte at index 0`）。
+    const std::string proj = "/tmp/任务账本用例截口";
+    pipeline::Task t{"llm", "拆分镜", proj};
+    t.begin();
+    std::string chunk;
+    for (int i = 0; i < 1000; ++i) chunk += "想";   // 3000 字节一段
+    for (int i = 0; i < 67; ++i) t.append_thinking(chunk);   // 201000 字节：超了上限
+    t.append_thinking("x");                                 // 再挪一个字节，截口落进字里
+    const auto got = pipeline::task_thinking(t.id(), 0);
+    REQUIRE_FALSE(got.text.empty());
+    CHECK(got.text.rfind("想", 0) == 0);               // 开头是一整个字
+    CHECK_NOTHROW((void)nlohmann::json(got.text).dump());
+
+    std::string s = "ab想想";
+    CHECK(changji::text::keep_tail_utf8(s, 4) == 5);   // 留 4 个字节会劈开第一个「想」：挪到下一个字
+    CHECK(s == "想");
+    std::string short_one = "想";
+    CHECK(changji::text::keep_tail_utf8(short_one, 10) == 0);
+    CHECK(short_one == "想");
 }
 
 // ---------------------------------------------------------------------------

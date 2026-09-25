@@ -290,11 +290,9 @@ void Task::set_thinking(std::string a) { CHANGJI_TASK_MUTATE(row.thinking = std:
 void Task::append_thinking(const std::string& piece) {
     CHANGJI_TASK_MUTATE(
         row.thinking += piece;
-        if (row.thinking.size() > kThinkingKeep) {
-            const std::size_t cut = row.thinking.size() - kThinkingKeep;
-            row.thinking.erase(0, cut);
-            row.thinking_from += cut;
-        })
+        // 截口要落在字的边界上，不然留下来那一截开头是半个字，/api/task/thinking
+        // 序列化时当场抛（见 text::keep_tail_utf8）。
+        row.thinking_from += text::keep_tail_utf8(row.thinking, kThinkingKeep);)
 }
 void Task::set_output(std::string all) {
     // **截在锁外面**：一整份几千字，别攥着整本账的锁去拷。

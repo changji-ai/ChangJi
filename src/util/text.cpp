@@ -254,6 +254,15 @@ std::string truncate_utf8(const std::string& s, std::size_t n) {
     return s.substr(0, i);
 }
 
+std::size_t keep_tail_utf8(std::string& s, std::size_t max_bytes) {
+    if (s.size() <= max_bytes) return 0;
+    std::size_t cut = s.size() - max_bytes;
+    // 截口落在一个字的后半截上（10xxxxxx）：往后挪到下一个字的开头。
+    while (cut < s.size() && (static_cast<unsigned char>(s[cut]) & 0xC0) == 0x80) ++cut;
+    s.erase(0, cut);
+    return cut;
+}
+
 std::vector<std::string> utf8_chars(const std::string& s) {
     std::vector<std::string> out;
     std::size_t i = 0;
