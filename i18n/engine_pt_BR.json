@@ -1518,6 +1518,14 @@
     "one": ", e %n capítulo não deu para escrever (o motivo está na linha desse capítulo)",
     "other": ", e %n capítulos não deram para escrever (o motivo está na linha de cada capítulo)"
   },
+  "，另有 %n 章没出成分镜（原因在每一章那一行上）": {
+    "one": ", e %n capítulo não deu para decupar (o motivo está na linha desse capítulo)",
+    "other": ", e %n capítulos não deram para decupar (o motivo está na linha de cada capítulo)"
+  },
+  "，另有 %n 章没改编成剧本（原因在每一章那一行上）": {
+    "one": ", e %n capítulo não deu para adaptar em roteiro (o motivo está na linha desse capítulo)",
+    "other": ", e %n capítulos não deram para adaptar em roteiro (o motivo está na linha de cada capítulo)"
+  },
   "，失败 %1 个": ", falharam: %1",
   "，粗估 %1": ", mais ou menos %1",
   "：%1": ": %1",

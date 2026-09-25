@@ -3000,6 +3000,14 @@ TEST_CASE("批量写剧本：判据和「理解故事」那一条是同一份") 
         REQUIRE(r.body.value("started", false));
         CHECK(r.body.at("episodes") == json::array({"ep01"}));
         pipeline::jobs().wait_idle();
+
+        // **唯一那一章砸了：任务算出错，不是「出完了 1 章的分镜」。**
+        // 2026-09-25 实撞：大模型那头断了线，任务照样报做完了、error 是空的，
+        // 人和场记都以为那一章重拆过了（见 batch.cpp 的 finish_batch）。
+        const json snap = pipeline::jobs().snapshot(pipeline::JobKind::Write);
+        CAPTURE(snap.dump());
+        CHECK_FALSE(snap.value("error", std::string()).empty());
+        CHECK(snap.value("error", std::string()).find("ep01") != std::string::npos);
         std::error_code ec;
         fs::remove_all(root, ec);
     }

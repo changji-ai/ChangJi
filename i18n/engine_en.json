@@ -1518,6 +1518,14 @@
     "one": ", and %n chapter could not be written (the reason is on that chapter’s row)",
     "other": ", and %n chapters could not be written (the reason is on each chapter’s row)"
   },
+  "，另有 %n 章没出成分镜（原因在每一章那一行上）": {
+    "one": ", and %n chapter did not get a shot list (the reason is on that chapter’s row)",
+    "other": ", and %n chapters did not get a shot list (the reason is on each chapter’s row)"
+  },
+  "，另有 %n 章没改编成剧本（原因在每一章那一行上）": {
+    "one": ", and %n chapter could not be adapted into a script (the reason is on that chapter’s row)",
+    "other": ", and %n chapters could not be adapted into scripts (the reason is on each chapter’s row)"
+  },
   "，失败 %1 个": ", failed: %1",
   "，粗估 %1": ", roughly %1",
   "：%1": ": %1",

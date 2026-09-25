@@ -110,6 +110,22 @@ void keep_only(std::vector<std::string>& todo, const std::vector<std::string>& o
                todo.end());
 }
 
+/// 一批收尾那一句。**数的是真做成的**，砸了的另说一句；**一章都没做成就记成
+/// 出错**——任务那一行是红的、场记收到的是出错，不是一句「做完了」。
+///
+/// 2026-09-25 实撞：批量补分镜只有一章，那一章拆到一半大模型那头断了线，任务
+/// 照样报「出完了 1 章的分镜」、error 是空的——人和场记都以为那一章重拆过了。
+/// 改编剧本那一批更糟：砸了的连记都不记。写正文那一批 2026-09-22 修过一半
+/// （成的砸的分开数了，可全砸了照样不算出错）。四批收在这一处。
+void finish_batch(pipeline::JobProgress& p, int ok, int failed, const std::string& ok_line,
+                  const std::string& fail_tail, const std::string& first_error) {
+    if (failed > 0 && ok == 0) {
+        p.set_error(first_error.empty() ? ok_line + fail_tail : first_error);
+        return;
+    }
+    p.set_message(failed > 0 ? ok_line + fail_tail : ok_line);
+}
+
 /// **这一道上**是不是已经有一件在写。
 ///
 /// 原来判的是"全机器有没有一件在写"，于是 A 片子在写正文，B 片子的对话
@@ -293,6 +309,7 @@ ApiResult post_story_chapters(const json& body,
             // **三个数，三件事**：`done` 是走完了几章（进度条），`wrote` 是真写成了几章（最后那句总结），`failed` 是砸了几章。
             int wrote = 0;
             int failed = 0;
+            std::string first_error;   // 全砸了的时候报它，见 finish_batch
             for (const auto& id : todo) {
                 if (p.cancelled()) return;
 
@@ -316,6 +333,9 @@ ApiResult post_story_chapters(const json& body,
                     req = chapter_request(cur, id, style);
                 } catch (const std::exception& e) {
                     p.add_episode(json{{"chapter_id", id}, {"error", e.what()}});
+                    // 这也是没写成（原来不算进 failed，收尾那句漏了它）。
+                    ++failed;
+                    if (first_error.empty()) first_error = SAYF("%1：%2", id, e.what());
                     p.set_done(++done);
                     continue;
                 }
@@ -520,6 +540,9 @@ ApiResult post_story_chapters(const json& body,
                     // 任务条上却写着「写完了 1 章」，而 error 是空的。
                     // 每一章的原因确实记在上面那张表里，可人先看见的是那一句。
                     ++failed;
+                    if (first_error.empty()) {
+                        first_error = SAYF("%1：%2", id, SAYF("%1（重试过两次）", last_error));
+                    }
                     p.set_done(++done);
                     if (last_hopeless) {
                         p.set_error(stopped_because(
@@ -546,11 +569,10 @@ ApiResult post_story_chapters(const json& body,
                 ++wrote;
                 p.set_done(++done);
             }
-            // **数的是真写成的那几章。** 砸了的单说一句，别混进来。
-            std::string sum = SAYN("写完了 %n 章", wrote);
-            if (failed > 0) sum += SAYN("，另有 %n 章没写成（原因在每一章那一行上）",
-                                        failed);
-            p.set_message(sum);
+            // **数的是真写成的那几章。** 砸了的单说一句，别混进来；全砸了算出错。
+            finish_batch(p, wrote, failed, SAYN("写完了 %n 章", wrote),
+                         SAYN("，另有 %n 章没写成（原因在每一章那一行上）", failed),
+                         first_error);
         },
         // **不是 `kWriteStoppedMessage`。** 那是写作槽的兜底，眼下和这一条
         // 同字——同字是巧合，展开的是章**正文**、不是剧本，两件事分开放
@@ -611,6 +633,10 @@ ApiResult post_script_series(const json& body,
             }
 
             int done = 0;
+            // 真写成几章、砸了几章，分开数（见 finish_batch）。
+            int ok = 0;
+            int failed = 0;
+            std::string first_error;
             for (int i = 0; i < episodes; ++i) {
                 if (p.cancelled()) return;
 
@@ -671,6 +697,8 @@ ApiResult post_script_series(const json& body,
                     // 一章写砸了不该让前面几章白写，记下来接着往下写。
                     // episode_id 留空——这一章根本没建出来。
                     p.add_episode(json{{"episode_id", ""}, {"error", e.what()}});
+                    ++failed;
+                    if (first_error.empty()) first_error = e.what();
                     p.set_done(++done);
                     // **配错了就别再试**，见 hopeless。
                     if (hopeless(e)) {
@@ -709,9 +737,12 @@ ApiResult post_script_series(const json& body,
                     {"speakers", draft.speakers()},
                     {"dialogue_chars", draft.dialogue_chars()},
                 });
+                ++ok;
                 p.set_done(++done);
             }
-            p.set_message(SAYN("写完了 %n 章", done));
+            finish_batch(p, ok, failed, SAYN("写完了 %n 章", ok),
+                         SAYN("，另有 %n 章没写成（原因在每一章那一行上）", failed),
+                         first_error);
         },
         // 收在 `pipeline/jobs.hpp`：那边改了措辞，这儿跟着走。
         pipeline::kScriptSeriesStoppedMessage,
@@ -901,6 +932,17 @@ ApiResult post_script_all(const json& body, std::shared_ptr<llm::Client> client)
             const JobScope scope{
                 p.job_id(), p.token()};
             int done = 0;
+            // 真改编成几章、砸了几章，分开数（见 finish_batch）。原来砸了的连记都
+            // 不记：catch 里什么都不做、拿不到剧本就 continue，全砸了任务照样是
+            // 「做完了」。
+            int ok = 0;
+            int failed = 0;
+            std::string first_error;
+            const auto fail = [&](const std::string& episode_id, const std::string& why) {
+                p.add_episode(json{{"episode_id", episode_id}, {"error", why}});
+                ++failed;
+                if (first_error.empty()) first_error = SAYF("%1：%2", episode_id, why);
+            };
             for (const std::string& episode_id : todo) {
                 if (p.cancelled()) return;
                 p.set_message(SAYF("正在改编 %1", episode_id));
@@ -912,9 +954,15 @@ ApiResult post_script_all(const json& body, std::shared_ptr<llm::Client> client)
                     // 老路线那一支要这个键才不报"缺 premise"；章模式用不上。
                     req["premise"] = "";
                     const ApiResult wrote = post_script_write(req, *client, tok);
-                    if (wrote.status != 200 || !wrote.body.is_object()) continue;
-                    const auto sit = wrote.body.find("script");
-                    if (sit == wrote.body.end() || !sit->is_string()) continue;
+                    const auto sit = wrote.body.is_object() ? wrote.body.find("script")
+                                                            : wrote.body.end();
+                    if (wrote.status != 200 || sit == wrote.body.end() || !sit->is_string()) {
+                        fail(episode_id, wrote.body.is_object()
+                                             ? wrote.body.value("detail", std::to_string(wrote.status))
+                                             : std::to_string(wrote.status));
+                        p.set_done(++done);
+                        continue;
+                    }
 
                     json save = json::object();
                     save["project"] = root;
@@ -925,12 +973,18 @@ ApiResult post_script_all(const json& body, std::shared_ptr<llm::Client> client)
                         save["synopsis"] = *lit;
                     }
                     post_script(save, *client, tok);
-                } catch (const std::exception&) {
-                    // **一章砸了不拖垮整批。** 后面那几章照跑，跑完人回来看
-                    // 哪几章还是空的——和 post_plan_all 那条一个做法。
+                    ++ok;
+                } catch (const std::exception& e) {
+                    // **一章砸了不拖垮整批。** 后面那几章照跑——和 post_plan_all
+                    // 那条一个做法。**但要记下来**，收尾那句照实说。
+                    if (p.cancelled()) return;
+                    fail(episode_id, e.what());
                 }
                 p.set_done(++done);
             }
+            finish_batch(p, ok, failed, SAYN("写完了 %n 章", ok),
+                         SAYN("，另有 %n 章没改编成剧本（原因在每一章那一行上）", failed),
+                         first_error);
         },
         // 收在 `pipeline/jobs.hpp`，和另外两件写作活各是一条。
         pipeline::kScriptAllStoppedMessage, root,
@@ -1378,6 +1432,10 @@ ApiResult post_plan_all(const json& body, std::shared_ptr<llm::Client> client) {
             const JobScope scope{p.job_id(),
                                  p.token()};
             int done = 0;
+            // 真出成几章、砸了几章，分开数（见 finish_batch）。
+            int ok = 0;
+            int failed = 0;
+            std::string first_error;
             for (const std::string& episode_id : todo) {
                 if (p.cancelled()) return;
                 p.set_message(SAYF("正在给 %1 出分镜", episode_id));
@@ -1463,8 +1521,11 @@ ApiResult post_plan_all(const json& body, std::shared_ptr<llm::Client> client) {
                 } catch (const std::exception& e) {
                     // 一章出错不拖垮后面几章。跑一晚上，早上发现第二章挂了
                     // 导致后面十章都没动，那这一晚上就白熬了。
+                    if (p.cancelled()) return;
                     p.add_episode(
                         json{{"episode_id", episode_id}, {"error", e.what()}});
+                    ++failed;
+                    if (first_error.empty()) first_error = SAYF("%1：%2", episode_id, e.what());
                     p.set_done(++done);
                     // **配错了就别再试**，见 hopeless：2026-09-17 就是这儿
                     // 连着报了五章一模一样的 401。
@@ -1482,9 +1543,12 @@ ApiResult post_plan_all(const json& body, std::shared_ptr<llm::Client> client) {
                                    {"title", ep->title},
                                    {"shots", ep->shots.size()},
                                    {"duration_s", round1(total)}});
+                ++ok;
                 p.set_done(++done);
             }
-            p.set_message(SAYN("出完了 %n 章的分镜", done));
+            finish_batch(p, ok, failed, SAYN("出完了 %n 章的分镜", ok),
+                         SAYN("，另有 %n 章没出成分镜（原因在每一章那一行上）", failed),
+                         first_error);
         },
         SAY("已手动停止。已经出好的分镜留着。"),
         paths::to_utf8(store.root()),

@@ -1432,6 +1432,8 @@ inline const std::vector<Table>& all_tables() {
             {"选中的范围不对：这一章有 %n 个字，而选的是 [%1, %2)", {{"المدى المحدَّد غير صحيح: في هذا الفصل لا أحرف، والمحدَّد [%1, %2)", "المدى المحدَّد غير صحيح: في هذا الفصل حرف واحد، والمحدَّد [%1, %2)", "المدى المحدَّد غير صحيح: في هذا الفصل حرفان، والمحدَّد [%1, %2)", "المدى المحدَّد غير صحيح: في هذا الفصل %n أحرف، والمحدَّد [%1, %2)", "المدى المحدَّد غير صحيح: في هذا الفصل %n حرفًا، والمحدَّد [%1, %2)", "المدى المحدَّد غير صحيح: في هذا الفصل %n حرف، والمحدَّد [%1, %2)"}}},
             {"闸门检查 %n 个镜头，通过 %1 个", {{"لم تفحص البوابة أي لقطة، واجتاز منها %1", "فحصت البوابة لقطة واحدة، واجتاز منها %1", "فحصت البوابة لقطتين، واجتاز منها %1", "فحصت البوابة %n لقطات، واجتاز منها %1", "فحصت البوابة %n لقطة، واجتاز منها %1", "فحصت البوابة %n لقطة، واجتاز منها %1"}}},
             {"，另有 %n 章没写成（原因在每一章那一行上）", {{"، ولم يتعذّر أي فصل", "، وتعذّر كتابة فصل واحد (السبب في سطر ذلك الفصل)", "، وتعذّرت كتابة فصلين (السبب في سطر كل فصل)", "، وتعذّرت كتابة %n فصول (السبب في سطر كل فصل)", "، وتعذّرت كتابة %n فصلًا (السبب في سطر كل فصل)", "، وتعذّرت كتابة %n فصل (السبب في سطر كل فصل)"}}},
+            {"，另有 %n 章没出成分镜（原因在每一章那一行上）", {{"، ولم يتعذّر أي فصل", "، وتعذّر إعداد قائمة لقطات فصل واحد (السبب في سطر ذلك الفصل)", "، وتعذّر إعداد قوائم لقطات فصلين (السبب في سطر كل فصل)", "، وتعذّر إعداد قوائم لقطات %n فصول (السبب في سطر كل فصل)", "، وتعذّر إعداد قوائم لقطات %n فصلًا (السبب في سطر كل فصل)", "، وتعذّر إعداد قوائم لقطات %n فصل (السبب في سطر كل فصل)"}}},
+            {"，另有 %n 章没改编成剧本（原因在每一章那一行上）", {{"، ولم يتعذّر أي فصل", "، وتعذّر تحويل فصل واحد إلى سيناريو (السبب في سطر ذلك الفصل)", "، وتعذّر تحويل فصلين إلى سيناريو (السبب في سطر كل فصل)", "، وتعذّر تحويل %n فصول إلى سيناريو (السبب في سطر كل فصل)", "، وتعذّر تحويل %n فصلًا إلى سيناريو (السبب في سطر كل فصل)", "، وتعذّر تحويل %n فصل إلى سيناريو (السبب في سطر كل فصل)"}}},
         } },
         { "de", {
             {"\n\n===== 第 %1/%2 场 =====\n\n", "\n\n===== Szene %1 von %2 =====\n\n"},
@@ -2849,6 +2851,8 @@ inline const std::vector<Table>& all_tables() {
             {"选中的范围不对：这一章有 %n 个字，而选的是 [%1, %2)", {{"", "der gewählte Bereich passt nicht: dieses Kapitel hat %n Zeichen, gewählt ist [%1, %2)", "", "", "", "der gewählte Bereich passt nicht: dieses Kapitel hat %n Zeichen, gewählt ist [%1, %2)"}}},
             {"闸门检查 %n 个镜头，通过 %1 个", {{"", "Das Gate hat %n Shot geprüft, %1 ist durch", "", "", "", "Das Gate hat %n Shots geprüft, %1 sind durch"}}},
             {"，另有 %n 章没写成（原因在每一章那一行上）", {{"", ", und %n Kapitel ließ sich nicht schreiben (der Grund steht in der Zeile dieses Kapitels)", "", "", "", ", und %n Kapitel ließen sich nicht schreiben (der Grund steht in der Zeile des jeweiligen Kapitels)"}}},
+            {"，另有 %n 章没出成分镜（原因在每一章那一行上）", {{"", ", und für %n Kapitel ließ sich keine Shotliste erstellen (der Grund steht in der Zeile dieses Kapitels)", "", "", "", ", und für %n Kapitel ließ sich keine Shotliste erstellen (der Grund steht in der Zeile des jeweiligen Kapitels)"}}},
+            {"，另有 %n 章没改编成剧本（原因在每一章那一行上）", {{"", ", und %n Kapitel ließ sich nicht zum Drehbuch umarbeiten (der Grund steht in der Zeile dieses Kapitels)", "", "", "", ", und %n Kapitel ließen sich nicht zum Drehbuch umarbeiten (der Grund steht in der Zeile des jeweiligen Kapitels)"}}},
         } },
         { "en", {
             {"\n\n===== 第 %1/%2 场 =====\n\n", "\n\n===== Scene %1 of %2 =====\n\n"},
@@ -4266,6 +4270,8 @@ inline const std::vector<Table>& all_tables() {
             {"选中的范围不对：这一章有 %n 个字，而选的是 [%1, %2)", {{"", "the selected range is wrong: this chapter has %n character, and the selection is [%1, %2)", "", "", "", "the selected range is wrong: this chapter has %n characters, and the selection is [%1, %2)"}}},
             {"闸门检查 %n 个镜头，通过 %1 个", {{"", "Gate checked %n shot, %1 passed", "", "", "", "Gate checked %n shots, %1 passed"}}},
             {"，另有 %n 章没写成（原因在每一章那一行上）", {{"", ", and %n chapter could not be written (the reason is on that chapter’s row)", "", "", "", ", and %n chapters could not be written (the reason is on each chapter’s row)"}}},
+            {"，另有 %n 章没出成分镜（原因在每一章那一行上）", {{"", ", and %n chapter did not get a shot list (the reason is on that chapter’s row)", "", "", "", ", and %n chapters did not get a shot list (the reason is on each chapter’s row)"}}},
+            {"，另有 %n 章没改编成剧本（原因在每一章那一行上）", {{"", ", and %n chapter could not be adapted into a script (the reason is on that chapter’s row)", "", "", "", ", and %n chapters could not be adapted into scripts (the reason is on each chapter’s row)"}}},
         } },
         { "es", {
             {"\n\n===== 第 %1/%2 场 =====\n\n", "\n\n===== Escena %1 de %2 =====\n\n"},
@@ -5683,6 +5689,8 @@ inline const std::vector<Table>& all_tables() {
             {"选中的范围不对：这一章有 %n 个字，而选的是 [%1, %2)", {{"", "el rango seleccionado no cuadra: este capítulo tiene %n carácter y la selección es [%1, %2)", "", "", "", "el rango seleccionado no cuadra: este capítulo tiene %n caracteres y la selección es [%1, %2)"}}},
             {"闸门检查 %n 个镜头，通过 %1 个", {{"", "El control revisó %n plano y pasó %1", "", "", "", "El control revisó %n planos y pasaron %1"}}},
             {"，另有 %n 章没写成（原因在每一章那一行上）", {{"", ", y %n capítulo no se pudo escribir (el motivo está en la fila de ese capítulo)", "", "", "", ", y %n capítulos no se pudieron escribir (el motivo está en la fila de cada capítulo)"}}},
+            {"，另有 %n 章没出成分镜（原因在每一章那一行上）", {{"", ", y %n capítulo no se pudo desglosar (el motivo está en la fila de ese capítulo)", "", "", "", ", y %n capítulos no se pudieron desglosar (el motivo está en la fila de cada capítulo)"}}},
+            {"，另有 %n 章没改编成剧本（原因在每一章那一行上）", {{"", ", y %n capítulo no se pudo adaptar a guion (el motivo está en la fila de ese capítulo)", "", "", "", ", y %n capítulos no se pudieron adaptar a guion (el motivo está en la fila de cada capítulo)"}}},
         } },
         { "fr", {
             {"\n\n===== 第 %1/%2 场 =====\n\n", "\n\n===== Scène %1 sur %2 =====\n\n"},
@@ -7100,6 +7108,8 @@ inline const std::vector<Table>& all_tables() {
             {"选中的范围不对：这一章有 %n 个字，而选的是 [%1, %2)", {{"", "la plage sélectionnée ne va pas : ce chapitre fait %n caractère et la sélection est [%1, %2)", "", "", "", "la plage sélectionnée ne va pas : ce chapitre fait %n caractères et la sélection est [%1, %2)"}}},
             {"闸门检查 %n 个镜头，通过 %1 个", {{"", "Le contrôle a examiné %n plan, %1 est passé", "", "", "", "Le contrôle a examiné %n plans, %1 sont passés"}}},
             {"，另有 %n 章没写成（原因在每一章那一行上）", {{"", ", et %n chapitre n’a pas pu être écrit (la raison est sur la ligne de ce chapitre)", "", "", "", ", et %n chapitres n’ont pas pu être écrits (la raison est sur la ligne de chaque chapitre)"}}},
+            {"，另有 %n 章没出成分镜（原因在每一章那一行上）", {{"", ", et %n chapitre n’a pas pu être découpé (la raison est sur la ligne de ce chapitre)", "", "", "", ", et %n chapitres n’ont pas pu être découpés (la raison est sur la ligne de chaque chapitre)"}}},
+            {"，另有 %n 章没改编成剧本（原因在每一章那一行上）", {{"", ", et %n chapitre n’a pas pu être adapté en scénario (la raison est sur la ligne de ce chapitre)", "", "", "", ", et %n chapitres n’ont pas pu être adaptés en scénario (la raison est sur la ligne de chaque chapitre)"}}},
         } },
         { "hi", {
             {"\n\n===== 第 %1/%2 场 =====\n\n", "\n\n===== %2 में से %1वाँ दृश्य =====\n\n"},
@@ -8517,6 +8527,8 @@ inline const std::vector<Table>& all_tables() {
             {"选中的范围不对：这一章有 %n 个字，而选的是 [%1, %2)", {{"", "चुनी हुई सीमा ठीक नहीं है: इस अध्याय में %n अक्षर है, और चुना गया है [%1, %2)", "", "", "", "चुनी हुई सीमा ठीक नहीं है: इस अध्याय में %n अक्षर हैं, और चुना गया है [%1, %2)"}}},
             {"闸门检查 %n 个镜头，通过 %1 个", {{"", "जाँच ने %n शॉट देखा, %1 पास हुए", "", "", "", "जाँच ने %n शॉट देखे, %1 पास हुए"}}},
             {"，另有 %n 章没写成（原因在每一章那一行上）", {{"", ", और %n अध्याय नहीं लिखा जा सका (कारण उस अध्याय की पंक्ति में है)", "", "", "", ", और %n अध्याय नहीं लिखे जा सके (कारण हर अध्याय की पंक्ति में है)"}}},
+            {"，另有 %n 章没出成分镜（原因在每一章那一行上）", {{"", ", और %n अध्याय की शॉट लिस्ट नहीं बन सकी (कारण उस अध्याय की पंक्ति में है)", "", "", "", ", और %n अध्यायों की शॉट लिस्ट नहीं बन सकी (कारण हर अध्याय की पंक्ति में है)"}}},
+            {"，另有 %n 章没改编成剧本（原因在每一章那一行上）", {{"", ", और %n अध्याय की पटकथा नहीं बन सकी (कारण उस अध्याय की पंक्ति में है)", "", "", "", ", और %n अध्यायों की पटकथा नहीं बन सकी (कारण हर अध्याय की पंक्ति में है)"}}},
         } },
         { "ja", {
             {"\n\n===== 第 %1/%2 场 =====\n\n", "\n\n===== %2 場中 %1 場目 =====\n\n"},
@@ -9934,6 +9946,8 @@ inline const std::vector<Table>& all_tables() {
             {"选中的范围不对：这一章有 %n 个字，而选的是 [%1, %2)", {{"", "", "", "", "", "選択範囲が違います：この章は %n 文字で、選択は [%1, %2) です"}}},
             {"闸门检查 %n 个镜头，通过 %1 个", {{"", "", "", "", "", "ゲートで %n ショットを検査し、%1 ショットが通過"}}},
             {"，另有 %n 章没写成（原因在每一章那一行上）", {{"", "", "", "", "", "、うち %n 章は書けませんでした（理由は各章の行にあります）"}}},
+            {"，另有 %n 章没出成分镜（原因在每一章那一行上）", {{"", "", "", "", "", "、うち %n 章は絵コンテができませんでした（理由は各章の行にあります）"}}},
+            {"，另有 %n 章没改编成剧本（原因在每一章那一行上）", {{"", "", "", "", "", "、うち %n 章は脚本にできませんでした（理由は各章の行にあります）"}}},
         } },
         { "ko", {
             {"\n\n===== 第 %1/%2 场 =====\n\n", "\n\n===== %2개 중 %1번째 장면 =====\n\n"},
@@ -11351,6 +11365,8 @@ inline const std::vector<Table>& all_tables() {
             {"选中的范围不对：这一章有 %n 个字，而选的是 [%1, %2)", {{"", "", "", "", "", "선택한 범위가 맞지 않습니다: 이 장은 %n 자인데 선택은 [%1, %2) 입니다"}}},
             {"闸门检查 %n 个镜头，通过 %1 个", {{"", "", "", "", "", "게이트에서 %n 컷을 검사해 %1 컷 통과"}}},
             {"，另有 %n 章没写成（原因在每一章那一行上）", {{"", "", "", "", "", ", 그중 %n 개 장은 쓰지 못했습니다 (이유는 각 장의 줄에 있습니다)"}}},
+            {"，另有 %n 章没出成分镜（原因在每一章那一行上）", {{"", "", "", "", "", ", 그중 %n 개 장은 콘티를 만들지 못했습니다 (이유는 각 장의 줄에 있습니다)"}}},
+            {"，另有 %n 章没改编成剧本（原因在每一章那一行上）", {{"", "", "", "", "", ", 그중 %n 개 장은 각본으로 옮기지 못했습니다 (이유는 각 장의 줄에 있습니다)"}}},
         } },
         { "pt_BR", {
             {"\n\n===== 第 %1/%2 场 =====\n\n", "\n\n===== Cena %1 de %2 =====\n\n"},
@@ -12768,6 +12784,8 @@ inline const std::vector<Table>& all_tables() {
             {"选中的范围不对：这一章有 %n 个字，而选的是 [%1, %2)", {{"", "a faixa selecionada não bate: este capítulo tem %n caractere e a seleção é [%1, %2)", "", "", "", "a faixa selecionada não bate: este capítulo tem %n caracteres e a seleção é [%1, %2)"}}},
             {"闸门检查 %n 个镜头，通过 %1 个", {{"", "O controle checou %n plano e %1 passou", "", "", "", "O controle checou %n planos e %1 passaram"}}},
             {"，另有 %n 章没写成（原因在每一章那一行上）", {{"", ", e %n capítulo não deu para escrever (o motivo está na linha desse capítulo)", "", "", "", ", e %n capítulos não deram para escrever (o motivo está na linha de cada capítulo)"}}},
+            {"，另有 %n 章没出成分镜（原因在每一章那一行上）", {{"", ", e %n capítulo não deu para decupar (o motivo está na linha desse capítulo)", "", "", "", ", e %n capítulos não deram para decupar (o motivo está na linha de cada capítulo)"}}},
+            {"，另有 %n 章没改编成剧本（原因在每一章那一行上）", {{"", ", e %n capítulo não deu para adaptar em roteiro (o motivo está na linha desse capítulo)", "", "", "", ", e %n capítulos não deram para adaptar em roteiro (o motivo está na linha de cada capítulo)"}}},
         } },
         { "ru", {
             {"\n\n===== 第 %1/%2 场 =====\n\n", "\n\n===== Сцена %1 из %2 =====\n\n"},
@@ -14185,6 +14203,8 @@ inline const std::vector<Table>& all_tables() {
             {"选中的范围不对：这一章有 %n 个字，而选的是 [%1, %2)", {{"", "выбранный отрезок не подходит: в этой главе %n знак, а выбрано [%1, %2)", "", "выбранный отрезок не подходит: в этой главе %n знака, а выбрано [%1, %2)", "выбранный отрезок не подходит: в этой главе %n знаков, а выбрано [%1, %2)", ""}}},
             {"闸门检查 %n 个镜头，通过 %1 个", {{"", "Ворота проверили %n кадр, прошёл %1", "", "Ворота проверили %n кадра, прошли %1", "Ворота проверили %n кадров, прошли %1", ""}}},
             {"，另有 %n 章没写成（原因在每一章那一行上）", {{"", ", и %n главу написать не удалось (причина — в строке этой главы)", "", ", и %n главы написать не удалось (причина — в строке каждой главы)", ", и %n глав написать не удалось (причина — в строке каждой главы)", ""}}},
+            {"，另有 %n 章没出成分镜（原因在每一章那一行上）", {{"", ", и для %n главы раскадровку сделать не удалось (причина — в строке этой главы)", "", ", и для %n глав раскадровку сделать не удалось (причина — в строке каждой главы)", ", и для %n глав раскадровку сделать не удалось (причина — в строке каждой главы)", ""}}},
+            {"，另有 %n 章没改编成剧本（原因在每一章那一行上）", {{"", ", и %n главу переложить в сценарий не удалось (причина — в строке этой главы)", "", ", и %n главы переложить в сценарий не удалось (причина — в строке каждой главы)", ", и %n глав переложить в сценарий не удалось (причина — в строке каждой главы)", ""}}},
         } },
         { "zh_TW", {
             {"\n\n===== 第 %1/%2 场 =====\n\n", "\n\n===== 第 %1/%2 場 =====\n\n"},
@@ -15602,6 +15622,8 @@ inline const std::vector<Table>& all_tables() {
             {"选中的范围不对：这一章有 %n 个字，而选的是 [%1, %2)", {{"", "", "", "", "", "選中的範圍不對：這一章有 %n 個字，而選的是 [%1, %2)"}}},
             {"闸门检查 %n 个镜头，通过 %1 个", {{"", "", "", "", "", "閘門檢查 %n 個鏡頭，通過 %1 個"}}},
             {"，另有 %n 章没写成（原因在每一章那一行上）", {{"", "", "", "", "", "，另有 %n 章沒寫成（原因在每一章那一行上）"}}},
+            {"，另有 %n 章没出成分镜（原因在每一章那一行上）", {{"", "", "", "", "", "，另有 %n 章沒出成分鏡（原因在每一章那一行上）"}}},
+            {"，另有 %n 章没改编成剧本（原因在每一章那一行上）", {{"", "", "", "", "", "，另有 %n 章沒改編成劇本（原因在每一章那一行上）"}}},
         } },
     };
     return t;

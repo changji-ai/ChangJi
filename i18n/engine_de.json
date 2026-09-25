@@ -1518,6 +1518,14 @@
     "one": ", und %n Kapitel ließ sich nicht schreiben (der Grund steht in der Zeile dieses Kapitels)",
     "other": ", und %n Kapitel ließen sich nicht schreiben (der Grund steht in der Zeile des jeweiligen Kapitels)"
   },
+  "，另有 %n 章没出成分镜（原因在每一章那一行上）": {
+    "one": ", und für %n Kapitel ließ sich keine Shotliste erstellen (der Grund steht in der Zeile dieses Kapitels)",
+    "other": ", und für %n Kapitel ließ sich keine Shotliste erstellen (der Grund steht in der Zeile des jeweiligen Kapitels)"
+  },
+  "，另有 %n 章没改编成剧本（原因在每一章那一行上）": {
+    "one": ", und %n Kapitel ließ sich nicht zum Drehbuch umarbeiten (der Grund steht in der Zeile dieses Kapitels)",
+    "other": ", und %n Kapitel ließen sich nicht zum Drehbuch umarbeiten (der Grund steht in der Zeile des jeweiligen Kapitels)"
+  },
   "，失败 %1 个": ", fehlgeschlagen: %1",
   "，粗估 %1": ", grob %1",
   "：%1": ": %1",

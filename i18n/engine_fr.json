@@ -1518,6 +1518,14 @@
     "one": ", et %n chapitre n’a pas pu être écrit (la raison est sur la ligne de ce chapitre)",
     "other": ", et %n chapitres n’ont pas pu être écrits (la raison est sur la ligne de chaque chapitre)"
   },
+  "，另有 %n 章没出成分镜（原因在每一章那一行上）": {
+    "one": ", et %n chapitre n’a pas pu être découpé (la raison est sur la ligne de ce chapitre)",
+    "other": ", et %n chapitres n’ont pas pu être découpés (la raison est sur la ligne de chaque chapitre)"
+  },
+  "，另有 %n 章没改编成剧本（原因在每一章那一行上）": {
+    "one": ", et %n chapitre n’a pas pu être adapté en scénario (la raison est sur la ligne de ce chapitre)",
+    "other": ", et %n chapitres n’ont pas pu être adaptés en scénario (la raison est sur la ligne de chaque chapitre)"
+  },
   "，失败 %1 个": ", échecs : %1",
   "，粗估 %1": ", environ %1",
   "：%1": " : %1",
