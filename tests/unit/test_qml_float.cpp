@@ -112,7 +112,9 @@ TEST_CASE("桌面端的 QML：挂在身子外面的牌子必须是 Floater") {
     // 2026-09-25 再从 4 降到 3：设置页「能力」那颗灰牌子底下自己画的那块
     //「为什么灰」换成了自带的 ToolTip（它在 overlay 层，本来就不挂在谁身上），
     // 少的这一块也是真没了。
-    REQUIRE_MESSAGE(checked >= 3,
+    // 同一天又从 3 降到 1：标题栏图标条那块牌子、回话底下那一排的牌子也换成了
+    // 自带的 ToolTip（Rail.qml / FootKey.qml），这两块同样是真没了。
+    REQUIRE_MESSAGE(checked >= 1,
                     "只找着 " << checked << " 块挂在身子外面的——这条用例八成是自己不认路了");
 
     for (const auto& b : bare) {
@@ -136,10 +138,16 @@ TEST_CASE("桌面端的 QML：回话底下那一排的牌子挂在上面") {
     std::ifstream in(f);
     REQUIRE_MESSAGE(in.good(), "读不到 " << f.string());
 
+    // 2026-09-25 起那块牌子是自带的 ToolTip（在 overlay 层，不受剪），位置写成
+    // `y:`：往上是 `y: -height …`，往下会是 `y: root.height …` / `parent.height`。
+    // 原来那种 anchors 挂法也一并认，换回去的时候这条照样管用。
     bool up = false, down = false;
     for (std::string l; std::getline(in, l);) {
-        if (has(l, "anchors.bottom: parent.top")) up = true;
-        if (has(l, "anchors.top: parent.bottom")) down = true;
+        if (has(l, "anchors.bottom: parent.top") || has(l, "y: -height")) up = true;
+        if (has(l, "anchors.top: parent.bottom") || has(l, "y: root.height") ||
+            has(l, "y: parent.height")) {
+            down = true;
+        }
     }
     CHECK_MESSAGE(up, "牌子没挂在上面——最后一条回话上它会被对话栏整块剪掉");
     CHECK_MESSAGE(!down, "牌子挂到底下去了——最后一条回话上它会被对话栏整块剪掉");
