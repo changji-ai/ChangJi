@@ -828,8 +828,24 @@ std::vector<std::string> episodes_missing_shots(const Project& project,
 /// 章模式和老路线还分岔（见 post_script_write）。这儿原样调它，出来的稿子
 /// 直接存（post_script）——批量就是"我不逐篇看了"，没有草稿态。
 ApiResult post_script_all(const json& body, std::shared_ptr<llm::Client> client) {
-    forbid_extra(body, {"project", "overwrite"});
+    forbid_extra(body, {"project", "overwrite", "episodes"});
     const bool overwrite = opt_bool(body, "overwrite", false);
+    // **只做这几章**（可选）。2026-09-25 之前没有这一栏：人对场记说「把第一章
+    // 的剧本重写一遍」，场记手上没有一件能只重写一章的工具，挑了「理解故事」
+    // ——那一件不重写已有的剧本，跑了二十分钟拆的是旧剧本的分镜，嘴上却说
+    // 「逐章重写剧本」。给了这一栏再配 overwrite，就是「重写这几章」。
+    std::vector<std::string> only;
+    if (const auto it = body.find("episodes"); it != body.end() && !it->is_null()) {
+        if (!it->is_array()) {
+            throw unprocessable_top("episodes", "Input should be a valid list", *it,
+                                    "list_type");
+        }
+        for (const auto& e : *it) {
+            if (e.is_string() && !e.get<std::string>().empty()) {
+                only.push_back(e.get<std::string>());
+            }
+        }
+    }
 
     if (lane_busy(body)) {
         throw ApiError(409, SAY("剧本那边还在忙"));
@@ -839,8 +855,16 @@ ApiResult post_script_all(const json& body, std::shared_ptr<llm::Client> client)
     const Story story = story_or_empty(store);
 
     // 挑哪几章：`script_missing` 那一条，和「理解故事」用的是同一份。
-    const std::vector<std::string> todo =
+    std::vector<std::string> todo =
         episodes_missing_script(project, story, overwrite);
+    if (!only.empty()) {
+        todo.erase(std::remove_if(todo.begin(), todo.end(),
+                                  [&](const std::string& id) {
+                                      return std::find(only.begin(), only.end(), id) ==
+                                             only.end();
+                                  }),
+                   todo.end());
+    }
     // **"没有要做的"不是错。**
     //
     // 这两颗批量按钮的用法就是"隔一阵按一下，把新写的章补上"，而按下去

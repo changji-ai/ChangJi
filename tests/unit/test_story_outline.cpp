@@ -2953,6 +2953,38 @@ TEST_CASE("批量写剧本：判据和「理解故事」那一条是同一份") 
         std::error_code ec;
         fs::remove_all(root, ec);
     }
+
+    SUBCASE("只重写一章：episodes + overwrite") {
+        // 2026-09-25：人对场记说「把第一章的剧本重写一遍」，场记手上没有一件能只
+        // 重写一章的工具，挑了「理解故事」——那一件不重写已有剧本，跑了二十分钟。
+        const fs::path root = understood_project("只重写一章", true, false);
+        auto client = std::make_shared<llm::ReplayClient>(
+            std::vector<std::string>{"这不是 JSON"});
+        const auto r = http::post_script_all(
+            json{{"project", p_str(root)}, {"overwrite", true},
+                 {"episodes", json::array({"ep01"})}},
+            client);
+        REQUIRE(r.status == 202);
+        CHECK(r.body.at("episodes") == json::array({"ep01"}));
+        pipeline::jobs().wait_idle();
+
+        // 不认的章就是没活干，不是把别的章捎上
+        auto idle = std::make_shared<llm::ReplayClient>(std::vector<std::string>{});
+        const auto none = http::post_script_all(
+            json{{"project", p_str(root)}, {"overwrite", true},
+                 {"episodes", json::array({"ep99"})}},
+            idle);
+        CHECK(none.status == 200);
+        CHECK(none.body.at("started") == false);
+        CHECK(idle->calls().empty());
+
+        // 形状不对是 422，不是悄悄当成「全部」
+        CHECK_THROWS_AS(http::post_script_all(
+                            json{{"project", p_str(root)}, {"episodes", "ep01"}}, idle),
+                        http::ApiError);
+        std::error_code ec;
+        fs::remove_all(root, ec);
+    }
 }
 
 TEST_CASE("POST /api/story/from_web：写好只换这一章") {
