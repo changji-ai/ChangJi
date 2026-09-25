@@ -9,13 +9,35 @@
 
 namespace changji::setup {
 
-std::string version_json_url(const config::UpdateConfig& cfg) {
-    const std::string repo =
-        cfg.repo.empty() ? std::string("integemjack/changji") : cfg.repo;
-    const std::string ch =
-        cfg.channel == "beta" ? std::string("beta") : std::string("release");
-    return "https://github.com/" + repo + "/releases/download/" + ch +
-           "/version.json";
+namespace {
+
+/// 发布在哪个仓库。**空就用默认那个**（配置里写了空串也不该拼出一个坏地址）。
+std::string repo_of(const config::UpdateConfig& cfg) {
+    return cfg.repo.empty() ? config::UpdateConfig{}.repo : cfg.repo;
+}
+
+/// 是不是打 tag 出来的正式版：`v` 后面只有数和点（`v2.3`、`v2.3.1`）。
+bool is_release_version(const std::string& v) {
+    if (v.size() < 2 || v[0] != 'v') return false;
+    bool digit = false;
+    for (std::size_t i = 1; i < v.size(); ++i) {
+        const char c = v[i];
+        if (c >= '0' && c <= '9') digit = true;
+        else if (c != '.') return false;
+    }
+    return digit;
+}
+
+}  // namespace
+
+std::string update_channel(const config::UpdateConfig& cfg, const std::string& current) {
+    if (!cfg.channel.empty()) return cfg.channel == "beta" ? "beta" : "release";
+    return is_release_version(text::strip_ws(current)) ? "release" : "beta";
+}
+
+std::string version_json_url(const config::UpdateConfig& cfg, const std::string& current) {
+    return "https://github.com/" + repo_of(cfg) + "/releases/download/" +
+           update_channel(cfg, current) + "/version.json";
 }
 
 bool is_different_version(const std::string& current,
@@ -32,16 +54,16 @@ UpdateInfo check_update(const config::UpdateConfig& cfg,
                         const std::string& current, const Fetch& fetch) {
     UpdateInfo out;
     out.current = text::strip_ws(current);
-    out.url = "https://github.com/" +
-              (cfg.repo.empty() ? std::string("integemjack/changji") : cfg.repo) +
-              "/releases/" + (cfg.channel == "beta" ? "tag/beta" : "tag/release");
+    out.url = "https://github.com/" + repo_of(cfg) + "/releases/tag/" +
+              update_channel(cfg, current);
     if (!fetch) {
         out.error = SAY("没法发请求");
         return out;
     }
-    const std::string body = fetch(version_json_url(cfg));
+    const std::string where = version_json_url(cfg, current);
+    const std::string body = fetch(where);
     if (body.empty()) {
-        out.error = SAYF("取不到版本信息（%1）", version_json_url(cfg));
+        out.error = SAYF("取不到版本信息（%1）", where);
         return out;
     }
     const auto js = nlohmann::json::parse(body, nullptr, /*allow_exceptions=*/false);

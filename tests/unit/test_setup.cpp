@@ -775,18 +775,26 @@ TEST_CASE("开机自启：开了关了都读得回来") {
 TEST_CASE("更新检查：地址固定、判据是「一不一样」") {
     config::UpdateConfig cfg;
     CHECK(cfg.auto_check);              // 不默认开等于这件事没有
-    CHECK(cfg.channel == "release");
+    // **公开的那个仓库**。2026-09-25 之前默认是私有的 integemjack/changji，
+    // 不带口令连首页都 404——这条检查从来没成功过一次。
+    CHECK(cfg.repo == "changji-ai/ChangJi");
+    // 没配线 = 跟着手上这一版走（见下一条用例）。
+    CHECK(cfg.channel.empty());
 
     // 地址里那两个字**就是发布那头固定的 tag 名**，不做映射——多一层映射就
     // 多一个会对不上的地方。
-    CHECK(setup::version_json_url(cfg) ==
-          "https://github.com/integemjack/changji/releases/download/release/version.json");
+    CHECK(setup::version_json_url(cfg, "v2.3.1") ==
+          "https://github.com/changji-ai/ChangJi/releases/download/release/version.json");
     cfg.channel = "beta";
-    CHECK(setup::version_json_url(cfg).find("/download/beta/version.json") !=
-          std::string::npos);
+    CHECK(setup::version_json_url(cfg, "v2.3.1").find("/download/beta/version.json") !=
+          std::string::npos);   // 配了就听配的
     cfg.channel = "乱写的";
     CHECK(setup::version_json_url(cfg).find("/download/release/") !=
           std::string::npos);   // 认不出就回正式线
+    cfg.channel.clear();
+    cfg.repo.clear();
+    CHECK(setup::version_json_url(cfg, "v2.3").find("changji-ai/ChangJi") !=
+          std::string::npos);   // 配了个空串也别拼出坏地址
 
     // ⚠️ **不做语义化版本比较，只比一不一样。** 这套东西的版本号有两种形状
     // （`v1.2.0` 和 `beta-<分支>-<短 sha>`），后一种根本没有先后可言；而发布
@@ -798,6 +806,32 @@ TEST_CASE("更新检查：地址固定、判据是「一不一样」") {
     // 人点过去发现下不到。
     CHECK_FALSE(setup::is_different_version("", "v1.2.0"));
     CHECK_FALSE(setup::is_different_version("v1.2.0", ""));
+}
+
+TEST_CASE("更新检查：没配线就跟着手上这一版走") {
+    // 判据和 release.yml 定版本号那段是同一条：打 tag 出来的正式版版本号就是
+    // tag；分支上出的是 beta，`<前缀>-<提交数>-<分支>`。2026-09-25 之前默认死跟
+    // release，而发布那头还没有过一次 release——人手上的全是 beta，人人点「现在
+    // 查一次」都是「取不到版本信息」。
+    const config::UpdateConfig cfg;
+    CHECK(setup::update_channel(cfg, "v2.3") == "release");
+    CHECK(setup::update_channel(cfg, "v2.3.1") == "release");
+    CHECK(setup::update_channel(cfg, " v2.3.1\n") == "release");
+    CHECK(setup::update_channel(cfg, "v2.2-35-main") == "beta");
+    CHECK(setup::update_channel(cfg, "v2.2-35-v2.2-desktop") == "beta");
+    CHECK(setup::update_channel(cfg, "v2.2-local-cuda") == "beta");   // 本机编的
+    CHECK(setup::update_channel(cfg, "") == "beta");
+    CHECK(setup::update_channel(cfg, "v") == "beta");
+
+    // 查的那一下和给人的那个链接跟着同一条线。
+    std::string asked;
+    const auto info = setup::check_update(cfg, "v2.2-35-main", [&](const std::string& u) {
+        asked = u;
+        return std::string(R"({"version":"v2.2-36-main"})");
+    });
+    CHECK(asked.find("/download/beta/version.json") != std::string::npos);
+    CHECK(info.url.find("/releases/tag/beta") != std::string::npos);
+    CHECK(info.newer);
 }
 
 TEST_CASE("更新检查：取不到、回的不是 JSON、缺字段，三种都不报假的新版") {

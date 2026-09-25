@@ -1231,14 +1231,23 @@ struct UpdateConfig {
     /// 起服务时和之后每隔一阵去问一次。**默认开**：不开的话这件事等于没有
     /// ——没人会想起来手动点检查。
     bool auto_check = true;
-    /// 跟哪条线：`release`（默认）或 `beta`。
+    /// 跟哪条线：`release` 或 `beta`；**空（默认）= 跟着手上这一版走**
+    /// （见 `setup::update_channel`：打 tag 出来的正式版跟 release，分支上出的
+    /// 跟 beta）。
     ///
     /// 这两个字就是发布那头固定的 tag 名（见 .github/workflows/release.yml
     /// 里那段「以后 release 也只有一个」），所以拼地址时直接用它，不做映射
     /// ——多一层映射就多一个会对不上的地方。
-    std::string channel = "release";
+    ///
+    /// ⚠️ 2026-09-25 之前默认写死 `release`：可发布那头**还没有过一次 release**，
+    /// 人手上的全是 beta，于是人人点「现在查一次」都是「取不到版本信息」。
+    std::string channel;
     /// 去哪个仓库取。换了发布地址的人要能改。
-    std::string repo = "integemjack/changji";
+    ///
+    /// ⚠️ **是引擎那个公开的仓库**（release.yml 在那儿跑、发在那儿）。
+    /// 2026-09-25 之前默认是 `integemjack/changji`——那是个私有仓库，不带口令
+    /// 连首页都是 404，所以这条检查**从来没有成功过一次**。
+    std::string repo = "changji-ai/ChangJi";
     /// 隔多久问一次。默认一天；0 = 只在起服务时问一次。
     double every_hours = 24.0;
 };

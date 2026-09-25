@@ -864,7 +864,8 @@ void run(const config::Settings& settings, const Options& opts) {
                      {"newer", info.newer},
                      {"url", info.url},
                      {"built_at", info.built_at},
-                     {"channel", cfg.channel},
+                     // 实际跟的那条（没配就是按手上这一版定的），不是配置里那个空串。
+                     {"channel", setup::update_channel(cfg, CHANGJI_VERSION)},
                      {"auto_check", cfg.auto_check},
                      {"error", info.error}}};
         });
