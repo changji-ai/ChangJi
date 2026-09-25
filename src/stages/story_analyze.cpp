@@ -142,6 +142,16 @@ const ordered& analyze_schema() {
         props["genre"] = outline.at("properties").at("genre");
         props["tone"] = outline.at("properties").at("tone");
         props["characters"] = outline.at("properties").at("characters");
+        // **形状一样，收谁不一样。** 出大纲是在编故事，三到五个人正好；这儿是
+        // 读**已经写好的正文**，里面说过话的人一个都不能漏——名单之外的人说的话，
+        // 写剧本时 speaker 只能挑名单里的名字，就挂到了别人头上。2026-09-25 实测：
+        // 营门哨兵六句台词没被收进来，剧本里全记成了女主说的，配音就会是她的声音。
+        props["characters"]["description"] =
+            "正文里所有说过话的人：主要人物、配角，还有有台词的小角色（哨兵、店员、"
+            "司机）也要登记——没名字的按身份起名（「哨兵」）。没登记的人说的话，"
+            "后面没人认领。只在叙述里提到、一句话没说的人不用登记。";
+        props["characters"]["minItems"] = 1;
+        props["characters"]["maxItems"] = 12;
         props["relations"] = outline.at("properties").at("relations");
         props["locations"] = outline.at("properties").at("locations");
 

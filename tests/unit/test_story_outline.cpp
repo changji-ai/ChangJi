@@ -1925,9 +1925,10 @@ TEST_CASE("人物表里要有「他说话什么样」") {
     };
     CHECK(pos("fear") == pos("want") + 1);
 
-    // 读故事那一步用的是同一份人物块，两边不一致的话每个消费者都要分支
-    CHECK(changji::stages::analyze_schema().at("properties").at("characters") ==
-          outline_schema().at("properties").at("characters"));
+    // 读故事那一步用的是同一份人物块（每一个人的**形状**），两边不一致的话每个
+    // 消费者都要分支。收几个人不一样（见下面那条），所以只比 items。
+    CHECK(changji::stages::analyze_schema().at("properties").at("characters").at("items") ==
+          outline_schema().at("properties").at("characters").at("items"));
 }
 
 TEST_CASE("schema：每一章都要说清抖出什么") {
@@ -1959,7 +1960,12 @@ TEST_CASE("schema：人物那三块和大纲那份长一样") {
     const auto& a = changji::stages::analyze_schema().at("properties");
     const auto& o = outline_schema().at("properties");
     // 下游认的是同一个形状，两边不一致的话每个消费者都要分支
-    CHECK(a.at("characters") == o.at("characters"));
+    CHECK(a.at("characters").at("items") == o.at("characters").at("items"));
+    // **收谁不一样**：出大纲是在编，三到五个人；读已经写好的正文，说过话的人
+    // 一个都不能漏（2026-09-25 营门哨兵六句台词没收进来，剧本全记成了女主说的）。
+    CHECK(a.at("characters").at("maxItems").get<int>() > o.at("characters").at("maxItems").get<int>());
+    CHECK(a.at("characters").at("description").get<std::string>().find("说过话") !=
+          std::string::npos);
     CHECK(a.at("relations") == o.at("relations"));
     CHECK(a.at("locations") == o.at("locations"));
     // 章名不给模型改——那是作者自己写的

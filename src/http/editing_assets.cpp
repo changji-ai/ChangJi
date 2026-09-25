@@ -13,6 +13,7 @@
 #include "models/project.hpp"
 #include "util/paths.hpp"
 #include "util/say.hpp"
+#include "util/text.hpp"
 
 using json = nlohmann::json;
 
@@ -163,6 +164,50 @@ ApiResult post_character(const json& body) {
     const int reset =
         (touched && want_reset(body, true)) ? reset_shots_with_character(store, char_id) : 0;
     return {200, {{"saved", true}, {"rendered", rendered}, {"reset_shots", reset}}};
+}
+
+ApiResult post_character_add(const json& body) {
+    static const std::set<std::string> kAllowed = {
+        "project", "name", "identity", "body", "face", "attire",
+    };
+    reject_extra(body, kAllowed);
+    const std::string project_path = need_str(body, "project");
+    if (project_path.empty()) throw ApiError(400, SAY("没有指定项目目录"));
+    ProjectStore store(paths::from_utf8(project_path));
+    const auto store_guard = store.lock();   // 读→改→存一把锁
+
+    const std::string name = text::strip_ws(need_str(body, "name"));
+    if (name.empty()) throw ApiError(400, SAY("角色名不能是空的"));
+    AssetLibrary assets = store.load_assets();
+    for (const auto& [id, c] : assets.characters) {
+        if (c.name == name) throw ApiError(409, SAYF("已经有叫「%1」的角色了（%2）", name, id));
+    }
+
+    Character c;
+    c.name = name;
+    c.char_id = "c_" + text::slug(name);
+    // id 撞了（两个名字 slug 到一处）就加个号。
+    for (int n = 2; assets.characters.count(c.char_id); ++n) {
+        c.char_id = "c_" + text::slug(name) + "_" + std::to_string(n);
+    }
+    const auto field = [&](const char* k) {
+        return body.contains(k) && body.at(k).is_string() ? text::strip_ws(body.at(k).get<std::string>())
+                                                          : std::string();
+    };
+    c.appearance.identity = field("identity");
+    c.appearance.body = field("body");
+    c.appearance.face = field("face");
+    c.appearance.attire = field("attire");
+    std::vector<std::string> errs;
+    c.validate(errs);
+    if (!errs.empty()) throw ApiError(400, SAYF("改动不合法：%1", errs.front()));
+
+    const std::string id = c.char_id;
+    const std::string rendered = c.render_prompt(assets.style.style_line);
+    assets.characters[id] = std::move(c);
+    store.save_assets(assets);
+    // 新来的人还没进任何一镜，不退镜头。
+    return {200, {{"saved", true}, {"char_id", id}, {"rendered", rendered}}};
 }
 
 ApiResult post_location(const json& body) {

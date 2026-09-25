@@ -111,6 +111,36 @@ TEST_CASE("改一个角色、一个场景：只退用到它的那几镜") {
     fs::remove_all(root, ec);
 }
 
+TEST_CASE("加一个角色：有台词的小角色补得进名单，同名的拒收") {
+    // 读正文那一步只收主要人物：营门哨兵六句台词，剧本里全记成了女主说的。
+    const fs::path root = fresh_copy("加角色");
+    models::ProjectStore store(root);
+    const json ok = {{"project", paths::to_utf8(root)}, {"name", "哨兵"},
+                     {"identity", "二十岁上下的新兵，上岗第三天"},
+                     {"body", "偏瘦，站桩时两个肘架得偏高"},
+                     {"face", "寸头，脸晒得发红，眉毛淡"},
+                     {"attire", "作训服，枪背在肩上"}};
+    const auto r = http::guard([&] { return http::post_character_add(ok); });
+    REQUIRE(r.status == 200);
+    const std::string id = r.body.at("char_id").get<std::string>();
+    CHECK(id.rfind("c_", 0) == 0);
+    const auto lib = store.load_assets();
+    REQUIRE(lib.characters.count(id) == 1);
+    CHECK(lib.characters.at(id).name == "哨兵");
+    CHECK(lib.characters.at(id).appearance.attire == "作训服，枪背在肩上");
+
+    // 同一个人登记两遍：镜头引用哪个说不清，拒收
+    CHECK(http::guard([&] { return http::post_character_add(ok); }).status == 409);
+    // 外观缺一段：引擎那头的校验照旧拦
+    json bad = ok;
+    bad["name"] = "店员";
+    bad["face"] = "";
+    CHECK(http::guard([&] { return http::post_character_add(bad); }).status == 400);
+
+    std::error_code ec;
+    fs::remove_all(root, ec);
+}
+
 TEST_CASE("资产编辑接口与 Python 逐条对拍") {
     const json g = load_golden("endpoints_asset_edit");
     int idx = 0;

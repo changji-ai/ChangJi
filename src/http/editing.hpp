@@ -36,6 +36,19 @@ ApiResult post_shot(const nlohmann::json& body);
 /// 把未锁定的镜头退回未开工。改音色之类的不触发。
 ApiResult post_character(const nlohmann::json& body);
 
+/// POST /api/character/add —— 加一个角色。
+/// body: {project, name, identity, body, face, attire}
+///
+/// **为什么要有**：人物是读正文时一次提出来的，那一步只收主要人物和重要配角。
+/// 有台词的小角色（哨兵、店员）不在名单上，写剧本时 speaker 只能挑名单里的人，
+/// 他的话就挂到了别人头上（2026-09-25 实测：哨兵六句台词全记成了女主说的）。
+/// 那时候名单已经定了，「理解故事」见各章剧本都在就不重跑——人手、场记手上都
+/// 没有补一个人的路。
+///
+/// 名字重了是 409（同一个人登记两遍，镜头引用哪个说不清）。回包里 `char_id`
+/// 是新的那一个，按名字生成（`c_` + slug，中文名走 slug 的散列退路）。
+ApiResult post_character_add(const nlohmann::json& body);
+
 /// POST /api/location —— 改场景。
 /// body: {project, location_id, patch: {...}, reset_shots: bool = true}
 ApiResult post_location(const nlohmann::json& body);
