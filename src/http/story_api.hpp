@@ -83,6 +83,18 @@ ApiResult post_story_adopt(const nlohmann::json& body);
 /// 「落成章节」要重跑，界面上要把这句说出来。没有这个 id 是 404。
 ApiResult post_story_chapter_delete(const nlohmann::json& body);
 
+/// POST /api/story/chapter/edit —— 改一章的标题、梗概、反转、伏笔。
+/// body: {project, chapter_id, title?, summary?, reveal?, plant?}
+///
+/// **不碰大模型，正文一个字不动。** 2026-09-25 之前改一章的标题只有一条路：
+/// 让模型把整份大纲重写一遍——三章正文被顶掉、标题也由模型重新起。人说
+/// 「把第二章标题改成风起时」，场记想了十分钟，最后只能说「这个改不了」。
+///
+/// 回包里 `changed` 是真变了的那几栏（原样再填一遍不算）。标题跟着落到
+/// 那一章的章节记录上（sync_episodes_to_chapters），梗概也是——章节记录里
+/// 那一句摘要原来只在空着时补，这儿是人明说要改的，照改。
+ApiResult post_story_chapter_edit(const nlohmann::json& body);
+
 /// POST /api/story/plan —— 按每章时长重算章节计划。
 ApiResult post_story_plan(const nlohmann::json& body);
 

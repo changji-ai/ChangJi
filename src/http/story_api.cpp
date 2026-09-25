@@ -755,6 +755,70 @@ ApiResult post_story_chapter_delete(const json& body) {
     return {200, std::move(out)};
 }
 
+ApiResult post_story_chapter_edit(const json& body) {
+    forbid_extra(body, {"project", "chapter_id", "title", "summary", "reveal", "plant"});
+    ProjectStore store = open_project(body);
+    // 读→改→存在一把锁里，理由同上。
+    const auto guard = store.lock();
+    load_or_400(store);
+    const std::string chapter_id = opt_str(body, "chapter_id", "");
+    if (chapter_id.empty()) {
+        throw unprocessable_top("chapter_id", "Field required", body, "missing");
+    }
+    Story story = load_story_or_400(store);
+    const auto it = std::find_if(story.chapters.begin(), story.chapters.end(),
+                                 [&](const Chapter& c) { return c.chapter_id == chapter_id; });
+    if (it == story.chapters.end()) throw ApiError(404, SAYF("没有章节 %1", chapter_id));
+
+    // 四栏的上限和大纲那边落库时一样量级：标题一行，其余三五句。
+    struct Field {
+        const char* key;
+        std::string Chapter::*slot;
+        std::size_t max_chars;
+    };
+    static const Field kFields[] = {
+        {"title", &Chapter::title, 60},
+        {"summary", &Chapter::summary, 2000},
+        {"reveal", &Chapter::reveal, 600},
+        {"plant", &Chapter::plant, 600},
+    };
+    json changed = json::array();
+    for (const Field& f : kFields) {
+        if (!body.contains(f.key)) continue;
+        std::string v = text::truncate_utf8(text::strip_ws(need_str(body, f.key)), f.max_chars);
+        // **标题不许清空**：章节表、下拉、成片清单全拿它当名字，空了那一行
+        // 就只剩一个 ch02。别的三栏空着不算错（粘贴导入的故事本来就没有）。
+        if (f.slot == &Chapter::title && v.empty()) {
+            throw ApiError(400, SAY("章节标题不能是空的"));
+        }
+        if ((*it).*f.slot == v) continue;
+        (*it).*f.slot = std::move(v);
+        changed.push_back(f.key);
+    }
+
+    if (!changed.empty()) {
+        validate_or_400(story);
+        store.save_story(story);
+        sync_episodes_to_chapters(store, story);
+        // 章节记录里那句摘要平时只在空着时补（见 sync_episodes_to_chapters），
+        // 人明说要改梗概时照改，不然项目页上挂的还是旧的那句。
+        if (std::find(changed.begin(), changed.end(), "summary") != changed.end()) {
+            Project project = load_or_400(store);
+            const std::size_t i = static_cast<std::size_t>(it - story.chapters.begin());
+            if (Episode* ep = project.episode_by_id(
+                    stages::episode_id_for_chapter(chapter_id, i))) {
+                ep->synopsis = text::truncate_utf8(text::collapse_ws(it->summary), 120);
+                store.save_project(project);
+            }
+        }
+    }
+
+    json out = story_response(story);
+    out["chapter_id"] = chapter_id;
+    out["changed"] = std::move(changed);
+    return {200, std::move(out)};
+}
+
 ApiResult post_story_adopt(const json& body) {
     forbid_extra(body, {"project", "story", "overwrite"});
     ProjectStore store = open_project(body);

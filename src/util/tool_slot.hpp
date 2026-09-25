@@ -28,7 +28,7 @@ namespace changji::util {
 inline std::string slot_of_tool(std::string_view name) {
     // 故事
     if (name == "story_read" || name == "story_outline" ||
-        name == "story_write_chapters") {
+        name == "story_write_chapters" || name == "chapter_edit") {
         return "story";
     }
     // 设定（人物场景的参考图）
@@ -77,7 +77,7 @@ inline std::string episode_of_args(std::string_view args) {
 /// 只对**有格**的工具有意义（没格的东西没有"那一格"可改）。
 inline bool tool_rewrites(std::string_view name) {
     return name == "story_outline" || name == "story_write_chapters" ||
-           name == "script_write_all" || name == "storyboard_plan_all" ||
+           name == "chapter_edit" || name == "script_write_all" || name == "storyboard_plan_all" ||
            name == "shot_edit" || name == "refs_make" ||
            name == "assets_set_reference" || name == "assets_understand" ||
            name == "render_run" || name == "film_join";

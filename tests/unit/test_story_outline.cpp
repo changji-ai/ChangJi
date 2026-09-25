@@ -665,6 +665,69 @@ TEST_CASE("POST /api/story/adopt：会顶掉写好的正文时要拦一下") {
     fs::remove_all(root, ec);
 }
 
+TEST_CASE("POST /api/story/chapter/edit：只改标题和梗概，正文一个字不动") {
+    // 2026-09-25 之前改一章的标题只有「整份大纲重写」一条路：人说「把第二章
+    // 标题改成风起时」，场记想了十分钟，最后说「这个改不了」。
+    const fs::path root = fresh_project("改章名");
+    ProjectStore store(root);
+    Story s;
+    s.premise = "梗概";
+    for (const char* id : {"ch01", "ch02"}) {
+        Chapter c;
+        c.chapter_id = id;
+        c.title = std::string("旧标题") + id;
+        c.summary = "旧梗概";
+        c.text = "这一章已经有正文了。";
+        s.chapters.push_back(c);
+    }
+    store.save_story(s);
+    http::sync_episodes_to_chapters(store, s);
+
+    const auto r = http::post_story_chapter_edit(
+        json{{"project", p_str(root)}, {"chapter_id", "ch02"}, {"title", "  风起时 "}});
+    CHECK(r.status == 200);
+    CHECK(r.body.at("changed") == json::array({"title"}));
+    const Story saved = store.load_story();
+    CHECK(saved.chapters[1].title == "风起时");          // 首尾空白削掉
+    CHECK(saved.chapters[1].text == "这一章已经有正文了。");
+    CHECK(saved.chapters[1].summary == "旧梗概");
+    CHECK(saved.chapters[0].title == "旧标题ch01");
+    // 章节记录上的名字跟着换：项目页、下拉、成片清单读的是它
+    CHECK(store.load_project().episode_by_id("ep02")->title == "风起时");
+
+    SUBCASE("梗概：章节记录里那句摘要跟着换，哪怕原来不是空的") {
+        http::post_story_chapter_edit(
+            json{{"project", p_str(root)}, {"chapter_id", "ch02"}, {"summary", "新梗概"}});
+        CHECK(store.load_story().chapters[1].summary == "新梗概");
+        CHECK(store.load_project().episode_by_id("ep02")->synopsis == "新梗概");
+    }
+    SUBCASE("原样再填一遍：changed 是空的") {
+        const auto again = http::post_story_chapter_edit(
+            json{{"project", p_str(root)}, {"chapter_id", "ch02"}, {"title", "风起时"}});
+        CHECK(again.body.at("changed").empty());
+    }
+    SUBCASE("标题不许清空、没有这一章是 404、不认的栏拒收") {
+        CHECK_THROWS_AS(http::post_story_chapter_edit(json{
+                            {"project", p_str(root)}, {"chapter_id", "ch02"}, {"title", " "}}),
+                        http::ApiError);
+        CHECK(store.load_story().chapters[1].title == "风起时");
+        try {
+            http::post_story_chapter_edit(
+                json{{"project", p_str(root)}, {"chapter_id", "ch09"}, {"title", "x"}});
+            FAIL("该抛");
+        } catch (const http::ApiError& e) {
+            CHECK(e.status() == 404);
+        }
+        // 正文不走这条路（改正文有 revise 那一套，留钩子、重算切点）
+        CHECK_THROWS(http::post_story_chapter_edit(
+            json{{"project", p_str(root)}, {"chapter_id", "ch02"}, {"text", "x"}}));
+        CHECK(store.load_story().chapters[1].text == "这一章已经有正文了。");
+    }
+
+    std::error_code ec;
+    fs::remove_all(root, ec);
+}
+
 TEST_CASE("POST /api/story/plan：改每章时长，条数不变（一章一条），时长落盘") {
     const fs::path root = fresh_project("重算");
     ProjectStore store(root);
