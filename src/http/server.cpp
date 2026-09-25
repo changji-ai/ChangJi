@@ -1484,6 +1484,13 @@ void run(const config::Settings& settings, const Options& opts) {
             return json_response(r.body, r.status);
         });
 
+    CROW_ROUTE(app, "/api/story/chapter/add").methods("POST"_method)(
+        [](const crow::request& req) {
+            auto r = guard(
+                [&] { return post_story_chapter_add(parse_body(req.body)); });
+            return json_response(r.body, r.status);
+        });
+
     CROW_ROUTE(app, "/api/story/chapter/edit").methods("POST"_method)(
         [](const crow::request& req) {
             auto r = guard(

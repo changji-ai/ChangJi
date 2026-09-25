@@ -95,6 +95,18 @@ ApiResult post_story_chapter_delete(const nlohmann::json& body);
 /// 那一句摘要原来只在空着时补，这儿是人明说要改的，照改。
 ApiResult post_story_chapter_edit(const nlohmann::json& body);
 
+/// POST /api/story/chapter/add —— 在最后加一章（空正文）。
+/// body: {project, title?, summary?}
+///
+/// **引擎读盘上那份、在锁里加。** 原来网页的「加一章」是把**页面手上那份整个
+/// 故事**带着 overwrite 交给 /adopt：那一会儿别的对话刚写完一章正文的话，页面
+/// 那份旧稿把它整章冲回去，一声不响。场记手上也没有加一章的路（大纲那步见到
+/// 有正文就拦）。
+///
+/// 编号取「最大的那个 + 1」（删过中间一章时数量比最大编号小）。回包里
+/// `chapter_id` 是新的那一章。
+ApiResult post_story_chapter_add(const nlohmann::json& body);
+
 /// POST /api/story/plan —— 按每章时长重算章节计划。
 ApiResult post_story_plan(const nlohmann::json& body);
 

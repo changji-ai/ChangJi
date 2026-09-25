@@ -741,6 +741,13 @@ ApiResult post_story_chapter_delete(const json& body) {
         throw unprocessable_top("chapter_id", "Field required", body, "missing");
     }
     Story story = load_story_or_400(store);
+    // 这一章对应的章节记录叫什么，要在删之前按它原来的位置算。
+    std::string ep_id;
+    for (std::size_t i = 0; i < story.chapters.size(); ++i) {
+        if (story.chapters[i].chapter_id == chapter_id) {
+            ep_id = stages::episode_id_for_chapter(chapter_id, i);
+        }
+    }
     const Story::ChapterRemoval r = story.remove_chapter(chapter_id);
     if (!r.removed) throw ApiError(404, SAYF("没有章节 %1", chapter_id));
     store.save_story(story);
@@ -749,6 +756,24 @@ ApiResult post_story_chapter_delete(const json& body) {
     sync_episodes_to_chapters(store, story);
 
     json out = story_response(story);
+    // **删掉的那一章，章节记录是空的就一起删。** sync 那头对落单的只报不删
+    //（里面可能有写好的剧本、拆好的分镜），而一条什么都没有的记录留着，
+    // 项目页、场记读到的还是「4 章」——人刚删掉的那一章一直挂在那儿
+    //（2026-09-25 加一章、删一章实测撞到的）。有东西的照旧留着，回包里说一声。
+    if (!ep_id.empty()) {
+        Project project = load_or_400(store);
+        const auto it = std::find_if(project.episodes.begin(), project.episodes.end(),
+                                     [&](const Episode& e) { return e.episode_id == ep_id; });
+        if (it != project.episodes.end()) {
+            if (text::strip_ws(it->script).empty() && it->shots.empty()) {
+                project.episodes.erase(it);
+                store.save_project(project);
+                out["episode_dropped"] = ep_id;
+            } else {
+                out["episode_kept"] = ep_id;
+            }
+        }
+    }
     out["deleted"] = chapter_id;
     out["plan_dropped"] = r.plan_dropped;
     out["plan_moved"] = r.plan_moved;
@@ -816,6 +841,43 @@ ApiResult post_story_chapter_edit(const json& body) {
     json out = story_response(story);
     out["chapter_id"] = chapter_id;
     out["changed"] = std::move(changed);
+    return {200, std::move(out)};
+}
+
+ApiResult post_story_chapter_add(const json& body) {
+    forbid_extra(body, {"project", "title", "summary"});
+    ProjectStore store = open_project(body);
+    // 读→加→存在一把锁里：页面、场记、别的对话同时在写时，谁都不拿自己手上
+    // 那份旧稿去盖盘上的。
+    const auto guard = store.lock();
+    const Project project = load_or_400(store);
+    const Story existing = load_story_or_400(store);
+    Story story = existing;
+
+    int top = 0;
+    for (const Chapter& c : story.chapters) {
+        const std::string& id = c.chapter_id;
+        if (id.size() > 2 && id.rfind("ch", 0) == 0 &&
+            id.find_first_not_of("0123456789", 2) == std::string::npos) {
+            top = std::max(top, std::stoi(id.substr(2)));
+        }
+    }
+    char id[16];
+    std::snprintf(id, sizeof(id), "ch%02d", top + 1);
+
+    Chapter c;
+    c.chapter_id = id;
+    c.title = text::truncate_utf8(text::strip_ws(opt_str(body, "title", "")), 60);
+    // 没给标题就按它排在第几章起一个（和网页原来那颗按钮一样），别留空：
+    // 章节表、下拉、成片清单全拿标题当名字。
+    if (c.title.empty()) {
+        c.title = SAYF("第 %1 章", std::to_string(story.chapters.size() + 1));
+    }
+    c.summary = text::truncate_utf8(text::strip_ws(opt_str(body, "summary", "")), 2000);
+    story.chapters.push_back(std::move(c));
+
+    json out = commit_story(store, project, std::move(story), existing);
+    out["chapter_id"] = id;
     return {200, std::move(out)};
 }
 

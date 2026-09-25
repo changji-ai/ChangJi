@@ -728,6 +728,70 @@ TEST_CASE("POST /api/story/chapter/edit：只改标题和梗概，正文一个�
     fs::remove_all(root, ec);
 }
 
+TEST_CASE("POST /api/story/chapter/add：在最后加一章，编号接最大的那个，别的章一个字不动") {
+    // 原来网页的「加一章」把页面手上那份整个故事带着 overwrite 交给 /adopt——
+    // 别的对话刚写完的正文会被那份旧稿冲回去。
+    const fs::path root = fresh_project("加一章");
+    ProjectStore store(root);
+    Story s;
+    s.premise = "梗概";
+    for (const char* id : {"ch01", "ch03"}) {   // 中间删过一章：数量 2、最大编号 3
+        Chapter c;
+        c.chapter_id = id;
+        c.title = std::string("标题") + id;
+        c.text = "正文。";
+        s.chapters.push_back(c);
+    }
+    store.save_story(s);
+    http::sync_episodes_to_chapters(store, s);
+
+    // 页面手上那份是旧的；这会儿别的对话把 ch03 写长了。
+    Story later = store.load_story();
+    later.chapters[1].text = "别的对话刚写完的一整章。";
+    store.save_story(later);
+
+    const auto r = http::post_story_chapter_add(
+        json{{"project", p_str(root)}, {"title", "回城"}, {"summary", "她回到城里。"}});
+    CHECK(r.status == 200);
+    CHECK(r.body.at("chapter_id") == "ch04");
+    const Story saved = store.load_story();
+    REQUIRE(saved.chapters.size() == 3);
+    CHECK(saved.chapters[2].chapter_id == "ch04");
+    CHECK(saved.chapters[2].title == "回城");
+    CHECK(saved.chapters[2].summary == "她回到城里。");
+    CHECK(saved.chapters[2].text.empty());
+    CHECK(saved.chapters[1].text == "别的对话刚写完的一整章。");   // 没被冲回去
+    CHECK(store.load_project().episode_by_id("ep04") != nullptr);  // 章节记录跟上
+
+    SUBCASE("没给标题：按排第几章起一个，不留空") {
+        const auto r2 = http::post_story_chapter_add(json{{"project", p_str(root)}});
+        CHECK(r2.body.at("chapter_id") == "ch05");
+        CHECK(store.load_story().chapters.back().title == "第 4 章");
+    }
+    SUBCASE("不认的栏拒收（正文不走这条路）") {
+        CHECK_THROWS(http::post_story_chapter_add(
+            json{{"project", p_str(root)}, {"text", "x"}}));
+    }
+    SUBCASE("加完再删：空的章节记录跟着删，有剧本的留着") {
+        // 原来删章只删故事那一条，章节记录（空的）一直挂着，项目页还是多一章。
+        const auto d = http::post_story_chapter_delete(
+            json{{"project", p_str(root)}, {"chapter_id", "ch04"}});
+        CHECK(d.body.value("episode_dropped", std::string()) == "ep04");
+        CHECK(store.load_project().episode_by_id("ep04") == nullptr);
+
+        Project p = store.load_project();
+        p.episode_by_id("ep03")->script = "写好的剧本。";
+        store.save_project(p);
+        const auto d3 = http::post_story_chapter_delete(
+            json{{"project", p_str(root)}, {"chapter_id", "ch03"}});
+        CHECK(d3.body.value("episode_kept", std::string()) == "ep03");
+        CHECK(store.load_project().episode_by_id("ep03") != nullptr);
+    }
+
+    std::error_code ec;
+    fs::remove_all(root, ec);
+}
+
 TEST_CASE("POST /api/story/plan：改每章时长，条数不变（一章一条），时长落盘") {
     const fs::path root = fresh_project("重算");
     ProjectStore store(root);
