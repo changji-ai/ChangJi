@@ -15,8 +15,8 @@
 #
 #     sh cpp/tools/desktop_sweep.sh ../build/desktop/changji-desktop.app/Contents/MacOS/changji-desktop ~/某个测试用的 HOME [站在哪一部片子上]
 #
-# 第三个参数可以不给；给了的话每一趟都从那一部片子开始，**跟上一次谁动过
-# 什么无关**（理由见底下 `lastProject` 那段）。
+# 第三个参数可以不给；给了的话每一趟都从那一部片子开始（见底下「偏好那一族」
+# 那段）。
 #
 # 红了的那一档会把前三行告警印出来，退出码是红的个数。
 
@@ -26,39 +26,20 @@ FAKEHOME="${2:?第二个参数：给它当 HOME 的目录}"
 OUT="${TMPDIR:-/tmp}/changji-sweep"
 mkdir -p "$OUT"
 
-# ⚠️ **偏好那一族不认 HOME，得单独扳回来。**
+# ⚠️ **偏好那一族：每一趟都是一份新的，跟人自己那份和上一趟都无关。**
 #
-# macOS 上 QSettings 走 cfprefsd（域 `com.changji.场记`），换 HOME 换不掉它
-# ——于是**上一趟把侧栏收起来了，下一趟一上来就是收着的**，而设置那颗齿轮
-# 就住在那条栏里。2026-09-21 第二次跑这个脚本时实撞：三档设置全红，报的是
-# `点不着「齿轮」：visible=0 宽高=-16x28`，而第一趟是全绿的。
+# 2026-09-25 之前 QSettings 自检和人共用一个域（macOS 上 cfprefsd 的
+# `com.changji.场记`，换 HOME 换不掉），于是上一趟把侧栏收起来了，下一趟
+# 一上来就是收着的（「点不着「齿轮」：visible=0 宽高=-16x28」）；上一趟换过
+# 片子，这一趟就开在一部空片子上。这儿原来是每趟前后 `defaults write` 扳回去
+# ——**扳的是人自己那份**。现在自检那一趟由程序自己开一份临时的（见
+# desktop/main.cpp 的 `selftest_prefs`），这儿什么都不用扳。
 #
-# 所以开跑之前先把它扳回来；底下「收侧栏」那一趟也在同一次运行里扳回去。
-#
-# ⚠️ **`lastProject` 也在这个域里，而这一趟扫的每一张图都指望它。**
-# 2026-09-21 实撞：拿另一个 HOME 单独试了一下换片子，那一下把 `lastProject`
-# 写成了另一个 HOME 里的一部片子——**下一趟扫描四档全红**，报的是
-# 「点不着『格·story』：visible=0」「点不着『上下文条』：visible=0」
-# 「画面上没有『场记这段』」，看着像界面坏了，其实是这一趟开在一部空片子上。
-#
-# 第三个参数就是给它的：**这一趟要站在哪一部片子上**。不给就不动它
-#（接着用上一次留下的那个，和以前一样）。
-if command -v defaults >/dev/null 2>&1; then
-  defaults write com.changji.场记 sideOpen -bool true 2>/dev/null || true
-  if [ "${3:-}" != "" ]; then
-    defaults write com.changji.场记 lastProject -string "$3" 2>/dev/null || true
-    # ⚠️ **「开哪一条对话」那一笔也得清掉。**
-    #
-    # 钉住片子还不够：每部片子还单记着「上次说的是哪一条」
-    #（`lastChat/<路径的 base64>`，见 `chat_model.cpp`）。别处点过一次别的
-    # 对话，那一笔就留在这个域里——而这一趟扫描会从那一条开始，于是
-    # 「底下那一排」那几档报的是「画面上没有『场记这段』」（那一条里
-    # 一句场记的话都没有）。2026-09-21 实撞，和 `lastProject` 那次一模一样。
-    #
-    # 清掉就落回这部片子默认那一条（空 id 的「原先那条」），每趟都一样。
-    key="lastChat/$(printf '%s' "$3" | base64)"
-    defaults delete com.changji.场记 "$key" 2>/dev/null || true
-  fi
+# 第三个参数：**这一趟要站在哪一部片子上**，经 `CHANGJI_DESKTOP_PROJECT`
+# 交给程序（「开哪一条对话」在新的那份里本来就是空的，落回默认那一条）。
+# 不给的话每一趟都站在「还没开片子」上。
+if [ "${3:-}" != "" ]; then
+  export CHANGJI_DESKTOP_PROJECT="$3"
 fi
 
 # ---- 素材跑完要还原 ----
@@ -174,8 +155,8 @@ run 局域网 CHANGJI_DESKTOP_SHOT_MS=17000 CHANGJI_DESKTOP_TAP='齿轮,设置�
 
 # 一条对话右边那颗「⋯」：点开是置顶和删掉。
 #
-# ⚠️ **只掀开，不挑**：置顶落在 cfprefsd 里（不认 HOME），挑一下就留给了
-# 下一趟——而下一趟的每一张图都会多出那一行。同 `lastProject` 那条。
+# **只掀开，不挑**：挑了就是真置顶、真删。偏好每趟是新的，不会留给下一趟，
+# 但「删掉」动的是素材本身。
 run 那颗点   CHANGJI_DESKTOP_SHOT_MS=10000 CHANGJI_DESKTOP_TAP='~对话·互联·原先那条,⋮·' CHANGJI_DESKTOP_TAP_MS=6000
 
 # 输入框上面那两颗药丸：哪一部片子 · 哪一章。**只掀开，不挑**（同下面那条）。
