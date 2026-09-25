@@ -1061,21 +1061,30 @@ TEST_CASE("断在半路、正文还没来：原样再发一趟，只一趟") {
                         llm::LlmError);
         CHECK(stream.calls.size() == 1);
     }
-    SUBCASE("两趟都断：只重发一次，报错里说已经重发过、不叫人调超时") {
+    SUBCASE("一直断：最多重发两趟（一共三趟），报错里说重发过、不叫人调超时") {
+        // 一趟不够：2026-09-25 实测连着两趟都断，整轮以报错收场。
         FakeStream stream;
-        stream.chunks = {{}, {}, {}};
-        stream.broke = {kBroke, kBroke, kBroke};
+        stream.chunks = {{}, {}, {}, {}};
+        stream.broke = {kBroke, kBroke, kBroke, kBroke};
         llm::RemoteClient c(test_cfg(), http.fn(), stream.fn());
         try {
             c.complete(simple_req(), tok, [](const std::string&) {});
             FAIL("该抛异常");
         } catch (const llm::LlmError& e) {
             const std::string msg = e.what();
-            CHECK(msg.find("重发过一次") != std::string::npos);
+            CHECK(msg.find("重发之后还是断") != std::string::npos);
             CHECK(msg.find("timeout_s") == std::string::npos);
             CHECK(msg.find(kBroke) != std::string::npos);
         }
-        CHECK(stream.calls.size() == 2);
+        CHECK(stream.calls.size() == 3);
+    }
+    SUBCASE("连断两趟、第三趟通了：照常交回") {
+        FakeStream stream;
+        stream.chunks = {{}, {}, {sse_chunk("{\\\"title\\\": \\\"雨\\\"}"), "data: [DONE]\n\n"}};
+        stream.broke = {kBroke, kBroke};
+        llm::RemoteClient c(test_cfg(), http.fn(), stream.fn());
+        CHECK(c.complete(simple_req(), tok, [](const std::string&) {}) == "{\"title\": \"雨\"}");
+        CHECK(stream.calls.size() == 3);
     }
     SUBCASE("等满了超时才断的不重发：再等一个超时也一样") {
         FakeStream stream;

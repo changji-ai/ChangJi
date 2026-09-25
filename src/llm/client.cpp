@@ -570,11 +570,10 @@ std::string connect_failed(const config::LLMConfig& cfg,
     if (broke_midway(why) && resent) {
         // 重发过一次还是断，说"调大超时"就指歪了：值得重发的那一趟本来就
         // 远没到超时（见 worth_resending）。
-        return SAYF("和大模型服务连上了，但连着两趟都断在半路（%1）。\n%2"
-                    "\n第一趟断了之后已经自动重发过一次。离超时还远就断，多半是"
-                    "服务端或中间的代理掐掉了这条长连接：过一会儿再试；老是这样"
-                    "的话换一个模型或服务。**不是网络不通**——网络不通的话下面"
-                    "那行写的是连接失败。",
+        return SAYF("和大模型服务连上了，但自动重发之后还是断在半路（%1）。\n%2"
+                    "\n离超时还远就断，多半是服务端或中间的代理掐掉了这条长连接："
+                    "过一会儿再试；老是这样的话换一个模型或服务。**不是网络不通**"
+                    "——网络不通的话下面那行写的是连接失败。",
                     cfg.base_url, why);
     }
     if (broke_midway(why)) {
@@ -613,6 +612,11 @@ std::string connect_failed(const config::LLMConfig& cfg,
 ///      出了半句，再发一趟会把同样的话再冒一遍；
 ///   3. **离超时还远**（不到 timeout_s 的一半）。真是等满了超时的，再等一个
 ///      超时也一样。
+/// 最多重发几趟。**一趟不够**：2026-09-25 实测智谱连着两趟都断（第二趟也是
+/// 想到一半），整轮以报错收场。三趟都断的概率小得多，再多就是在跟一个真坏
+/// 了的服务耗。
+constexpr int kMaxResends = 2;
+
 bool worth_resending(const std::optional<std::string>& transport_error,
                      double secs, double timeout_s) {
     return transport_error.has_value() && broke_midway(*transport_error) &&
@@ -814,8 +818,10 @@ std::string RemoteClient::complete(const Request& req,
         }
         bool resent = false;
         // 正文来过一截的，调用方给了 `on_restart`（收得回）才重发，见 chat 那处。
-        if (!a.canceled && (a.text.empty() || req.on_restart) &&
-            worth_resending(a.transport_error, a.secs, cfg.timeout_s)) {
+        for (int tries = 0; tries < kMaxResends && !a.canceled &&
+                            (a.text.empty() || req.on_restart) &&
+                            worth_resending(a.transport_error, a.secs, cfg.timeout_s);
+             ++tries) {
             if (!a.text.empty()) req.on_restart();
             const std::string notice = resend_notice();
             if (req.on_thinking) req.on_thinking(notice);
@@ -955,9 +961,11 @@ std::string RemoteClient::complete(const Request& req,
         // 断在半路那一种原样再发一趟，见 worth_resending。整段这条一个字都
         // 没交出去过，"正文还没来"天然成立。
         bool resent = false;
-        if (!tok.cancelled() &&
-            worth_resending(r.transport_error, seconds_since(t0), cfg.timeout_s)) {
+        for (int tries = 0; tries < kMaxResends && !tok.cancelled() &&
+                            worth_resending(r.transport_error, seconds_since(t0), cfg.timeout_s);
+             ++tries) {
             resent = true;
+            t0 = std::chrono::steady_clock::now();
             r = send(payload);
         }
         // **拿到回包就立刻记，放在下面那句 transport_error 之前。** 连不上
@@ -1167,9 +1175,11 @@ ChatReply RemoteClient::chat(const std::vector<Message>& messages, const ordered
             }
             // 断在半路原样再发一趟，见 worth_resending。
             bool resent = false;
-            if (!tok.cancelled() &&
-                worth_resending(r.transport_error, seconds_since(t0), cfg.timeout_s)) {
+            for (int tries = 0; tries < kMaxResends && !tok.cancelled() &&
+                                worth_resending(r.transport_error, seconds_since(t0), cfg.timeout_s);
+                 ++tries) {
                 resent = true;
+                t0 = std::chrono::steady_clock::now();
                 r = post_(url, payload.dump(), headers, cfg.timeout_s);
             }
             // 拿到回包就立刻记，理由同整段那条：放到下面去就把 400 那一支漏了。
@@ -1237,9 +1247,10 @@ ChatReply RemoteClient::chat(const std::vector<Message>& messages, const ordered
         // 正文已经来过一截的：调用方给了 `on_restart`（收得回那半句）才重发，
         // 先让它把推出去的那截作废。工具调用在流里攒着、还没交出去过，不用管。
         bool resent = false;
-        const bool can_take_back = content.empty() || static_cast<bool>(opts.on_restart);
-        if (!canceled && can_take_back &&
-            worth_resending(r.transport_error, seconds_since(t0), cfg.timeout_s)) {
+        for (int tries = 0; tries < kMaxResends && !canceled &&
+                            (content.empty() || static_cast<bool>(opts.on_restart)) &&
+                            worth_resending(r.transport_error, seconds_since(t0), cfg.timeout_s);
+             ++tries) {
             if (!content.empty()) {
                 opts.on_restart();
                 content.clear();
@@ -1249,6 +1260,7 @@ ChatReply RemoteClient::chat(const std::vector<Message>& messages, const ordered
             log.append_thinking(notice);
             sse = SseDeltas{};
             resent = true;
+            t0 = std::chrono::steady_clock::now();
             r = stream_post_(url, payload.dump(), headers, cfg.timeout_s, on_chunk);
         }
         log.note_response(r.status, r.body);
