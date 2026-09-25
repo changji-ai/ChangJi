@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  changji.exe（引擎，也是 worker 子进程）和 changji-desktop.exe 共用的这一份。
+
+  activeCodePage=UTF-8：这个进程里所有**窄字符**的文件、系统 API 都按 UTF-8 解。
+  我们到处拿 UTF-8 的 std::string 当路径，而依赖库里还有几处走窄 API——
+  stable-diffusion.cpp 开模型全走 CreateFileA / ifstream(std::string) / zip_open，
+  Crow 发静态文件走 stat / ifstream(c_str)。中文系统代码页是 GBK，于是：
+  模型目录里带中文（中文用户名下的 %LOCALAPPDATA% 就是）出图模型载不进来；
+  片子目录带中文 /api/media 回 500。2026-09-25 查出来的。
+  系统报错（std::system_error::what）也跟着变成 UTF-8，不再是进了 JSON 就抛的 GBK。
+
+  要 Windows 10 1903 起；更老的系统不认这一栏、照旧按 GBK——所以 Crow 那处另外
+  打了补丁（cmake/patch_crow_utf8_path.cmake），不单靠这一份。
+
+  longPathAware：项目目录深、镜头文件名长，超过 260 字符的路径系统开了长路径时
+  照样打得开（没开也无害）。
+
+  由 CMake 当作源文件交给 MSVC 链接器，和它自己生成的那份清单合并。
+-->
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <activeCodePage xmlns="http://schemas.microsoft.com/SMI/2019/WindowsSettings">UTF-8</activeCodePage>
+      <longPathAware xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">true</longPathAware>
+    </windowsSettings>
+  </application>
+</assembly>

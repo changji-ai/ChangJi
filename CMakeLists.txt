@@ -1076,6 +1076,12 @@ endif()
 
 add_executable(changji src/main.cpp)
 target_link_libraries(changji PRIVATE changji_core)
+# Windows：进程的窄字符代码页设成 UTF-8（理由在清单文件头上）。MSVC 链接器把
+# 源文件里的 .manifest 和它自己生成的那份合并。**测试程序不挂**：挂上之后
+# test_crow_static 在没打补丁时也会绿，就钉不住 Crow 那处补丁了。
+if(MSVC)
+    target_sources(changji PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/windows/utf8.manifest")
+endif()
 
 # 自己的代码要 C++20，但只加在自己的目标上，不传染给上游。
 # 阶段 5 链 sd.cpp / llama.cpp 时这一点是必须的，见上面 CMAKE_CXX_STANDARD 那段。
