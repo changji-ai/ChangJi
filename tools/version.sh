@@ -1,11 +1,15 @@
 #!/usr/bin/env sh
 # 这一版叫什么。
 #
-#     sh cpp/tools/version.sh            # → v2.2-7
+#     sh cpp/tools/version.sh            # → v2.2.7
 #
 # 规矩（用户 2026-09-21 定的）：
 #
-#     版本号 = <前缀>-<前缀定下来之后的第几个提交>
+#     版本号 = <前缀>.<前缀定下来之后的第几个提交>      （v2.2.0、v2.2.7）
+#
+# 2026-09-25 起中间是点，不是横杠（原来是 v2.2-7）：三段数字，安装器的
+# VERSIONINFO 抠得出完整的一版。**横杠留给分支名**——CI 出 beta 时在后面挂
+# `-<分支>`，`update_check` 靠「v 后面只有数和点」认正式版，有横杠就是 beta。
 #
 # 前缀住在 `cpp/CMakeLists.txt` 里那一行 `CHANGJI_VERSION_PREFIX`。
 # **一改它，后面那个计数从 0 重新开始**——因为计数是"从写进那个前缀的那一个
@@ -48,10 +52,10 @@ fi
 if [ -z "$BORN" ]; then
     # 找不到（浅克隆、或者这一行还没提交过）：报 0，**但说一句**。
     # 不说的话它和"真的就是第 0 个"长得一模一样。
-    echo "$PREFIX-0"
+    echo "$PREFIX.0"
     echo "（数不出来：这个前缀还没提交过，或者是浅克隆——CI 上记得 fetch-depth: 0）" >&2
     exit 0
 fi
 
 N=$(git -C "$HERE" rev-list --count "$BORN..HEAD" 2>/dev/null || echo 0)
-echo "$PREFIX-$N"
+echo "$PREFIX.$N"

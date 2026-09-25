@@ -57,7 +57,7 @@ using Fetch = std::function<std::string(const std::string& url)>;
 /// 配了（`[update].channel`）就听配的，认不出的字回 `release`。**没配就看手上
 /// 这一版是怎么来的**——判据和 release.yml 里定版本号那一段是同一条：打 tag
 /// 出来的是正式版，版本号就是 tag（`v2.3`、`v2.3.1`）；分支上出的是 beta，
-/// 版本号是 `<前缀>-<提交数>-<分支>`（`v2.2-35-main`）；本机自己编的
+/// 版本号是 `<前缀>.<提交数>-<分支>`（`v2.2.35-main`）；本机自己编的
 ///（`v2.2-local-cuda`）也不是正式版，跟 beta。
 std::string update_channel(const config::UpdateConfig& cfg, const std::string& current);
 

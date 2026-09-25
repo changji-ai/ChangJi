@@ -810,24 +810,27 @@ TEST_CASE("更新检查：地址固定、判据是「一不一样」") {
 
 TEST_CASE("更新检查：没配线就跟着手上这一版走") {
     // 判据和 release.yml 定版本号那段是同一条：打 tag 出来的正式版版本号就是
-    // tag；分支上出的是 beta，`<前缀>-<提交数>-<分支>`。2026-09-25 之前默认死跟
+    // tag；分支上出的是 beta，`<前缀>.<提交数>-<分支>`。2026-09-25 之前默认死跟
     // release，而发布那头还没有过一次 release——人手上的全是 beta，人人点「现在
     // 查一次」都是「取不到版本信息」。
     const config::UpdateConfig cfg;
     CHECK(setup::update_channel(cfg, "v2.3") == "release");
     CHECK(setup::update_channel(cfg, "v2.3.1") == "release");
     CHECK(setup::update_channel(cfg, " v2.3.1\n") == "release");
-    CHECK(setup::update_channel(cfg, "v2.2-35-main") == "beta");
-    CHECK(setup::update_channel(cfg, "v2.2-35-v2.2-desktop") == "beta");
+    // 前缀和计数之间是点（v2.2.35），跟正式版的 tag 长得一样——**分出 beta 的
+    // 只剩后面挂的那个「-分支」**。
+    CHECK(setup::update_channel(cfg, "v2.2.35-main") == "beta");
+    CHECK(setup::update_channel(cfg, "v2.2.35-v2.2-desktop") == "beta");
+    CHECK(setup::update_channel(cfg, "v2.2-35-main") == "beta");   // 09-25 之前的写法
     CHECK(setup::update_channel(cfg, "v2.2-local-cuda") == "beta");   // 本机编的
     CHECK(setup::update_channel(cfg, "") == "beta");
     CHECK(setup::update_channel(cfg, "v") == "beta");
 
     // 查的那一下和给人的那个链接跟着同一条线。
     std::string asked;
-    const auto info = setup::check_update(cfg, "v2.2-35-main", [&](const std::string& u) {
+    const auto info = setup::check_update(cfg, "v2.2.35-main", [&](const std::string& u) {
         asked = u;
-        return std::string(R"({"version":"v2.2-36-main"})");
+        return std::string(R"({"version":"v2.2.36-main"})");
     });
     CHECK(asked.find("/download/beta/version.json") != std::string::npos);
     CHECK(info.url.find("/releases/tag/beta") != std::string::npos);

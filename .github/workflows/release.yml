@@ -219,7 +219,7 @@ jobs:
             echo "channel=release"             >> "$GITHUB_OUTPUT"
           else
             # **The version comes from the prefix in CMake** (decided
-            # 2026-09-21): `<prefix>-<commits since the prefix was set>`, and
+            # 2026-09-21): `<prefix>.<commits since the prefix was set>` (`v2.2.7`), and
             # changing the prefix restarts the count at 0. The rule and the
             # algorithm live in `cpp/tools/version.sh`.
             #
