@@ -794,6 +794,7 @@
   "按配置的 %1 GB 推导档位": "niveau de qualité déduit des %1 Go configurés",
   "挪不动合成好的电影：%1": "Impossible de déplacer le film terminé : %1",
   "换 %1 的参考图": "Remplacer l’image de référence de %1",
+  "换下来的旧参考图（新的在前；要换回哪张，把路径交给 assets_set_reference）：": "Images de référence remplacées (les plus récentes d’abord ; pour en remettre une, passer son chemin à assets_set_reference) :",
   "换参考图": "Remplacer une image de référence",
   "排了一会儿还没轮到 %1：前面的活还没干完。\n等它们干完再点一次就行；要是一直排不上，多半是有一件长任务（出片、写全片）一直占着卡。\n顶栏那块「AI 作业中」点开能看到现在在跑什么。": "%1 n’a pas eu son tour depuis un moment : le travail devant n’est pas fini.\nAttends qu’il se termine et reclique ; si le tour ne vient jamais, c’est probablement qu’une tâche longue (rendu, écriture du film entier) monopolise la carte.\nLe panneau « IA au travail » de la barre du haut montre ce qui tourne.",
   "排着的已经有 %1 件了，等这一批跑完再加": "il y en a déjà %1 en attente ; rajoutes-en quand ce lot sera passé",

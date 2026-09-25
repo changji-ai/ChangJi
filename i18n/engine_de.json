@@ -794,6 +794,7 @@
   "按配置的 %1 GB 推导档位": "Qualitätsstufe aus den konfigurierten %1 GB abgeleitet",
   "挪不动合成好的电影：%1": "Der fertige Film lässt sich nicht verschieben: %1",
   "换 %1 的参考图": "Referenzbild von %1 ersetzen",
+  "换下来的旧参考图（新的在前；要换回哪张，把路径交给 assets_set_reference）：": "Ersetzte Referenzbilder (neueste zuerst; um eins zurückzuholen, den Pfad an assets_set_reference übergeben):",
   "换参考图": "Referenzbild ersetzen",
   "排了一会儿还没轮到 %1：前面的活还没干完。\n等它们干完再点一次就行；要是一直排不上，多半是有一件长任务（出片、写全片）一直占着卡。\n顶栏那块「AI 作业中」点开能看到现在在跑什么。": "%1 ist seit einer Weile nicht an der Reihe: die Arbeit davor ist nicht fertig.\nWarte, bis sie durch ist, und klick nochmal; kommt nie eine Reihe, hält meist ein langer Auftrag (Rendern, den ganzen Film schreiben) die Karte fest.\nDas Panel „KI arbeitet“ in der Kopfzeile zeigt, was gerade läuft.",
   "排着的已经有 %1 件了，等这一批跑完再加": "es warten schon %1; leg mehr nach, wenn dieser Stapel durch ist",
