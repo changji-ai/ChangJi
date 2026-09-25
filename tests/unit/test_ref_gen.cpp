@@ -21,6 +21,7 @@
 
 #include "util/cancel_words.hpp"
 #include "http/ref_gen.hpp"
+#include "http/upload.hpp"
 #include "infer/sd_image.hpp"
 #include "stages/frames.hpp"
 #include "models/project.hpp"
@@ -168,6 +169,62 @@ TEST_CASE("画参考图走首帧那条后端：要基础权重、种子定死、
     CHECK(seen_shot == char_id + "_front");
     CHECK(r.body.at("saved").get<std::string>().rfind("refs/", 0) == 0);
 
+    std::error_code ec;
+    fs::remove_all(root, ec);
+}
+
+TEST_CASE("重画参考图：旧图先留底；画砸了原来那张还在") {
+    // 2026-09-25 之前 claim_ref_path 在**出图之前**就删掉同名不同扩展名的
+    // 旧图：原来传的是 jpg、这次画 png，画失败或者被停，角色那一栏还指着
+    // jpg，而 jpg 已经没了。同扩展名的那张则是被新图原地盖掉，没有底。
+    const fs::path root = fresh_copy("留底");
+    const models::ProjectStore store{root};
+    auto assets = store.load_assets();
+    REQUIRE(!assets.characters.empty());
+    const std::string char_id = assets.characters.begin()->first;
+    const std::string stem = char_id + "_front";
+    const fs::path jpg = store.paths().refs() / paths::from_utf8(stem + ".jpg");
+    fs::create_directories(jpg.parent_path());
+    std::ofstream(jpg, std::ios::binary) << "原来传的那张";
+    assets.characters.begin()->second.ref_front = store.paths().rel(jpg);
+    store.save_assets(assets);
+
+    bool fail = true;
+    http::set_ref_renderer([&](const config::Settings&, const models::ProjectStore&) {
+        http::RefBackend b;
+        b.render = [&](const models::Shot&, const stages::PromptBundle&,
+                       const models::TierSpec&, const fs::path& dest,
+                       pipeline::CancelToken&, const infer::StepCallback&) {
+            if (fail) throw std::runtime_error("假装出图失败");
+            std::ofstream(dest, std::ios::binary) << "新画的";
+        };
+        return b;
+    });
+    const json body = {{"project", paths::to_utf8(root)}, {"char_id", char_id}};
+
+    // 画砸了：原来那张还在，库里还指着它
+    CHECK(status_of([&] { http::post_character_reference_generate(body); }) == 500);
+    CHECK(fs::is_regular_file(jpg));
+    CHECK(store.load_assets().characters.at(char_id).ref_front ==
+          store.paths().rel(jpg));
+
+    // 画成了：旧的 jpg 清掉，但留底里有它
+    fail = false;
+    CHECK(http::post_character_reference_generate(body).status == 200);
+    CHECK_FALSE(fs::is_regular_file(jpg));
+    auto hist = http::ref_history(store, stem);
+    REQUIRE(hist.size() == 1);
+    CHECK(hist.front().extension() == ".jpg");
+
+    // 再画两次，出来都一样：新画的那张只留一份，不把旧版本挤掉
+    CHECK(http::post_character_reference_generate(body).status == 200);
+    CHECK(http::post_character_reference_generate(body).status == 200);
+    hist = http::ref_history(store, stem);
+    REQUIRE(hist.size() == 2);
+    CHECK(hist.front().extension() == ".png");   // 新的在前
+    CHECK(hist.back().extension() == ".jpg");
+
+    http::set_ref_renderer({});
     std::error_code ec;
     fs::remove_all(root, ec);
 }

@@ -211,6 +211,7 @@ Rendered render_ref(const ProjectStore& store, const std::string& stem,
         throw ApiError(500, SAYF("出图那一步没报错，但文件没落地：%1",
                                  paths::to_utf8(dest)));
     }
+    settle_ref_path(store, stem, dest);
 
     return {store.paths().rel(dest), seed, spec.width, spec.height, spec.steps,
             seconds};

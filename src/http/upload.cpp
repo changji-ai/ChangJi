@@ -1,10 +1,15 @@
 #include "http/upload.hpp"
 #include "http/reset.hpp"
 
+#include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <fstream>
+#include <iterator>
 #include <set>
+#include <vector>
 
 #include "models/project.hpp"
 #include "util/paths.hpp"
@@ -134,6 +139,7 @@ std::string write_ref(const ProjectStore& store, const std::string& stem,
     out.write(data.data(), static_cast<std::streamsize>(data.size()));
     out.close();
     if (!out) throw ApiError(500, SAYF("写文件时出错：%1", paths::to_utf8(dest)));
+    settle_ref_path(store, stem, dest);
 
     return store.paths().rel(dest);
 }
@@ -176,20 +182,93 @@ int size_kb(const std::string& data) {
 
 }  // namespace
 
+namespace {
+
+std::string read_all(const fs::path& p) {
+    std::ifstream in(p, std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(in), {});
+}
+
+}  // namespace
+
+fs::path ref_history_dir(const ProjectStore& store, const std::string& stem) {
+    return store.root() / "versions" / "refs" / paths::from_utf8(stem);
+}
+
+std::vector<fs::path> ref_history(const ProjectStore& store,
+                                  const std::string& stem) {
+    std::vector<fs::path> out;
+    std::error_code ec;
+    const fs::path dir = ref_history_dir(store, stem);
+    if (!fs::is_directory(dir, ec)) return out;
+    for (const auto& e : fs::directory_iterator(dir, ec)) {
+        if (e.is_regular_file(ec)) out.push_back(e.path());
+    }
+    // 文件名打头是毫秒时刻、定宽，字面序就是时间序。新的在前。
+    std::sort(out.begin(), out.end(), [](const fs::path& a, const fs::path& b) {
+        return a.filename().native() > b.filename().native();
+    });
+    return out;
+}
+
+void stash_ref(const ProjectStore& store, const std::string& stem) {
+    std::error_code ec;
+    const fs::path refs = store.paths().refs();
+    const fs::path dir = ref_history_dir(store, stem);
+    for (const char* ext : ref_stale_exts()) {
+        const fs::path cur = refs / paths::from_utf8(stem + ext);
+        if (!fs::is_regular_file(cur, ec)) continue;
+        const std::string bytes = read_all(cur);
+        if (bytes.empty()) continue;
+        // 和最近那一份一模一样就不再存：点了重画又停、同一张传两遍，
+        // 不该各占一格把真正的旧版本挤出去。
+        const auto have = ref_history(store, stem);
+        if (!have.empty() && fs::file_size(have.front(), ec) == bytes.size() &&
+            read_all(have.front()) == bytes) {
+            continue;
+        }
+        fs::create_directories(dir, ec);
+        const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::system_clock::now().time_since_epoch())
+                            .count();
+        char name[64];
+        std::snprintf(name, sizeof(name), "%013lld", static_cast<long long>(ms));
+        fs::path to = dir / (std::string(name) + ext);
+        // 同一毫秒里两份（不同扩展名）：加个尾巴，别互相盖
+        for (int i = 1; fs::exists(to, ec); ++i) {
+            to = dir / (std::string(name) + "-" + std::to_string(i) + ext);
+        }
+        fs::copy_file(cur, to, fs::copy_options::overwrite_existing, ec);
+    }
+    // 只留最近几份。参考图一张几 MB，一格画二十遍就是一百 MB。
+    const auto all = ref_history(store, stem);
+    for (std::size_t i = kRefHistoryKeep; i < all.size(); ++i) {
+        fs::remove(all[i], ec);
+    }
+}
+
 fs::path claim_ref_path(const ProjectStore& store, const std::string& stem,
                         const std::string& suffix) {
     std::error_code ec;
     const fs::path refs = store.paths().refs();
     fs::create_directories(refs, ec);
+    // **先留底。** 这一格现在的图（不管哪种扩展名）复制一份到
+    // versions/refs/<名字>/——新图会原地盖掉同扩展名那张，而重画出来的
+    // 不一定比原来的好。2026-09-25 之前盖了就是没了。
+    stash_ref(store, stem);
+    return refs / paths::from_utf8(stem + suffix);
+}
 
-    const fs::path dest = refs / paths::from_utf8(stem + suffix);
+void settle_ref_path(const ProjectStore& store, const std::string& stem,
+                     const fs::path& dest) {
+    std::error_code ec;
+    const fs::path refs = store.paths().refs();
     for (const char* ext : ref_stale_exts()) {
         const fs::path stale = refs / paths::from_utf8(stem + ext);
         if (stale != dest && fs::is_regular_file(stale, ec)) {
             fs::remove(stale, ec);
         }
     }
-    return dest;
 }
 
 std::string ref_suffix_for(const std::string& content_type) {
@@ -210,6 +289,9 @@ ApiResult post_character_reference(const std::string& project_path,
     }
 
     ProjectStore store = open_project(project_path);
+    // 读→改→存一把锁（ProjectStore::lock）：同时出图的那几格在锁里重读、
+    // 只填自己那一格，这儿不锁的话两边各存各的，后存的把前一格冲掉。
+    const auto store_guard = store.lock();
     AssetLibrary assets = store.load_assets();
     const auto it = assets.characters.find(char_id);
     if (it == assets.characters.end()) throw ApiError(404, SAYF("没有角色 %1", char_id));
@@ -245,6 +327,8 @@ ApiResult post_character_voice(const std::string& project_path,
                                const std::string& content_type,
                                const std::string& data) {
     ProjectStore store = open_project(project_path);
+    // 读→改→存一把锁，见 post_character_reference。
+    const auto store_guard = store.lock();
     AssetLibrary assets = store.load_assets();
     const auto it = assets.characters.find(char_id);
     if (it == assets.characters.end()) throw ApiError(404, SAYF("没有角色 %1", char_id));
@@ -295,6 +379,8 @@ ApiResult post_character_voice(const std::string& project_path,
 ApiResult post_character_voice_clear(const json& body) {
     ProjectStore store = open_project(need_str(body, "project"));
     const std::string char_id = need_str(body, "char_id");
+    // 读→改→存一把锁，见 post_character_reference。
+    const auto store_guard = store.lock();
     AssetLibrary assets = store.load_assets();
     const auto it = assets.characters.find(char_id);
     if (it == assets.characters.end()) throw ApiError(404, SAYF("没有角色 %1", char_id));
@@ -314,6 +400,8 @@ ApiResult post_location_reference(const std::string& project_path,
                                   const std::string& content_type,
                                   const std::string& data) {
     ProjectStore store = open_project(project_path);
+    // 读→改→存一把锁，见 post_character_reference。
+    const auto store_guard = store.lock();
     AssetLibrary assets = store.load_assets();
     const auto it = assets.locations.find(location_id);
     if (it == assets.locations.end()) {
@@ -342,6 +430,8 @@ ApiResult post_character_reference_clear(const json& body) {
     }
 
     ProjectStore store = open_project(need_str(body, "project"));
+    // 读→改→存一把锁，见 post_character_reference。
+    const auto store_guard = store.lock();
     AssetLibrary assets = store.load_assets();
     const std::string char_id = need_str(body, "char_id");
     const auto it = assets.characters.find(char_id);
@@ -365,6 +455,8 @@ ApiResult post_character_reference_clear(const json& body) {
 
 ApiResult post_location_reference_clear(const json& body) {
     ProjectStore store = open_project(need_str(body, "project"));
+    // 读→改→存一把锁，见 post_character_reference。
+    const auto store_guard = store.lock();
     AssetLibrary assets = store.load_assets();
     const std::string location_id = need_str(body, "location_id");
     const auto it = assets.locations.find(location_id);

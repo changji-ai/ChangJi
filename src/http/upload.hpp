@@ -10,8 +10,10 @@
 // multipart 的解析留在路由层（那是 crow 的事），这里只收已经拆好的
 // 字段和二进制数据，这样能不起服务就把校验和落盘逻辑测一遍。
 
+#include <cstddef>
 #include <filesystem>
 #include <string>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
@@ -37,14 +39,33 @@ std::string ref_suffix_for(const std::string& content_type);
 /// 只会把项目目录撑爆。
 constexpr std::size_t kRefMaxBytes = 20u * 1024u * 1024u;
 
-/// 在 refs/ 里给这个名字定一个落点，顺手清掉**同名不同扩展名**的旧图。
+/// 在 refs/ 里给这个名字定一个落点，**先把这一格现在的图留底**
+/// （`versions/refs/<名字>/`，见 stash_ref）。
 ///
-/// 上传和生成都从这里过，因为那条清理规则两边都要守：同一个槽位先传过
-/// 一张 jpg、再生成一张 png 的话，不清的话 refs 里会留一张永远用不上的
-/// ——而且用户看不到，只有翻目录才发现。
+/// 上传和生成都从这里过。新图写好之后调 `settle_ref_path` 清掉**同名不同
+/// 扩展名**的旧图：同一个槽位先传过一张 jpg、再生成一张 png 的话，不清的话
+/// refs 里会留一张永远用不上的——而且用户看不到，只有翻目录才发现。
+///
+/// ⚠️ **清旧图要在新图落地之后。** 2026-09-25 之前是在这儿（出图之前）就删：
+/// 那一张画失败或者被停，角色那一栏还指着 jpg，而 jpg 已经没了。
 std::filesystem::path claim_ref_path(const models::ProjectStore& store,
                                      const std::string& stem,
                                      const std::string& suffix);
+/// 新图已经在 `dest` 了：清掉同名不同扩展名的旧图。
+void settle_ref_path(const models::ProjectStore& store, const std::string& stem,
+                     const std::filesystem::path& dest);
+
+/// 每一格留几份旧图。
+constexpr std::size_t kRefHistoryKeep = 8;
+/// 这一格的旧图放在哪（`<项目>/versions/refs/<名字>/`）。
+std::filesystem::path ref_history_dir(const models::ProjectStore& store,
+                                      const std::string& stem);
+/// 这一格留下来的旧图，新的在前。
+std::vector<std::filesystem::path> ref_history(const models::ProjectStore& store,
+                                               const std::string& stem);
+/// 把这一格现在的图复制一份留底。和最近一份一模一样就不存；只留最近
+/// `kRefHistoryKeep` 份。
+void stash_ref(const models::ProjectStore& store, const std::string& stem);
 
 /// POST /api/character/reference
 ///
