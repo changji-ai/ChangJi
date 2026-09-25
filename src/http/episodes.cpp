@@ -335,6 +335,7 @@ ApiResult post_episode(const json& body) {
     if (tit != body.end() && tit->is_number()) target = tit->get<double>();
 
     ProjectStore store = open_project(need_str(body, "project"));
+    const auto store_guard = store.lock();   // 读→改→存一把锁（CLAUDE.md 第十四条）
     Project project = load_or_400(store);
 
     std::string ep_id = text::strip_ws(opt_str(body, "episode_id", ""));
@@ -360,6 +361,7 @@ ApiResult post_episode_action(const json& body) {
     const std::string action = need_str(body, "action");
 
     ProjectStore store = open_project(need_str(body, "project"));
+    const auto store_guard = store.lock();   // 读→改→存一把锁（CLAUDE.md 第十四条）
     Project project = load_or_400(store);
     Episode* ep = project.episode_by_id(episode_id);
     if (ep == nullptr) throw ApiError(404, SAYF("没有章节 %1", episode_id));
@@ -384,6 +386,20 @@ ApiResult post_episode_action(const json& body) {
         ep->title = opt_str(body, "new_title", "");
         const std::string title = ep->title;
         store.save_project(project);
+        // **挂着故事里一章的，那一章的标题一起改。** 章节记录上的名字是从
+        // 故事那一章抄来的（sync_episodes_to_chapters 每次存故事都照抄一遍），
+        // 只改这一头的话，下一次谁存一下故事，名字就静悄悄变回去了。
+        // 空名字不往故事里写：故事那头标题不许空（/api/story/chapter/edit）。
+        if (!ep->chapter_refs.empty() && !text::strip_ws(title).empty()) {
+            models::Story story = store.load_story();
+            for (auto& c : story.chapters) {
+                if (c.chapter_id == ep->chapter_refs.front() && c.title != title) {
+                    c.title = title;
+                    store.save_story(story);
+                    break;
+                }
+            }
+        }
         return {200, {{"renamed", episode_id}, {"title", title}}};
     }
 

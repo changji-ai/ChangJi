@@ -309,6 +309,8 @@ ApiResult post_voice_save(const in_json& body) {
     if (body.contains("char_id") && body.at("char_id").is_string()) {
         const std::string char_id = body.at("char_id").get<std::string>();
         if (!char_id.empty()) {
+            // 读→改→存一把锁；出声音那一下在上面，锁不圈它。
+            const auto store_guard = store.lock();
             AssetLibrary assets = store.load_assets();
             const auto it = assets.characters.find(char_id);
             if (it == assets.characters.end()) {

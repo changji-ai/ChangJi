@@ -596,6 +596,8 @@ ApiResult post_script_write(const json& body, llm::Client& client,
     // 同一个形状在批量那两条长任务上也有，理由写在 batch.cpp 里那两段。
     const std::string trimmed = text::strip_ws(premise);
     if (project.premise != trimmed) {
+        // 重读→改→存一把锁；锁只圈这一小段，不圈上面那趟生成。
+        const auto store_guard = store.lock();
         Project latest = store.load_project();
         if (latest.premise != trimmed) {
             latest.premise = text::truncate_utf8(trimmed, 2000);

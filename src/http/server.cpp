@@ -2242,6 +2242,7 @@ void run(const config::Settings& settings, const Options& opts) {
                 // 而定妆那一步会按当时的画幅写对（见 post_bible）。
                 try {
                     const models::ProjectStore store{root};
+                    const auto store_guard = store.lock();   // 读→改→存一把锁
                     models::AssetLibrary assets = store.load_assets();
                     if (assets.style.aspect_ratio != v.aspect_ratio()) {
                         assets.style.aspect_ratio = v.aspect_ratio();

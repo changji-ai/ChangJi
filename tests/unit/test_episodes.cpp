@@ -18,6 +18,7 @@
 #include <nlohmann/json.hpp>
 
 #include "http/episodes.hpp"
+#include "http/story_api.hpp"
 #include "llm/client.hpp"
 #include "stages/script.hpp"
 #include "models/project.hpp"
@@ -311,6 +312,38 @@ TEST_CASE("新建和复制的编号规则不一样，这是照抄 Python 的") {
     std::error_code ec;
     fs::remove_all(root, ec);
     fs::remove_all(root2, ec);
+}
+
+TEST_CASE("给挂着故事的章改名：故事那一章跟着改，存一下故事也不会变回去") {
+    // 章节记录上的名字是从故事那一章抄来的（每次存故事都照抄一遍）。原来这条
+    // 只改章节记录：下一次谁存一下故事，名字就静悄悄变回去了。
+    const fs::path root = fresh_copy("改名跟故事", json());
+    models::ProjectStore store(root);
+    {
+        models::Project p = store.load_project();
+        p.episode_by_id("ep01")->chapter_refs = {"ch01"};
+        store.save_project(p);
+        models::Story s;
+        models::Chapter c;
+        c.chapter_id = "ch01";
+        c.title = "旧名";
+        s.chapters.push_back(c);
+        store.save_story(s);
+    }
+    const auto r = http::guard([&] {
+        return http::post_episode_action(json{{"project", paths::to_utf8(root)},
+                                              {"episode_id", "ep01"},
+                                              {"action", "rename"},
+                                              {"new_title", "新名"}});
+    });
+    REQUIRE(r.status == 200);
+    CHECK(store.load_story().chapters[0].title == "新名");
+    // 存一下故事（任何一条存故事的路都会对齐章节记录）：名字不回去。
+    http::sync_episodes_to_chapters(store, store.load_story());
+    CHECK(store.load_project().episode_by_id("ep01")->title == "新名");
+
+    std::error_code ec;
+    fs::remove_all(root, ec);
 }
 
 TEST_CASE("改剧本时 duration_s 给 0 当作没给") {

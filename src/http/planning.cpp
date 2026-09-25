@@ -362,6 +362,7 @@ ApiResult post_assets_dedupe(const json& body) {
     // 大模型。这个口子就是那一半：只收，不出新的。
     forbid_extra(body, {"project"});
     ProjectStore store = open_project(body);
+    const auto store_guard = store.lock();   // 读→改→存一把锁（CLAUDE.md 第十四条）
     Project project = load_or_400(store);
     AssetLibrary assets = load_assets_or_400(store);
 

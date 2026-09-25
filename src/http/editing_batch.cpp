@@ -76,6 +76,7 @@ ApiResult post_shots_batch(const json& body) {
     }
 
     ProjectStore store = open_project(body);
+    const auto store_guard = store.lock();   // 读→改→存一把锁（CLAUDE.md 第十四条）
     const std::string episode_id = need_str(body, "episode_id");
     Project project = store.load_project();
     Episode* ep = project.episode_by_id(episode_id);
@@ -169,6 +170,7 @@ ApiResult post_shots_reorder(const json& body) {
     // transition_in / transition_dur_s 到今天为止只是记下来的意图。
     // 结论不变：换顺序确实不用重跑。）
     ProjectStore store = open_project(body);
+    const auto store_guard = store.lock();   // 读→改→存一把锁（CLAUDE.md 第十四条）
     const std::string episode_id = need_str(body, "episode_id");
     Project project = store.load_project();
     Episode* ep = project.episode_by_id(episode_id);
@@ -218,6 +220,7 @@ ApiResult post_shots_link_locations(const json& body) {
     // 老项目里的分镜多半只填了 scene_id。那样渲染时场景描述整段丢掉，
     // 跑出来的画面同一个房间每镜都不一样，而且不报任何错。
     ProjectStore store = open_project(body);
+    const auto store_guard = store.lock();   // 读→改→存一把锁（CLAUDE.md 第十四条）
     const std::string episode_id =
         body.contains("episode_id") && body.at("episode_id").is_string()
             ? body.at("episode_id").get<std::string>()
