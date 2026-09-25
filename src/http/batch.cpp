@@ -84,6 +84,32 @@ std::string project_of(const json& body) {
                                                : std::string();
 }
 
+/// 请求里的 `episodes`（只做这几章，可选）。形状不对是 422，不是悄悄当成「全部」。
+std::vector<std::string> episodes_filter(const json& body) {
+    std::vector<std::string> only;
+    const auto it = body.find("episodes");
+    if (it == body.end() || it->is_null()) return only;
+    if (!it->is_array()) {
+        throw unprocessable_top("episodes", "Input should be a valid list", *it,
+                                "list_type");
+    }
+    for (const auto& e : *it) {
+        if (e.is_string() && !e.get<std::string>().empty()) only.push_back(e.get<std::string>());
+    }
+    return only;
+}
+
+/// 挑出来的那几章里只留 `only` 点名的（`only` 空 = 不筛）。
+void keep_only(std::vector<std::string>& todo, const std::vector<std::string>& only) {
+    if (only.empty()) return;
+    todo.erase(std::remove_if(todo.begin(), todo.end(),
+                              [&](const std::string& id) {
+                                  return std::find(only.begin(), only.end(), id) ==
+                                         only.end();
+                              }),
+               todo.end());
+}
+
 /// **这一道上**是不是已经有一件在写。
 ///
 /// 原来判的是"全机器有没有一件在写"，于是 A 片子在写正文，B 片子的对话
@@ -834,18 +860,7 @@ ApiResult post_script_all(const json& body, std::shared_ptr<llm::Client> client)
     // 的剧本重写一遍」，场记手上没有一件能只重写一章的工具，挑了「理解故事」
     // ——那一件不重写已有的剧本，跑了二十分钟拆的是旧剧本的分镜，嘴上却说
     // 「逐章重写剧本」。给了这一栏再配 overwrite，就是「重写这几章」。
-    std::vector<std::string> only;
-    if (const auto it = body.find("episodes"); it != body.end() && !it->is_null()) {
-        if (!it->is_array()) {
-            throw unprocessable_top("episodes", "Input should be a valid list", *it,
-                                    "list_type");
-        }
-        for (const auto& e : *it) {
-            if (e.is_string() && !e.get<std::string>().empty()) {
-                only.push_back(e.get<std::string>());
-            }
-        }
-    }
+    const std::vector<std::string> only = episodes_filter(body);
 
     if (lane_busy(body)) {
         throw ApiError(409, SAY("剧本那边还在忙"));
@@ -857,14 +872,7 @@ ApiResult post_script_all(const json& body, std::shared_ptr<llm::Client> client)
     // 挑哪几章：`script_missing` 那一条，和「理解故事」用的是同一份。
     std::vector<std::string> todo =
         episodes_missing_script(project, story, overwrite);
-    if (!only.empty()) {
-        todo.erase(std::remove_if(todo.begin(), todo.end(),
-                                  [&](const std::string& id) {
-                                      return std::find(only.begin(), only.end(), id) ==
-                                             only.end();
-                                  }),
-                   todo.end());
-    }
+    keep_only(todo, only);
     // **"没有要做的"不是错。**
     //
     // 这两颗批量按钮的用法就是"隔一阵按一下，把新写的章补上"，而按下去
@@ -1306,8 +1314,12 @@ ApiResult post_story_from_web(const json& body, std::shared_ptr<llm::Client> cli
 }
 
 ApiResult post_plan_all(const json& body, std::shared_ptr<llm::Client> client) {
-    forbid_extra(body, {"project", "overwrite"});
+    forbid_extra(body, {"project", "overwrite", "episodes"});
     const bool overwrite = opt_bool(body, "overwrite", false);
+    // **只做这几章**（可选），同 post_script_all。配 overwrite 就是「重拆这几章」
+    // ——剧本改过之后那张分镜过期了（Episode::shots_stale），人说「重拆第一章」，
+    // 场记原来只有一件"全部补缺"的工具，要么什么都不做、要么全片重拆。
+    const std::vector<std::string> only = episodes_filter(body);
 
     if (lane_busy(body)) {
         // 和写全片不是同一句话。用户看到SAY("已经在写了")会去找哪里在写剧本，
@@ -1329,8 +1341,8 @@ ApiResult post_plan_all(const json& body, std::shared_ptr<llm::Client> client) {
     // `shots_missing` 上：空壳镜头（shot_id 是空串）指不到任何文件、进不了
     // 任何一步，可数组非空就把这一章挡在补分镜之外——人看到的是「没有要
     // 补的」，而那一章明明是空的，一键跑完整部电影也救不回来。
-    const std::vector<std::string> todo =
-        episodes_missing_shots(project, story, overwrite);
+    std::vector<std::string> todo = episodes_missing_shots(project, story, overwrite);
+    keep_only(todo, only);
     // **"没有要做的"不是错。**
     //
     // 这两颗批量按钮的用法就是"隔一阵按一下，把新写的章补上"，而按下去

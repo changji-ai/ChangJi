@@ -273,6 +273,11 @@ ApiResult get_project(const std::string& path) {
             // 「理解过没有」的判据之一：每一章的剧本写了没有。只报字数，
             // 正文另走 /api/script——这份回包每一页都在拉。
             {"script_chars", static_cast<int>(text::utf8_len(e.script))},
+            // 分镜是不是照改之前那版剧本拆的（见 Episode::shots_from）。原来只有
+            // /api/shots 带着它：场记看的「这部片子现在什么样」只写「107 镜」，
+            // 2026-09-25 重写完第一章的剧本，它照样建议「从第一章开始出片」——
+            // 出的是照旧剧本（两场重复）拆的那张表。
+            {"shots_stale", e.shots_stale()},
             // **界面上这个数标着"时长"，那它就得是成片的长度。**
             //
             // 不是 planned_duration_s()——那是分镜表里那串名义值的和，而

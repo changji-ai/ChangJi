@@ -2985,6 +2985,24 @@ TEST_CASE("批量写剧本：判据和「理解故事」那一条是同一份") 
         std::error_code ec;
         fs::remove_all(root, ec);
     }
+
+    SUBCASE("只重拆一章的分镜：episodes + overwrite") {
+        // 剧本重写之后那张分镜过期了（shots_stale），人说「重拆第一章」——原来
+        // 批量补分镜只有"全部补缺"一档。
+        const fs::path root = understood_project("只重拆一章", true, false);
+        auto client = std::make_shared<llm::ReplayClient>(
+            std::vector<std::string>{"这不是 JSON", "这不是 JSON", "这不是 JSON"});
+        const auto r = http::post_plan_all(
+            json{{"project", p_str(root)}, {"overwrite", true},
+                 {"episodes", json::array({"ep01"})}},
+            client);
+        CAPTURE(r.body.dump());
+        REQUIRE(r.body.value("started", false));
+        CHECK(r.body.at("episodes") == json::array({"ep01"}));
+        pipeline::jobs().wait_idle();
+        std::error_code ec;
+        fs::remove_all(root, ec);
+    }
 }
 
 TEST_CASE("POST /api/story/from_web：写好只换这一章") {
