@@ -1107,6 +1107,37 @@ TEST_CASE("断在半路、正文还没来：原样再发一趟，只一趟") {
         CHECK(r.tool_calls[0].name == "project_state");
         CHECK(thought.find("重发") != std::string::npos);
     }
+    SUBCASE("正文来过一截、调用方收得回（on_restart）：先收回再重发") {
+        FakeStream stream;
+        stream.chunks = {{sse_chunk("改好了：罗")},
+                         {sse_chunk("改好了：罗春梅的穿着。"), sse_delta(json::object(), "stop"),
+                          "data: [DONE]\n\n"}};
+        stream.broke = {kBroke};
+        llm::RemoteClient c(test_cfg(), http.fn(), stream.fn());
+        llm::Request opts;
+        std::string shown;
+        int restarts = 0;
+        opts.on_token = [&](const std::string& p) { shown += p; };
+        opts.on_restart = [&] {
+            ++restarts;
+            shown.clear();
+        };
+        const llm::ChatReply r = c.chat({}, json::array(), opts, tok);
+        CHECK(stream.calls.size() == 2);
+        CHECK(restarts == 1);
+        CHECK(r.content == "改好了：罗春梅的穿着。");
+        CHECK(shown == "改好了：罗春梅的穿着。");   // 没有冒两遍
+    }
+    SUBCASE("正文来过一截、调用方没给 on_restart：照旧不重发") {
+        FakeStream stream;
+        stream.chunks = {{sse_chunk("改好了：罗")}};
+        stream.broke = {kBroke};
+        llm::RemoteClient c(test_cfg(), http.fn(), stream.fn());
+        llm::Request opts;
+        opts.on_token = [](const std::string&) {};
+        CHECK_THROWS_AS(c.chat({}, json::array(), opts, tok), llm::LlmError);
+        CHECK(stream.calls.size() == 1);
+    }
     SUBCASE("整段那条同样重发一趟") {
         llm::HttpResponse broke;
         broke.status = 0;

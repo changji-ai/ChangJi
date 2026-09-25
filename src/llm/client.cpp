@@ -813,8 +813,10 @@ std::string RemoteClient::complete(const Request& req,
             a = run(payload);
         }
         bool resent = false;
-        if (!a.canceled && a.text.empty() &&
+        // 正文来过一截的，调用方给了 `on_restart`（收得回）才重发，见 chat 那处。
+        if (!a.canceled && (a.text.empty() || req.on_restart) &&
             worth_resending(a.transport_error, a.secs, cfg.timeout_s)) {
+            if (!a.text.empty()) req.on_restart();
             const std::string notice = resend_notice();
             if (req.on_thinking) req.on_thinking(notice);
             log.append_thinking(notice);
@@ -1231,9 +1233,17 @@ ChatReply RemoteClient::chat(const std::vector<Message>& messages, const ordered
         // 断在半路、正文和工具调用一个字都还没来：原样再发一趟，见
         // worth_resending。**sse 要换一个新的**——断掉那一趟可能留着半行没
         // 凑完的字节，接着喂的话第二趟的第一行会被拼坏。
+        //
+        // 正文已经来过一截的：调用方给了 `on_restart`（收得回那半句）才重发，
+        // 先让它把推出去的那截作废。工具调用在流里攒着、还没交出去过，不用管。
         bool resent = false;
-        if (!canceled && content.empty() && sse.tool_calls().empty() &&
+        const bool can_take_back = content.empty() || static_cast<bool>(opts.on_restart);
+        if (!canceled && can_take_back &&
             worth_resending(r.transport_error, seconds_since(t0), cfg.timeout_s)) {
+            if (!content.empty()) {
+                opts.on_restart();
+                content.clear();
+            }
             const std::string notice = resend_notice();
             if (opts.on_thinking) opts.on_thinking(notice);
             log.append_thinking(notice);
