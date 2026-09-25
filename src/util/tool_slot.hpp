@@ -120,6 +120,8 @@ inline bool tool_is_read_only(std::string_view name) {
 inline bool tool_shows_nothing(std::string_view name) {
     return name == "project_state" || name == "list_projects" ||
            name == "create_project" || name == "tasks_read" ||
+           // 片名在侧栏和标题栏上，梗概不单占一格。
+           name == "project_edit" ||
            name == "task_cancel" || name == "ask_user" ||
            // 上网查的东西在对话里（那一行工具回话），不在哪一格面板上。
            name == "hot_topics" || name == "web_search" || name == "fetch_page" ||

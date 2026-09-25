@@ -666,6 +666,23 @@ TEST_CASE("改梗概") {
         });
         CHECK(r2.status == 400);
     }
+
+    SUBCASE("有故事时两份梗概一起改；没有故事不凭空建一份") {
+        // 原来只改 project.json：故事页上还是旧那句，下次从故事页一存又把旧的
+        // 写回 project.json。
+        models::ProjectStore store(proj);
+        CHECK_FALSE(fs::exists(store.paths().story_file()));
+        models::Story s;
+        s.premise = "旧梗概";
+        store.save_story(s);
+        const auto r2 = http::guard([&] {
+            return http::post_project_premise(
+                json{{"project", paths::to_utf8(proj)}, {"premise", "新梗概"}});
+        });
+        REQUIRE(r2.status == 200);
+        CHECK(store.load_story().premise == "新梗概");
+        CHECK(store.load_project().premise == "新梗概");
+    }
 }
 
 TEST_CASE("项目 id 的 slug 规则和角色的不一样") {

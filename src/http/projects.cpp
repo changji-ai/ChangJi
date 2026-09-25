@@ -281,6 +281,8 @@ ApiResult post_project_premise(const json& body) {
     const std::string premise = need_str(body, "premise");
 
     ProjectStore store(paths::from_utf8(path));
+    // 读→改→存在一把锁里（CLAUDE.md 第十四条）。
+    const auto guard = store.lock();
     Project project;
     try {
         project = store.load_project();
@@ -289,6 +291,17 @@ ApiResult post_project_premise(const json& body) {
     }
     project.premise = text::truncate_utf8(text::strip_ws(premise), 2000);
     store.save_project(project);
+    // **梗概在盘上有两份，两份一起改。** story.json 里那份是写大纲、故事页读的，
+    // project.json 里那份是写剧本的提示词读的。原来这儿只改后一份——故事页上
+    // 还是旧那句，下一次从故事页存一下又把旧的写回 project.json，一声不响
+    //（post_story 上那段说的是同一件事的另一头）。还没有故事就不凭空建一份。
+    if (fs::is_regular_file(store.paths().story_file())) {
+        models::Story story = store.load_story();
+        if (story.premise != project.premise) {
+            story.premise = project.premise;
+            store.save_story(story);
+        }
+    }
     return {200, {{"premise", project.premise}}};
 }
 
@@ -305,6 +318,9 @@ ApiResult post_project_rename(const json& body) {
     guard_not_running(canon, What::Rename);
 
     ProjectStore store(canon);
+    // 读→改→存在一把锁里（CLAUDE.md 第十四条）：不拿锁的话，读完、存之前别的
+    // 活正好存了一回 project.json，这边整份存回去就把那一回冲掉。
+    const auto guard = store.lock();
     Project project;
     try {
         project = store.load_project();
