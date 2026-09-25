@@ -156,6 +156,8 @@ EpisodePlan chapter_plan(const Story& story, const std::string& chapter_id,
 std::vector<ScenePlan> chapter_scene_plan(const Story& story,
                                           const EpisodePlan& plan) {
     std::vector<std::pair<std::string, int>> scene_chars;
+    // 每一场的原文和落点，和 scene_chars 一一对应（一场一次调用时单给它看）。
+    std::vector<std::pair<std::string, std::string>> body_stop;
     const int a = index_of(story, plan.from_chapter);
     if (a >= 0) {
         const int b0 = index_of(story, plan.to_chapter);
@@ -165,6 +167,7 @@ std::vector<ScenePlan> chapter_scene_plan(const Story& story,
             const int len = c.text_len();
             const int from = (i == a) ? plan.from_char : 0;
             const int to = (i == b) ? plan.to_char : len;
+            const std::vector<std::string> glyphs = text::utf8_chars(c.text);
             for (const Scene& s : c.scenes) {
                 if (s.to_char <= from || s.from_char >= to) continue;
                 std::string where;
@@ -173,8 +176,15 @@ std::vector<ScenePlan> chapter_scene_plan(const Story& story,
                 if (!s.goal.empty()) where += "：他要" + s.goal;
                 if (!s.obstacle.empty()) where += "；拦着他的是" + s.obstacle;
                 if (!s.turn.empty()) where += "。收在：" + s.turn;
-                const int chars = std::min(s.to_char, to) - std::max(s.from_char, from);
-                scene_chars.emplace_back(where, std::max(0, chars));
+                const int lo = std::max(s.from_char, from);
+                const int hi = std::min(s.to_char, to);
+                scene_chars.emplace_back(where, std::max(0, hi - lo));
+                std::string body;
+                for (int k = std::max(0, lo);
+                     k < hi && k < static_cast<int>(glyphs.size()); ++k) {
+                    body += glyphs[static_cast<std::size_t>(k)];
+                }
+                body_stop.emplace_back(std::move(body), s.turn);
             }
         }
     }
@@ -189,7 +199,12 @@ std::vector<ScenePlan> chapter_scene_plan(const Story& story,
         }
         scene_chars.emplace_back("", static_cast<int>(text::utf8_len(body)));
     }
-    return scene_plan_for_chapter(scene_chars);
+    std::vector<ScenePlan> out = scene_plan_for_chapter(scene_chars);
+    for (std::size_t i = 0; i < out.size() && i < body_stop.size(); ++i) {
+        out[i].body = std::move(body_stop[i].first);
+        out[i].stop = std::move(body_stop[i].second);
+    }
+    return out;
 }
 
 std::string truncate_middle(const std::string& body, std::size_t limit) {
@@ -340,12 +355,27 @@ std::string render_script_context(const Story& story, const EpisodePlan& plan,
     out += prompt::script_story::kScenesHead;
     for (std::size_t i = 0; i < chapter_scenes.size(); ++i) {
         const ScenePlan& p = chapter_scenes[i];
-        out += prompt::script_story::kSceneLinePre + std::to_string(i + 1) +
+        // 场号用这一场自己的：一场一次调用时只传一场进来，下标永远是 0。
+        const int number = p.number > 0 ? p.number : static_cast<int>(i + 1);
+        out += prompt::script_story::kSceneLinePre + std::to_string(number) +
                prompt::script_story::kSceneLineMid;
         if (!p.where.empty()) out += p.where + "。";
         out += prompt::script_story::kSceneLineBeatsPre +
                std::to_string(p.min_beats) +
                prompt::script_story::kSceneLineBeatsPost + "\n";
+    }
+
+    // **一章拆成一场一次调用时，说清这一次只写哪一场。** 原来拆开时提示词一个
+    // 字没动：清单上只剩一场、【这一章】还是整章、要求里写着「一章是一个完整
+    // 的故事」——2026-09-25 实跑，只有一场的那一次把整章四场全写进了 s1，后面
+    // 三次再各写一遍（见 prompts.toml 里 one_scene_pre 上那段）。
+    const ScenePlan* one = chapter_scenes.size() == 1 && chapter_scenes[0].of > 1
+                               ? &chapter_scenes[0]
+                               : nullptr;
+    if (one != nullptr) {
+        out += prompt::script_story::kOneScenePre + std::to_string(one->of) +
+               prompt::script_story::kOneSceneMid + std::to_string(one->number) +
+               prompt::script_story::kOneScenePost;
     }
 
     // 这一章要拍的。有正文用正文，没有就退回章节梗概。
@@ -370,11 +400,26 @@ std::string render_script_context(const Story& story, const EpisodePlan& plan,
         }
     }
 
+    // 一场一次调用：这一场自己那一段单独再给一遍——要拍的是它。
+    if (one != nullptr && !one->body.empty()) {
+        out += prompt::script_story::kOneSceneBodyHead;
+        out += truncate_middle(one->body, prompt::script_story::kChapterMaxChars);
+    }
+
     // 停在哪。**这一条是老路线完全没有的**：原来模型不知道自己该停在
     // 什么地方，结尾全凭它自己找一个落点，下一章接不接得上看运气。
     // 没有钩子也要写一句，规则里说了「停在【要停在】写的地方」。
-    out += "\n【这一章要停在】";
-    out += plan.hook.empty() ? prompt::script_story::kNoHookChapter : plan.hook;
+    //
+    // 一场一次调用、又不是最后一场：停在**这一场**的落点。给整章的钩子的话，
+    // 模型就一路写到整章的结尾。
+    if (one != nullptr && one->number < one->of) {
+        out += prompt::script_story::kSceneStopHead;
+        out += text::strip_ws(one->stop).empty() ? prompt::script_story::kNoStopScene
+                                                 : one->stop;
+    } else {
+        out += "\n【这一章要停在】";
+        out += plan.hook.empty() ? prompt::script_story::kNoHookChapter : plan.hook;
+    }
     out += "\n";
 
     return out;

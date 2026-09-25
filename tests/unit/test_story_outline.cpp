@@ -1076,6 +1076,74 @@ TEST_CASE("上下文：前情是压缩过的，而且只到这一章之前") {
     CHECK(ctx.find("前任") != std::string::npos);
 }
 
+TEST_CASE("一场一次调用：说清只写哪一场，场号对，停在这一场的落点") {
+    // 2026-09-25 拿 glm-5.3 实跑撞到：一章拆成一场一次调用时提示词一个字没动，
+    // 清单上只剩一场（还写成「第 1 场」）、【这一章】是整章、停在整章的钩子上——
+    // 第一场那一次把整章四场全写进了 s1，后面三次再各写一遍。
+    Story s = written_story();
+    Chapter& c = s.chapters[1];
+    c.text.clear();
+    for (int k = 0; k < 300; ++k) c.text += "一";
+    for (int k = 0; k < 300; ++k) c.text += "二";
+    for (int k = 0; k < 400; ++k) c.text += "三";
+    c.scenes.clear();
+    const char* wheres[] = {"天台", "咖啡馆", "地铁站"};
+    const char* turns[] = {"她转身走了", "他没接电话", "门关上了"};
+    const int bounds[] = {0, 300, 600, 1000};
+    for (int i = 0; i < 3; ++i) {
+        Scene sc;
+        sc.from_char = bounds[i];
+        sc.to_char = bounds[i + 1];
+        sc.where = wheres[i];
+        sc.turn = turns[i];
+        c.scenes.push_back(sc);
+    }
+    EpisodePlan p;
+    p.episode_id = "ep02";
+    p.from_chapter = p.to_chapter = c.chapter_id;
+    p.from_char = 0;
+    p.to_char = 1000;
+    p.hook = "整章的钩子";
+
+    const auto scenes = changji::stages::chapter_scene_plan(s, p);
+    REQUIRE(scenes.size() == 3);
+    CHECK(scenes[1].number == 2);
+    CHECK(scenes[1].of == 3);
+    CHECK(scenes[1].stop == "他没接电话");
+    CHECK(scenes[1].body.find("二二二") != std::string::npos);
+    CHECK(scenes[1].body.find("一") == std::string::npos);
+    CHECK(scenes[1].body.find("三") == std::string::npos);
+
+    SUBCASE("中间那一场") {
+        const std::string ctx =
+            changji::stages::render_script_context(s, p, "", {scenes[1]});
+        CAPTURE(ctx);
+        CHECK(ctx.find("第 2 场：咖啡馆") != std::string::npos);   // 不是「第 1 场」
+        CHECK(ctx.find("只写第 2 场") != std::string::npos);
+        CHECK(ctx.find("一共 3 场") != std::string::npos);
+        CHECK(ctx.find("【这一场的原文】") != std::string::npos);
+        // 停在这一场的落点，不是整章的钩子
+        CHECK(ctx.find("【这一场要停在】他没接电话") != std::string::npos);
+        CHECK(ctx.find("【这一章要停在】") == std::string::npos);
+        // 整章还在：那是上下文
+        CHECK(ctx.find("【这一章】") != std::string::npos);
+    }
+    SUBCASE("最后一场停在整章的钩子上") {
+        const std::string ctx =
+            changji::stages::render_script_context(s, p, "", {scenes[2]});
+        CHECK(ctx.find("只写第 3 场") != std::string::npos);
+        CHECK(ctx.find("【这一章要停在】整章的钩子") != std::string::npos);
+        CHECK(ctx.find("【这一场要停在】") == std::string::npos);
+    }
+    SUBCASE("整章一次调用：跟原来一样") {
+        const std::string ctx = changji::stages::render_script_context(s, p, "", scenes);
+        CHECK(ctx.find("【这一次只写一场】") == std::string::npos);
+        CHECK(ctx.find("【这一场的原文】") == std::string::npos);
+        CHECK(ctx.find("第 3 场：地铁站") != std::string::npos);
+        CHECK(ctx.find("【这一章要停在】整章的钩子") != std::string::npos);
+    }
+}
+
 TEST_CASE("第一章没有前情") {
     const Story s = written_story();
     const auto scenes = changji::stages::chapter_scene_plan(s, s.plan[0]);

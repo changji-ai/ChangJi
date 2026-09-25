@@ -260,6 +260,14 @@ struct ScenePlan {
     int chars = 0;      ///< 这一场的原文字数
     int min_beats = 0;
     int max_beats = 0;
+    /// 这一章里的第几场（从 1 数）、一共几场。**一场一次调用时靠它们**说清
+    /// "这一次只写第几场"（http/scripting.cpp）——只传一场进去的时候，下标
+    /// 永远是 0，清单上会把第三场写成「第 1 场」。
+    int number = 0;
+    int of = 0;
+    /// 这一场的原文、落点（场的 turn）。一场一次调用时单给它看。
+    std::string body;
+    std::string stop;
 };
 
 /// 按各场的字数给拍数。`scene_chars` 空时整章当一场。

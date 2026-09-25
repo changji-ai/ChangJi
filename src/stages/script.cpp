@@ -590,6 +590,8 @@ std::vector<ScenePlan> scene_plan_for_chapter(
     for (std::size_t i = 0; i < src.size(); ++i) {
         ScenePlan p;
         p.key = "s" + std::to_string(i + 1);
+        p.number = static_cast<int>(i + 1);
+        p.of = static_cast<int>(src.size());
         p.where = src[i].first;
         p.chars = std::max(0, src[i].second);
         // 一拍六十字起步、二十字封顶。再短的场也有四拍：场次头、环境、
