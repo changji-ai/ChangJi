@@ -228,6 +228,9 @@ endif()
 # 那边不经过 Crow 的写响应那一步。详见脚本里的注释。
 include("${CMAKE_CURRENT_LIST_DIR}/cmake/patch_crow_422.cmake")
 changji_patch_crow_422("${crow_SOURCE_DIR}/include")
+# Crow 发静态文件走窄字符 API：Windows 上带中文的片子目录里一张图都发不出去。
+include("${CMAKE_CURRENT_LIST_DIR}/cmake/patch_crow_utf8_path.cmake")
+changji_patch_crow_utf8_path("${crow_SOURCE_DIR}/include")
 
 # ⚠️ **httplib 的头文件目录不能是 SYSTEM。**
 #
@@ -1432,6 +1435,7 @@ if(CHANGJI_BUILD_TESTS)
         tests/unit/test_capability.cpp
         tests/unit/test_peer_auth.cpp
         tests/unit/test_request_guard.cpp
+        tests/unit/test_crow_static.cpp
         tests/unit/test_blob.cpp
         tests/unit/test_node_pick.cpp
         tests/unit/test_node_table.cpp
