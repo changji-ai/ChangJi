@@ -21,6 +21,8 @@
   "  ⚠️ 不到 1.05 秒。流水线里的静音检测会把这种当空音频拦下来。\n     念一句长一点的再看看是不是真的出声了。\n": "  ⚠️ Menos de 1,05 s. A detecção de silêncio da linha trata isso como áudio vazio e barra.\n     Tente uma frase mais longa e veja se saiu som mesmo.\n",
   " · 来自「%1」": " · de “%1”",
   " 「%1」": " “%1”",
+  " 人：%1": " pessoas: %1",
+  " 画面：%1": " imagem: %1",
   " 等 %1 个": " e mais %1",
   "%1 · %2": "%1 · %2",
   "%1 · %2 字\n%3": "%1 · tamanho: %2\n%3",

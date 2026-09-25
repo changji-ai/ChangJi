@@ -21,6 +21,8 @@
   "  ⚠️ 不到 1.05 秒。流水线里的静音检测会把这种当空音频拦下来。\n     念一句长一点的再看看是不是真的出声了。\n": "  ⚠️ Under 1.05 s. The silence check in the pipeline treats that as empty audio and stops it.\n     Try a longer line and see whether it really made a sound.\n",
   " · 来自「%1」": " · from “%1”",
   " 「%1」": " “%1”",
+  " 人：%1": " people: %1",
+  " 画面：%1": " shows: %1",
   " 等 %1 个": " and %1 more",
   "%1 · %2": "%1 · %2",
   "%1 · %2 字\n%3": "%1 · length: %2\n%3",
