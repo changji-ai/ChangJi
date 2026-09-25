@@ -118,6 +118,8 @@ ApiResult post_character(const json& body) {
     const json patch = patch_of(body);
     ProjectStore store = open_for_patch(body, patch, kAllowed);
     const std::string char_id = need_str(body, "char_id");
+    // 读→改→存一把锁（CLAUDE.md 第十四条）。
+    const auto store_guard = store.lock();
 
     AssetLibrary assets = store.load_assets();
     const auto it = assets.characters.find(char_id);
@@ -157,7 +159,9 @@ ApiResult post_character(const json& body) {
     const std::string rendered = c.render_prompt(assets.style.style_line);
     store.save_assets(assets);
 
-    const int reset = (touched && want_reset(body, true)) ? reset_all_shots(store) : 0;
+    // 只退画面里有他的那几镜（reset.hpp 上那段）。
+    const int reset =
+        (touched && want_reset(body, true)) ? reset_shots_with_character(store, char_id) : 0;
     return {200, {{"saved", true}, {"rendered", rendered}, {"reset_shots", reset}}};
 }
 
@@ -168,6 +172,7 @@ ApiResult post_location(const json& body) {
     const json patch = patch_of(body);
     ProjectStore store = open_for_patch(body, patch, kAllowed);
     const std::string location_id = need_str(body, "location_id");
+    const auto store_guard = store.lock();   // 读→改→存一把锁
 
     AssetLibrary assets = store.load_assets();
     const auto it = assets.locations.find(location_id);
@@ -198,7 +203,9 @@ ApiResult post_location(const json& body) {
     const std::string rendered = l.render_prompt(assets.style.style_line);
     store.save_assets(assets);
 
-    const int reset = (touched && want_reset(body, true)) ? reset_all_shots(store) : 0;
+    // 只退在这个场景里的那几镜。
+    const int reset =
+        (touched && want_reset(body, true)) ? reset_shots_at_location(store, location_id) : 0;
     return {200, {{"saved", true}, {"rendered", rendered}, {"reset_shots", reset}}};
 }
 
@@ -213,6 +220,7 @@ ApiResult post_style(const json& body) {
     };
     const json patch = patch_of(body);
     ProjectStore store = open_for_patch(body, patch, kAllowed);
+    const auto store_guard = store.lock();   // 读→改→存一把锁
 
     AssetLibrary assets = store.load_assets();
     const json before = assets.style;

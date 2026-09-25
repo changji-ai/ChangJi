@@ -62,19 +62,19 @@
       },
       "body": {
         "rendered": "linyuan_v3，三十岁上下的男性，沉默寡言，偏瘦，肩背挺直，改成了单眼皮，长发，深灰西装，衬衫领口松着，低饱和，胶片颗粒",
-        "reset_shots": 1,
+        "reset_shots": 0,
         "saved": true
       },
       "compare": "full",
       "extra": {
         "char_id": "c_lin_yuan"
       },
-      "name": "改外观_触发重跑",
+      "name": "改外观_镜头里没有他就不退",
       "patch": {
         "face": "改成了单眼皮，长发"
       },
       "reset_shots": null,
-      "shot_status_after": "planned",
+      "shot_status_after": "audio_done",
       "status": 200,
       "url": "/api/character"
     },

@@ -299,7 +299,8 @@ json character_ref_job(const std::string& project_path,
         {"height", out.height},
         {"steps", out.steps},
         {"seconds", out.seconds},
-        {"reset_shots", reset_all_shots(store)},
+        // 只退画面里有他的那几镜（reset.hpp 上那段）。
+        {"reset_shots", reset_shots_with_character(store, char_id)},
     };
 }
 
@@ -401,7 +402,7 @@ json location_ref_job(const std::string& project_path,
         {"height", out.height},
         {"steps", out.steps},
         {"seconds", out.seconds},
-        {"reset_shots", reset_all_shots(store)},
+        {"reset_shots", reset_shots_at_location(store, location_id)},
     };
 }
 

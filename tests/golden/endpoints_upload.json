@@ -61,7 +61,7 @@
         }
       },
       "body": {
-        "reset_shots": 1,
+        "reset_shots": 0,
         "saved": "refs/c_lin_yuan_front.png",
         "size_kb": 0,
         "slot": "front"
@@ -141,7 +141,7 @@
         }
       },
       "body": {
-        "reset_shots": 1,
+        "reset_shots": 0,
         "saved": "refs/c_lin_yuan_three_quarter.jpg",
         "size_kb": 0,
         "slot": "three_quarter"

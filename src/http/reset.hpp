@@ -44,4 +44,17 @@ int reset_all_shots(const models::ProjectStore& store);
 int reset_shots_in(const models::ProjectStore& store,
                    const std::set<std::string>& episode_ids);
 
+/// 同样的规则，但**只动画面里有这个角色的镜头**（`shot.characters` 里有它）。
+///
+/// 改一个角色的外观、换他的参考图——别的角色、空镜的提示词一个字都没变。
+/// 2026-09-25 之前这几处全走 reset_all_shots：给罗春梅换一件外套，林知夏的
+/// 独角戏也全退回待跑，下一次按「开始」白重出一两百镜（同上面 reset_shots_in
+/// 那段是一回事）。说话但不在画面里的（旁白、画外音）不算：外观管不着声音。
+int reset_shots_with_character(const models::ProjectStore& store,
+                               const std::string& char_id);
+
+/// 同样的规则，但**只动在这个场景里的镜头**（`shot.location_id`）。
+int reset_shots_at_location(const models::ProjectStore& store,
+                            const std::string& location_id);
+
 }  // namespace changji::http

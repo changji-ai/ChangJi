@@ -310,7 +310,8 @@ ApiResult post_character_reference(const std::string& project_path,
     return {200, {
         {"saved", rel},
         {"slot", slot},
-        {"reset_shots", reset_all_shots(store)},
+        // 只退画面里有他的那几镜（reset.hpp 上那段）。
+        {"reset_shots", reset_shots_with_character(store, char_id)},
         {"size_kb", size_kb(data)},
     }};
 }
@@ -417,7 +418,7 @@ ApiResult post_location_reference(const std::string& project_path,
     // 注意响应里**没有 slot 字段**，和角色那个不一样。场景只有一张空景图。
     return {200, {
         {"saved", rel},
-        {"reset_shots", reset_all_shots(store)},
+        {"reset_shots", reset_shots_at_location(store, location_id)},
         {"size_kb", size_kb(data)},
     }};
 }
@@ -450,7 +451,7 @@ ApiResult post_character_reference_clear(const json& body) {
 
     // 文件留着不删。用户可能只是想先试试没有参考图的效果，
     // 删掉的话再想用回来就得重新找那张图。
-    return {200, {{"cleared", true}, {"reset_shots", reset_all_shots(store)}}};
+    return {200, {{"cleared", true}, {"reset_shots", reset_shots_with_character(store, char_id)}}};
 }
 
 ApiResult post_location_reference_clear(const json& body) {
@@ -470,7 +471,7 @@ ApiResult post_location_reference_clear(const json& body) {
     }
     l.ref_empty = std::nullopt;
     store.save_assets(assets);
-    return {200, {{"cleared", true}, {"reset_shots", reset_all_shots(store)}}};
+    return {200, {{"cleared", true}, {"reset_shots", reset_shots_at_location(store, location_id)}}};
 }
 
 }  // namespace changji::http

@@ -61,6 +61,56 @@ http::ApiResult dispatch(const std::string& url, const json& body) {
 
 }  // namespace
 
+TEST_CASE("改一个角色、一个场景：只退用到它的那几镜") {
+    // 原来一律 reset_all_shots：给罗春梅换件外套，林知夏的独角戏也全退回待跑，
+    // 下一次按「开始」白重出一两百镜。
+    const fs::path root = fresh_copy("targeted");
+    models::ProjectStore store(root);
+    {
+        models::Project p = store.load_project();
+        models::Episode& ep = *p.episode_by_id("ep01");
+        // 两镜都出过画面：一镜有林远、在天台；一镜谁都没有、在小巷。
+        models::Shot& with = *ep.shot_by_id("ep01_s03_sh007");
+        with.characters.clear();
+        models::CharacterInShot c;
+        c.char_id = "c_lin_yuan";
+        with.characters.push_back(c);
+        with.location_id = "loc_rooftop";
+        with.status = models::ShotStatus::AUDIO_DONE;
+        models::Shot& other = *ep.shot_by_id("ep01_s01_sh001");
+        other.characters.clear();
+        other.location_id = "loc_alley";
+        other.status = models::ShotStatus::AUDIO_DONE;
+        store.save_project(p);
+    }
+    const auto status_of = [&](const char* sid) {
+        return std::string(models::to_string(
+            store.load_project().episode_by_id("ep01")->shot_by_id(sid)->status));
+    };
+
+    const auto r = http::guard([&] {
+        return http::post_character(json{{"project", paths::to_utf8(root)},
+                                         {"char_id", "c_lin_yuan"},
+                                         {"patch", {{"attire", "换了一件雨衣"}}}});
+    });
+    REQUIRE(r.status == 200);
+    CHECK(r.body.at("reset_shots") == 1);
+    CHECK(status_of("ep01_s03_sh007") == "planned");
+    CHECK(status_of("ep01_s01_sh001") == "audio_done");   // 画面里没有他：不动
+
+    const auto l = http::guard([&] {
+        return http::post_location(json{{"project", paths::to_utf8(root)},
+                                        {"location_id", "loc_alley"},
+                                        {"patch", {{"lighting", "路灯坏了一盏"}}}});
+    });
+    REQUIRE(l.status == 200);
+    CHECK(l.body.at("reset_shots") == 1);
+    CHECK(status_of("ep01_s01_sh001") == "planned");
+
+    std::error_code ec;
+    fs::remove_all(root, ec);
+}
+
 TEST_CASE("资产编辑接口与 Python 逐条对拍") {
     const json g = load_golden("endpoints_asset_edit");
     int idx = 0;
