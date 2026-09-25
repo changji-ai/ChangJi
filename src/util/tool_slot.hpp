@@ -32,7 +32,7 @@ inline std::string slot_of_tool(std::string_view name) {
         return "story";
     }
     // 设定（人物场景的参考图）
-    if (name == "assets_read" || name == "assets_set_reference" ||
+    if (name == "assets_read" || name == "assets_set_reference" || name == "asset_edit" ||
         name == "assets_understand" || name == "refs_make") {
         return "assets";
     }
@@ -79,7 +79,7 @@ inline bool tool_rewrites(std::string_view name) {
     return name == "story_outline" || name == "story_write_chapters" ||
            name == "chapter_edit" || name == "chapter_add" || name == "script_write_all" || name == "storyboard_plan_all" ||
            name == "shot_edit" || name == "refs_make" ||
-           name == "assets_set_reference" || name == "assets_understand" ||
+           name == "assets_set_reference" || name == "asset_edit" || name == "assets_understand" ||
            name == "render_run" || name == "film_join";
 }
 
