@@ -28,24 +28,13 @@ jobs:
     name: Web UI (build + bake into a header)
     runs-on: ubuntu-24.04
     steps:
-      # ⚠️ **Two checkouts, and the order matters.**
-      #
-      # This repository holds the engine only. The web UI, the desktop shell
-      # and the brand assets live in the private product repository, so the
-      # packaging pipeline pulls that one in as well.
+      # One checkout: the product repo, whose own `cpp/` is what gets built
+      # (see the meta job in release.yml).
       #
       # Layout that every path in these workflow files assumes:
       #
       #   changji/            <- the private product repo (webapp/, desktop/, brand/)
-      #   changji/cpp/        <- THIS repo, checked out over whatever is there
-      #
-      # The product repo keeps `cpp/` as a submodule pointing at this one, and
-      # `actions/checkout` leaves submodules alone unless asked — so that path
-      # arrives empty. It is removed and checked out anyway: the removal is what
-      # covers the other two cases, a checkout that did ask for submodules (it
-      # would hold the *pinned* commit, not this one) and the copy the product
-      # repo tracked file-by-file before 2026-09-22. Skip the step and the build
-      # uses the wrong core, or no core at all, and nothing in its output says so.
+      #   changji/cpp/        <- the engine, as the product repo tracks it
       - name: Check out the product repo
         uses: actions/checkout@v4
         with:
@@ -57,13 +46,6 @@ jobs:
           ref: ${{ inputs.product_ref }}
           path: changji
 
-      - name: Lay this repo's core over changji/cpp
-        shell: bash
-        run: rm -rf changji/cpp
-
-      - uses: actions/checkout@v4
-        with:
-          path: changji/cpp
 
       - uses: actions/setup-node@v4
         with:

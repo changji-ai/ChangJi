@@ -89,6 +89,9 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       product_ref: ${{ steps.pref.outputs.ref }}
+      # The product commit actually built. Everything in the package —
+      # engine included — comes from it, so the release notes name it.
+      product_sha: ${{ steps.v.outputs.product_sha }}
       version: ${{ steps.v.outputs.version }}
       tag: ${{ steps.v.outputs.tag }}
       channel: ${{ steps.v.outputs.channel }}
@@ -162,9 +165,11 @@ jobs:
           echo "product repo: $REPO@$ref"
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
 
-      # Two checkouts; see the meta job in release.yml for the full reasoning.
-      # ⚠️ **`fetch-depth: 0` on this repo**: the version is *counted*
-      # (`cpp/tools/version.sh`), and a single-commit clone counts 0, silently.
+      # One checkout, the product repo, and its own `cpp/` is what gets built;
+      # see the meta job in release.yml for the full reasoning.
+      # ⚠️ **`fetch-depth: 0` on the product repo**: the version is *counted*
+      # (`cpp/tools/version.sh`) from its history, and a single-commit clone
+      # counts 0, silently.
       - name: Check out the product repo
         uses: actions/checkout@v4
         with:
@@ -175,12 +180,6 @@ jobs:
           # through, or a branch there would silently be built against main.
           ref: ${{ steps.pref.outputs.ref }}
           path: changji
-      - name: Lay this repo's core over changji/cpp
-        shell: bash
-        run: rm -rf changji/cpp
-      - uses: actions/checkout@v4
-        with:
-          path: changji/cpp
           fetch-depth: 0
 
       - id: v
@@ -208,6 +207,7 @@ jobs:
             echo "version=$(sh changji/cpp/tools/version.sh)-${GITHUB_REF_NAME//\//-}" >> "$GITHUB_OUTPUT"
             echo "channel=beta" >> "$GITHUB_OUTPUT"
           fi
+          echo "product_sha=$(git -C changji rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           cat "$GITHUB_OUTPUT"
 
   webapp:
@@ -336,9 +336,8 @@ jobs:
           - { target: linux-arm64,        runner: ubuntu-24.04-arm, gpu: cpu,    qthost: linux_arm64,   qtarch: linux_gcc_arm64,      ssl: linux-arm64 }
           - { target: linux-arm64-cuda,   runner: ubuntu-24.04-arm, gpu: cuda,   qthost: linux_arm64,   qtarch: linux_gcc_arm64,      ssl: linux-arm64 }
     steps:
-      # Two checkouts; see the meta job in release.yml. `desktop/` and
-      # `webapp/` live in the product repo, so this job cannot run on this
-      # repository alone.
+      # One checkout, the product repo (engine included); see the meta job in
+      # release.yml.
       - name: Check out the product repo
         uses: actions/checkout@v4
         with:
@@ -349,12 +348,6 @@ jobs:
           # through, or a branch there would silently be built against main.
           ref: ${{ needs.meta.outputs.product_ref }}
           path: changji
-      - name: Lay this repo's core over changji/cpp
-        shell: bash
-        run: rm -rf changji/cpp
-      - uses: actions/checkout@v4
-        with:
-          path: changji/cpp
 
       # CHANGJI_LLAMA=ON needs a Python: llama.cpp is patched in place with
       # leejet's extensions after it is fetched, and configure stops dead
@@ -1002,6 +995,7 @@ jobs:
           # empty while what was actually used is the same-name pairing (or
           # the fallback). The notes have to name the version that went in.
           PRODUCT_REF: ${{ needs.meta.outputs.product_ref }}
+          PRODUCT_SHA: ${{ needs.meta.outputs.product_sha }}
         run: |
           set -e
           # Delete before creating: the tag would otherwise stay pinned to the
@@ -1083,13 +1077,12 @@ jobs:
             echo "| | |"
             echo "|---|---|"
             echo "| Branch | \`${GITHUB_REF_NAME}\` |"
-            echo "| Commit | ${GITHUB_SHA} |"
-            # **The desktop shell itself comes from the other repository.**
-            # The branch above is this repo's; when the run was triggered from
-            # over there, that is the branch that actually changed, and without
-            # this line the notes say "main" while the shell came from a
-            # feature branch.
-            [ -n "$PRODUCT_REF" ] && echo "| Shell and web UI from | \`$PRODUCT_REF\` |"
+            # **Everything in this package — shell, web UI and engine — is
+            # built from the product repo** (see the meta job in release.yml).
+            # The branch above is this pipeline's; without this line the notes
+            # say "main" while the sources came from a feature branch.
+            echo "| Built from | \`$PRODUCT_REF\` @ ${PRODUCT_SHA} |"
+            echo "| Workflow commit | ${GITHUB_SHA} |"
             echo "| Built | $(date -u '+%Y-%m-%d %H:%M UTC') |"
           } > body.md
           # Prerelease: `/releases/latest` does not point at it, so anyone

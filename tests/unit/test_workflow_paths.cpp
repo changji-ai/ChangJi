@@ -94,9 +94,11 @@ enum class Where { kHere, kProduct };
 /// ⚠️ **The workspace layout the yml files are written against:**
 ///
 ///     changji/          the private product repo (webapp/, desktop/, brand/)
-///     changji/cpp/      THIS repo, laid on top of the copy in there
+///     changji/cpp/      this engine, as the product repo tracks it (since
+///                       2026-09-25 CI builds that copy; it no longer lays this
+///                       repo's own checkout on top)
 ///
-/// So `changji/cpp/X` is this repo's `X`, while `changji/Y` is the product
+/// So `changji/cpp/X` is this tree's `X`, while `changji/Y` is the product
 /// repo's `Y`. Everything else is already relative to this repo's root.
 std::pair<fs::path, Where> resolve_ci(const std::string& p) {
     static const std::string kProduct = "changji/";

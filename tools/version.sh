@@ -33,7 +33,17 @@ if ! git -C "$HERE" rev-parse --git-dir >/dev/null 2>&1; then
 fi
 
 # 哪一个提交把这个前缀写进来的。`-S` 是"哪一次改动让这个串出现/消失"。
-BORN=$(git -C "$HERE" log -1 --format=%H -S"CHANGJI_VERSION_PREFIX \"$PREFIX\"" -- "$CMAKE" 2>/dev/null || true)
+#
+# ⚠️ **只认改了那一行的提交（`--diff-filter=M`），整个文件加进来、删掉的不算。**
+# 外层仓库里 cpp/ 先是逐文件跟着、2026-09-22 变成 gitlink（文件整个「删掉」）、
+# 2026-09-25 又变回逐文件（整个「加回来」）——不筛的话最近那一笔是加回来的那次，
+# 计数从 0 重来，版本号往回掉，而且一声不响。一次 M 都没有（前缀从仓库第一天
+# 就是这个）时退回**最早**那次加进来的。
+S="CHANGJI_VERSION_PREFIX \"$PREFIX\""
+BORN=$(git -C "$HERE" log -1 --format=%H --diff-filter=M -S"$S" -- "$CMAKE" 2>/dev/null || true)
+if [ -z "$BORN" ]; then
+    BORN=$(git -C "$HERE" log --format=%H --diff-filter=A -S"$S" -- "$CMAKE" 2>/dev/null | tail -1 || true)
+fi
 
 if [ -z "$BORN" ]; then
     # 找不到（浅克隆、或者这一行还没提交过）：报 0，**但说一句**。

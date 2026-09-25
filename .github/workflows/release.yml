@@ -90,6 +90,9 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       product_ref: ${{ steps.pref.outputs.ref }}
+      # The product commit actually built. Everything in the package —
+      # engine included — comes from it, so the release notes name it.
+      product_sha: ${{ steps.v.outputs.product_sha }}
       version: ${{ steps.v.outputs.version }}
       channel: ${{ steps.v.outputs.channel }}
       gpu: ${{ steps.v.outputs.gpu }}
@@ -163,28 +166,26 @@ jobs:
           echo "product repo: $REPO@$ref"
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
 
-      # ⚠️ **Two checkouts, and the order matters.**
-      #
-      # This repository holds the engine only. The web UI, the desktop shell
-      # and the brand assets live in the private product repository, which the
-      # packaging pipeline pulls in as well.
+      # ⚠️ **One checkout: the product repo, and its own `cpp/` is what gets
+      # built.**
       #
       # Layout that every path in these workflow files assumes:
       #
       #   changji/            <- the private product repo (webapp/, desktop/, brand/)
-      #   changji/cpp/        <- THIS repo, checked out over whatever is there
+      #   changji/cpp/        <- the engine, as the product repo tracks it
       #
-      # The product repo keeps `cpp/` as a submodule pointing at this one, and
-      # `actions/checkout` leaves submodules alone unless asked — so that path
-      # arrives empty. It is removed and checked out anyway: that also covers a
-      # checkout which did ask for submodules (it would hold the *pinned*
-      # commit, not this one). Build the wrong core and nothing in the output
-      # says so.
+      # Since 2026-09-25 the product repo tracks `cpp/` as plain files, not as
+      # a submodule, and **that copy is the one packaged**. This repository's
+      # own checkout is no longer laid over `changji/cpp` (until then every job
+      # did `rm -rf changji/cpp` and checked this repo out in its place). So a
+      # run started from here builds the product ref picked above — engine
+      # included — not the commit that triggered it.
       #
-      # ⚠️ **`fetch-depth: 0` on this repo.** The version is *counted*
+      # ⚠️ **`fetch-depth: 0` on the product repo.** The version is *counted*
       # (`cpp/tools/version.sh` asks git how many commits separate the commit
-      # that set the current prefix from HEAD). The default single-commit clone
-      # does not contain that commit, so the count is always 0 — silently.
+      # that set the current prefix from HEAD), and that history is now the
+      # product repo's. The default single-commit clone does not contain that
+      # commit, so the count is always 0 — silently.
       - name: Check out the product repo
         uses: actions/checkout@v4
         with:
@@ -195,21 +196,6 @@ jobs:
           # through, or a branch there would silently be built against main.
           ref: ${{ steps.pref.outputs.ref }}
           path: changji
-
-      # ⚠️ **`shell: bash` on every one of these, Windows or not.** The
-      # default shell on a Windows runner is PowerShell, where `rm -rf` is not
-      # a command — `rm` is an alias for Remove-Item and `-rf` is not one of
-      # its parameters. The `desktop-build` cell went red on exactly this in
-      # the first real run, at the third step, before Qt was even installed.
-      # Spelling it out uniformly costs nothing and removes the whole class:
-      # a cell that gains a Windows entry later cannot reintroduce it.
-      - name: Lay this repo's core over changji/cpp
-        shell: bash
-        run: rm -rf changji/cpp
-
-      - uses: actions/checkout@v4
-        with:
-          path: changji/cpp
           fetch-depth: 0
 
       - id: v
@@ -244,6 +230,7 @@ jobs:
             echo "version=$(sh changji/cpp/tools/version.sh)-${GITHUB_REF_NAME//\//-}" >> "$GITHUB_OUTPUT"
             echo "channel=beta" >> "$GITHUB_OUTPUT"
           fi
+          echo "product_sha=$(git -C changji rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           cat "$GITHUB_OUTPUT"
 
   # ---- Web UI ----
@@ -282,31 +269,18 @@ jobs:
       matrix:
         os: [ubuntu-24.04, macos-15]
     steps:
-      # Two checkouts; see the meta job for why — except that here the first
-      # one is **allowed to fail**.
-      #
-      # The unit tests need nothing from the product repo. Requiring its token
-      # would mean that anybody without it — a fork, an outside contributor —
-      # cannot run the tests on this public repository at all, which is a
-      # strange thing for the tests to demand. With the token present, the
-      # checkout succeeds and `test_workflow_paths` also verifies the paths
-      # pointing into that repo; without it, that test reports how many it
-      # skipped and checks the rest.
-      - name: Check out the product repo (optional here)
+      # One checkout; see the meta job for why. It used to be optional here
+      # (the tests came from this repo's own checkout); now the sources under
+      # test are the product repo's `cpp/`, so without it there is nothing to
+      # build.
+      - name: Check out the product repo
         id: product
-        continue-on-error: true
         uses: actions/checkout@v4
         with:
           repository: integemjack/changji
           token: ${{ secrets.CHANGJI_PRODUCT_TOKEN }}
           ref: ${{ needs.meta.outputs.product_ref }}
           path: changji
-      - name: Lay this repo's core over changji/cpp
-        shell: bash
-        run: rm -rf changji/cpp
-      - uses: actions/checkout@v4
-        with:
-          path: changji/cpp
 
       - name: Install ninja
         run: |
@@ -370,8 +344,7 @@ jobs:
       matrix:
         os: [ubuntu-24.04, macos-15, windows-2022]
     steps:
-      # Two checkouts; see the meta job for why. The desktop sources come from
-      # the product repo, so this job cannot run on this repository alone.
+      # One checkout, the product repo (engine included); see the meta job.
       - name: Check out the product repo
         uses: actions/checkout@v4
         with:
@@ -382,12 +355,6 @@ jobs:
           # through, or a branch there would silently be built against main.
           ref: ${{ needs.meta.outputs.product_ref }}
           path: changji
-      - name: Lay this repo's core over changji/cpp
-        shell: bash
-        run: rm -rf changji/cpp
-      - uses: actions/checkout@v4
-        with:
-          path: changji/cpp
 
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
@@ -505,7 +472,7 @@ jobs:
             # keeps using MSVC.
             toolset: ClangCL
     steps:
-      # Two checkouts; see the meta job for why.
+      # One checkout, the product repo (engine included); see the meta job.
       - name: Check out the product repo
         uses: actions/checkout@v4
         with:
@@ -516,12 +483,6 @@ jobs:
           # through, or a branch there would silently be built against main.
           ref: ${{ needs.meta.outputs.product_ref }}
           path: changji
-      - name: Lay this repo's core over changji/cpp
-        shell: bash
-        run: rm -rf changji/cpp
-      - uses: actions/checkout@v4
-        with:
-          path: changji/cpp
 
       # CHANGJI_LLAMA=ON needs a Python: llama.cpp is patched in place with
       # leejet's extensions after it is fetched (patches/apply_to_llamacpp.py),
@@ -964,7 +925,7 @@ jobs:
           - { target: windows-x64-cuda,   runner: windows-2022, gpu: cuda }
           - { target: windows-x64-vulkan, runner: windows-2022, gpu: vulkan }
     steps:
-      # Two checkouts; see the meta job for why.
+      # One checkout, the product repo (engine included); see the meta job.
       - name: Check out the product repo
         uses: actions/checkout@v4
         with:
@@ -975,12 +936,6 @@ jobs:
           # through, or a branch there would silently be built against main.
           ref: ${{ needs.meta.outputs.product_ref }}
           path: changji
-      - name: Lay this repo's core over changji/cpp
-        shell: bash
-        run: rm -rf changji/cpp
-      - uses: actions/checkout@v4
-        with:
-          path: changji/cpp
 
       # A runner has twenty-odd gigabytes free, and CUDA's intermediates (one
       # set per architecture) are more than ten. **Not clearing space shows up
@@ -1553,6 +1508,8 @@ jobs:
         env:
           CJ_VERSION: ${{ needs.meta.outputs.version }}
           CJ_CHANNEL: ${{ needs.meta.outputs.channel }}
+          # The product commit: that is where every byte in dist/ came from.
+          CJ_COMMIT: ${{ needs.meta.outputs.product_sha }}
         run: |
           python3 - <<'PY' > version.json
           import hashlib, json, os, pathlib, time
@@ -1563,7 +1520,7 @@ jobs:
           print(json.dumps({
               'version': os.environ['CJ_VERSION'],
               'channel': os.environ['CJ_CHANNEL'],
-              'commit': os.environ.get('GITHUB_SHA', ''),
+              'commit': os.environ.get('CJ_COMMIT', ''),
               'built_at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
               'assets': assets,
           }, ensure_ascii=False, indent=1))
@@ -1690,6 +1647,7 @@ jobs:
           # empty while what was actually used is the same-name pairing (or
           # the fallback). The notes have to name the version that went in.
           PRODUCT_REF: ${{ needs.meta.outputs.product_ref }}
+          PRODUCT_SHA: ${{ needs.meta.outputs.product_sha }}
         run: |
           gh release delete release --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag \
             || echo "no previous release Release; skipping"
@@ -1699,12 +1657,12 @@ jobs:
             echo "| | |"
             echo "|---|---|"
             echo "| Version | \`${{ needs.meta.outputs.version }}\` (what \`changji --version\` prints) |"
-            echo "| Commit | ${GITHUB_SHA} |"
-            # **Which product ref went into this.** The web UI is baked into
-            # the binary and comes from the other repository, so "which commit"
-            # above only answers half the question. When this run was triggered
-            # from over there, the branch it carried is the half that changed.
-            [ -n "$PRODUCT_REF" ] && echo "| Web UI from | \`$PRODUCT_REF\` |"
+            # **Everything in these packages is built from the product repo**
+            # (engine, web UI, prompts; see the meta job), so that ref and
+            # commit answer "which sources". The workflow commit is only which
+            # copy of this pipeline ran.
+            echo "| Built from | \`$PRODUCT_REF\` @ ${PRODUCT_SHA} |"
+            echo "| Workflow commit | ${GITHUB_SHA} |"
             echo "| Built | $(date -u '+%Y-%m-%d %H:%M UTC') |"
             echo
             echo "## Downloads"
@@ -1743,6 +1701,7 @@ jobs:
           # empty while what was actually used is the same-name pairing (or
           # the fallback). The notes have to name the version that went in.
           PRODUCT_REF: ${{ needs.meta.outputs.product_ref }}
+          PRODUCT_SHA: ${{ needs.meta.outputs.product_sha }}
         run: |
           gh release delete beta --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag \
             || echo "no previous beta Release; skipping"
@@ -1759,10 +1718,10 @@ jobs:
             echo "| | |"
             echo "|---|---|"
             echo "| Branch | \`${GITHUB_REF_NAME}\` |"
-            echo "| Commit | ${GITHUB_SHA} |"
-            # See the note in the stable step: this names the branch of THIS
-            # repo, and the web UI comes from the other one.
-            [ -n "$PRODUCT_REF" ] && echo "| Web UI from | \`$PRODUCT_REF\` |"
+            # See the note in the stable step: the sources are the product
+            # repo's; the branch above only names this pipeline's.
+            echo "| Built from | \`$PRODUCT_REF\` @ ${PRODUCT_SHA} |"
+            echo "| Workflow commit | ${GITHUB_SHA} |"
             echo "| Version | \`${{ needs.meta.outputs.version }}\` (what \`changji --version\` prints) |"
             echo "| Built | $(date -u '+%Y-%m-%d %H:%M UTC') |"
             echo
