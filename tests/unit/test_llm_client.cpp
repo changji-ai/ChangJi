@@ -874,6 +874,8 @@ struct FakeStream {
     std::vector<std::vector<std::string>> chunks;
     std::vector<int> statuses;      ///< 对应每次调用的状态码，默认 200
     std::string error_body;         ///< 状态码 >= 400 时回的体
+    /// 对应每次调用：喂完那几段之后断掉，回这句传输层错误。空串 = 不断。
+    std::vector<std::string> broke;
 
     llm::HttpPostStream fn() {
         return [this](const std::string&, const std::string& body,
@@ -892,6 +894,10 @@ struct FakeStream {
                 for (const auto& c : chunks[i]) {
                     if (!on_chunk(c.data(), c.size())) break;
                 }
+            }
+            if (i < broke.size() && !broke[i].empty()) {
+                r.status = 0;
+                r.transport_error = broke[i];
             }
             return r;
         };
@@ -1017,6 +1023,99 @@ TEST_CASE("远端 SSE：中途取消要断掉，别让它继续生成") {
                     llm::LlmError);
     // 叫停之后不该再有第二段——on_chunk 返回 false，传输层会断开
     CHECK(pieces.size() == 1);
+}
+
+TEST_CASE("断在半路、正文还没来：原样再发一趟，只一趟") {
+    // 2026-09-25 实测：智谱 glm-5.3 连着五次调用断了四次，全是
+    // `Failed to read connection`、全断在思考那一段（正文 0 字）、离超时
+    // 远得很。不重发的话对话那一轮整个作废，而人接下来做的就是原话再发一遍。
+    const std::string kBroke = "Failed to read connection";
+    FakeHttp http;
+    pipeline::CancelToken tok;
+
+    SUBCASE("整段生成（流式）：第一趟只想了一半就断，第二趟写完") {
+        FakeStream stream;
+        stream.chunks = {{sse_delta(json{{"reasoning_content", "先想想"}})},
+                         {sse_delta(json{{"reasoning_content", "再想想"}}),
+                          sse_chunk("{\\\"title\\\": \\\"雨\\\"}"), "data: [DONE]\n\n"}};
+        stream.broke = {kBroke};
+        llm::RemoteClient c(test_cfg(), http.fn(), stream.fn());
+        llm::Request req = simple_req();
+        std::string thought;
+        req.on_thinking = [&](const std::string& p) { thought += p; };
+        const std::string out = c.complete(req, tok, [](const std::string&) {});
+        CHECK(out == "{\"title\": \"雨\"}");
+        CHECK(stream.calls.size() == 2);
+        // 发的是**同一份**请求
+        CHECK(stream.calls[0].body == stream.calls[1].body);
+        // 思考那一栏要说一声，不然它从半截上重新想一遍，看着像犯糊涂
+        CHECK(thought.find("先想想") < thought.find("重发"));
+        CHECK(thought.find("重发") < thought.find("再想想"));
+    }
+    SUBCASE("正文已经来过半句就不重发：界面上会冒两遍") {
+        FakeStream stream;
+        stream.chunks = {{sse_chunk("{\\\"title\\\": \\\"雨")}};
+        stream.broke = {kBroke};
+        llm::RemoteClient c(test_cfg(), http.fn(), stream.fn());
+        CHECK_THROWS_AS(c.complete(simple_req(), tok, [](const std::string&) {}),
+                        llm::LlmError);
+        CHECK(stream.calls.size() == 1);
+    }
+    SUBCASE("两趟都断：只重发一次，报错里说已经重发过、不叫人调超时") {
+        FakeStream stream;
+        stream.chunks = {{}, {}, {}};
+        stream.broke = {kBroke, kBroke, kBroke};
+        llm::RemoteClient c(test_cfg(), http.fn(), stream.fn());
+        try {
+            c.complete(simple_req(), tok, [](const std::string&) {});
+            FAIL("该抛异常");
+        } catch (const llm::LlmError& e) {
+            const std::string msg = e.what();
+            CHECK(msg.find("重发过一次") != std::string::npos);
+            CHECK(msg.find("timeout_s") == std::string::npos);
+            CHECK(msg.find(kBroke) != std::string::npos);
+        }
+        CHECK(stream.calls.size() == 2);
+    }
+    SUBCASE("等满了超时才断的不重发：再等一个超时也一样") {
+        FakeStream stream;
+        stream.chunks = {{}, {}};
+        stream.broke = {kBroke, ""};
+        auto cfg = test_cfg();
+        cfg.timeout_s = 0.0;     // 花了多久都不算"离超时还远"
+        llm::RemoteClient c(cfg, http.fn(), stream.fn());
+        CHECK_THROWS_AS(c.complete(simple_req(), tok, [](const std::string&) {}),
+                        llm::LlmError);
+        CHECK(stream.calls.size() == 1);
+    }
+    SUBCASE("带工具的对话（流式）：第一趟断在思考里，第二趟调上工具") {
+        FakeStream stream;
+        stream.chunks = {{sse_delta(json{{"reasoning_content", "看看项目"}})},
+                         {sse_delta(json{{"tool_calls", json::array({json{
+                              {"index", 0}, {"id", "c1"},
+                              {"function", json{{"name", "project_state"},
+                                                {"arguments", "{}"}}}}})}}),
+                          sse_delta(json::object(), "tool_calls"), "data: [DONE]\n\n"}};
+        stream.broke = {kBroke};
+        llm::RemoteClient c(test_cfg(), http.fn(), stream.fn());
+        llm::Request opts;
+        std::string thought;
+        opts.on_thinking = [&](const std::string& p) { thought += p; };
+        const llm::ChatReply r = c.chat({}, json::array(), opts, tok);
+        CHECK(stream.calls.size() == 2);
+        REQUIRE(r.tool_calls.size() == 1);
+        CHECK(r.tool_calls[0].name == "project_state");
+        CHECK(thought.find("重发") != std::string::npos);
+    }
+    SUBCASE("整段那条同样重发一趟") {
+        llm::HttpResponse broke;
+        broke.status = 0;
+        broke.transport_error = kBroke;
+        http.responses = {broke, ok("{\"title\": \"雨\"}")};
+        llm::RemoteClient c(test_cfg(), http.fn());
+        CHECK(c.complete(simple_req(), tok) == "{\"title\": \"雨\"}");
+        CHECK(http.calls.size() == 2);
+    }
 }
 
 /**

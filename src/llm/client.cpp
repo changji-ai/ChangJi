@@ -4,6 +4,7 @@
 #include "llm/local_client.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <map>
 #include <mutex>
@@ -553,15 +554,30 @@ namespace {
 /// 两种说法指向两个完全不同的地方：「连不上」让人去查网络和地址，
 /// 「读一半断了」让人去看请求是不是太大、超时够不够、服务端掐没掐。
 /// 所以按 why 里的措辞分开说。
-std::string connect_failed(const config::LLMConfig& cfg,
-                           const std::string& why) {
+/// 「连上了但没读完」那一类：请求发出去了，断在读回来的路上。
+bool broke_midway(const std::string& why) {
     // cpp-httplib 的错误字样：连接阶段是 Connection/Connect，读写阶段是
     // Read/Write，超时是 Timeout。只要不是"压根没连上"，就别说连不上。
     const auto has = [&why](const char* w) {
         return why.find(w) != std::string::npos;
     };
-    if (has("read") || has("Read") || has("write") || has("Write") ||
-        has("timeout") || has("Timeout")) {
+    return has("read") || has("Read") || has("write") || has("Write") ||
+           has("timeout") || has("Timeout");
+}
+
+std::string connect_failed(const config::LLMConfig& cfg,
+                           const std::string& why, bool resent = false) {
+    if (broke_midway(why) && resent) {
+        // 重发过一次还是断，说"调大超时"就指歪了：值得重发的那一趟本来就
+        // 远没到超时（见 worth_resending）。
+        return SAYF("和大模型服务连上了，但连着两趟都断在半路（%1）。\n%2"
+                    "\n第一趟断了之后已经自动重发过一次。离超时还远就断，多半是"
+                    "服务端或中间的代理掐掉了这条长连接：过一会儿再试；老是这样"
+                    "的话换一个模型或服务。**不是网络不通**——网络不通的话下面"
+                    "那行写的是连接失败。",
+                    cfg.base_url, why);
+    }
+    if (broke_midway(why)) {
         return SAYF("和大模型服务连上了，但这一趟没走完（%1）。\n%2"
                     "\n请求发出去了、响应没读回来。多半是这一趟太大或太慢："
                     "把 [llm].timeout_s 调大，或者换一个上下文更长的模型；"
@@ -579,6 +595,38 @@ std::string connect_failed(const config::LLMConfig& cfg,
                 "地址和密钥在设置里改。**不是超时**——超时的话上面那行写的是"
                 "「连上了但这一趟没走完」。",
                 cfg.base_url, why);
+}
+
+/// 这一趟断在半路，值不值得**原样再发一趟**（只一趟）。
+///
+/// 「只发一次」是这个客户端的规矩（重复生成、重复计费），这是它唯一一处
+/// 为传输层开的口子。2026-09-25 实测：智谱 glm-5.3 连着五次调用里断了四次，
+/// 全是 `Failed to read connection`、全断在**思考**那一段（正文 0 字），
+/// 离 900 秒的超时远得很（92 ~ 212 秒）。不重发的话，对话那一轮整个作废、
+/// 一次补分镜白跑三分钟——而人接下来做的就是**原话再发一遍**，花的是同一份
+/// 钱。能自动解决的就别报错。
+///
+/// 三道判据，缺一道都不重发：
+///   1. **断在读的路上**（`broke_midway`）。压根没连上的不算——那是地址或
+///      网络的事，重发只是让人多等一个超时（「连不上的时候不重试」那条用例）；
+///   2. **正文、工具调用一个字都还没来**，由调用方判。来过的话界面上已经
+///      出了半句，再发一趟会把同样的话再冒一遍；
+///   3. **离超时还远**（不到 timeout_s 的一半）。真是等满了超时的，再等一个
+///      超时也一样。
+bool worth_resending(const std::optional<std::string>& transport_error,
+                     double secs, double timeout_s) {
+    return transport_error.has_value() && broke_midway(*transport_error) &&
+           secs < timeout_s * 0.5;
+}
+
+/// 重发之前往思考那一栏里说一句。**不说的话**，那一栏的字会在半截上
+/// 从头再想一遍，看着像模型犯了糊涂。
+std::string resend_notice() {
+    return "\n\n" + SAY("（和大模型服务的连接断在半路，已经原样重发一次。）") + "\n\n";
+}
+
+double seconds_since(std::chrono::steady_clock::time_point t0) {
+    return std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
 }
 
 }  // namespace
@@ -652,6 +700,7 @@ std::string RemoteClient::complete(const Request& req,
             int status = 0;
             std::optional<std::string> transport_error;
             bool canceled = false;
+            double secs = 0.0;       ///< 这一趟花了多久，见 worth_resending
         };
         const auto build = [&] {
             nlohmann::ordered_json payload = build_payload(cfg, req);
@@ -683,6 +732,7 @@ std::string RemoteClient::complete(const Request& req,
             log.set_prompt_from_payload(payload);
 
             SseDeltas sse;
+            const auto t0 = std::chrono::steady_clock::now();
             HttpResponse r = stream_post_(
                 url, payload.dump(), headers, cfg.timeout_s,
                 [&](const char* data, std::size_t len) {
@@ -714,6 +764,7 @@ std::string RemoteClient::complete(const Request& req,
                     if (on_token) on_token(piece);
                     return true;
                 });
+            a.secs = seconds_since(t0);
             a.status = r.status;
             a.response_body = r.body;
             a.transport_error = r.transport_error;
@@ -751,13 +802,23 @@ std::string RemoteClient::complete(const Request& req,
         // run() 里就地解析同一份响应；空响应和错误响应都不会自动再发一次，
         // 避免重复生成和重复计费。
         //
-        // 唯一的例外是「关掉思考」被拒（`learn_thinking_always_on`）：那是
-        // 400，请求根本没被接下，换 low 再发一趟不算重复。
+        // 例外有两个：「关掉思考」被拒（`learn_thinking_always_on`）：那是
+        // 400，请求根本没被接下，换 low 再发一趟不算重复；另一个是断在半路、
+        // 正文一个字还没来，见 worth_resending。
         nlohmann::ordered_json payload = build();
         Attempt a = run(payload);
         if (learn_thinking_always_on(payload, a.status, a.response_body,
                                      cfg.base_url, cfg.model)) {
             payload = build();
+            a = run(payload);
+        }
+        bool resent = false;
+        if (!a.canceled && a.text.empty() &&
+            worth_resending(a.transport_error, a.secs, cfg.timeout_s)) {
+            const std::string notice = resend_notice();
+            if (req.on_thinking) req.on_thinking(notice);
+            log.append_thinking(notice);
+            resent = true;
             a = run(payload);
         }
         log.note_response(a.status, a.response_body);
@@ -768,7 +829,7 @@ std::string RemoteClient::complete(const Request& req,
         log.set_reply(a.text);
         if (a.canceled) throw LlmError(util::kCancelled);
         if (a.transport_error.has_value()) {
-            throw LlmError(connect_failed(cfg, *a.transport_error));
+            throw LlmError(connect_failed(cfg, *a.transport_error, resent));
         }
         if (a.status >= 400) {
             throw LlmError(explain_status(cfg, a.status, a.response_body), a.status);
@@ -866,7 +927,7 @@ std::string RemoteClient::complete(const Request& req,
 
         // **只发一次。** 退档梯子随 response_format 一起删了，理由见
         // build_payload 里那段。
-        // 例外只有「关掉思考」被拒那一种，见 complete_stream 里那段。
+        // 例外两种：「关掉思考」被拒、断在半路，见 complete_stream 里那段。
         const auto send = [&](const nlohmann::ordered_json& payload) {
             // 分流之后那三样，从 payload 里取，**所以 set_model 在
             // build_payload 后面**，不能挪回前面去。理由见 complete_stream
@@ -881,10 +942,20 @@ std::string RemoteClient::complete(const Request& req,
             return post_(url, payload.dump(), headers, cfg.timeout_s);
         };
         nlohmann::ordered_json payload = build_payload(cfg, req);
+        auto t0 = std::chrono::steady_clock::now();
         HttpResponse r = send(payload);
         if (learn_thinking_always_on(payload, r.status, r.body, cfg.base_url,
                                      cfg.model)) {
             payload = build_payload(cfg, req);
+            t0 = std::chrono::steady_clock::now();
+            r = send(payload);
+        }
+        // 断在半路那一种原样再发一趟，见 worth_resending。整段这条一个字都
+        // 没交出去过，"正文还没来"天然成立。
+        bool resent = false;
+        if (!tok.cancelled() &&
+            worth_resending(r.transport_error, seconds_since(t0), cfg.timeout_s)) {
+            resent = true;
             r = send(payload);
         }
         // **拿到回包就立刻记，放在下面那句 transport_error 之前。** 连不上
@@ -892,7 +963,7 @@ std::string RemoteClient::complete(const Request& req,
         // 就整个漏了，而"什么提示词换来一个 400"正是最想研究的。
         log.note_response(r.status, r.body);
         if (r.transport_error.has_value()) {
-            throw LlmError(connect_failed(cfg, *r.transport_error));
+            throw LlmError(connect_failed(cfg, *r.transport_error, resent));
         }
 
         if (r.status >= 400) {
@@ -1086,14 +1157,23 @@ ChatReply RemoteClient::chat(const std::vector<Message>& messages, const ordered
         };
 
         if (!live) {
+            auto t0 = std::chrono::steady_clock::now();
             HttpResponse r = post_(url, payload.dump(), headers, cfg.timeout_s);
             if (thinking_refused(r)) {
+                t0 = std::chrono::steady_clock::now();
+                r = post_(url, payload.dump(), headers, cfg.timeout_s);
+            }
+            // 断在半路原样再发一趟，见 worth_resending。
+            bool resent = false;
+            if (!tok.cancelled() &&
+                worth_resending(r.transport_error, seconds_since(t0), cfg.timeout_s)) {
+                resent = true;
                 r = post_(url, payload.dump(), headers, cfg.timeout_s);
             }
             // 拿到回包就立刻记，理由同整段那条：放到下面去就把 400 那一支漏了。
             log.note_response(r.status, r.body);
             if (r.transport_error.has_value()) {
-                throw LlmError(connect_failed(cfg, *r.transport_error));
+                throw LlmError(connect_failed(cfg, *r.transport_error, resent));
             }
             if (r.status >= 400) {
                 throw LlmError(explain_status(cfg, r.status, r.body), r.status);
@@ -1140,16 +1220,31 @@ ChatReply RemoteClient::chat(const std::vector<Message>& messages, const ordered
             if (opts.on_token) opts.on_token(piece);
             return true;
         };
+        auto t0 = std::chrono::steady_clock::now();
         HttpResponse r =
             stream_post_(url, payload.dump(), headers, cfg.timeout_s, on_chunk);
         // 400 时流里一个字都没来过，sse / content 还是空的，接着用就是。
         if (thinking_refused(r)) {
+            t0 = std::chrono::steady_clock::now();
+            r = stream_post_(url, payload.dump(), headers, cfg.timeout_s, on_chunk);
+        }
+        // 断在半路、正文和工具调用一个字都还没来：原样再发一趟，见
+        // worth_resending。**sse 要换一个新的**——断掉那一趟可能留着半行没
+        // 凑完的字节，接着喂的话第二趟的第一行会被拼坏。
+        bool resent = false;
+        if (!canceled && content.empty() && sse.tool_calls().empty() &&
+            worth_resending(r.transport_error, seconds_since(t0), cfg.timeout_s)) {
+            const std::string notice = resend_notice();
+            if (opts.on_thinking) opts.on_thinking(notice);
+            log.append_thinking(notice);
+            sse = SseDeltas{};
+            resent = true;
             r = stream_post_(url, payload.dump(), headers, cfg.timeout_s, on_chunk);
         }
         log.note_response(r.status, r.body);
         if (canceled) throw LlmError(util::kCancelled);
         if (r.transport_error.has_value()) {
-            throw LlmError(connect_failed(cfg, *r.transport_error));
+            throw LlmError(connect_failed(cfg, *r.transport_error, resent));
         }
         if (r.status >= 400) {
             throw LlmError(explain_status(cfg, r.status, r.body), r.status);
