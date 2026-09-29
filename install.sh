@@ -5,8 +5,14 @@
 #   curl -fsSL https://raw.githubusercontent.com/changji-ai/ChangJi/main/install.sh | bash
 # To install the rolling prerelease that every branch push refreshes:
 #   CHANGJI_VERSION=beta bash install.sh
-# (The default goes through /releases/latest, and a prerelease is not in there,
-# so leaving it unset always gets you the stable build.)
+# (The default is the fixed `release` tag, the stable engine build.)
+#
+# ⚠️ **Not `/releases/latest`.** That used to be the default, and it is
+# whatever non-prerelease GitHub last marked latest. On 2026-09-29 the first
+# stable desktop release (`desktop-v2.5.9`) was published after the engine's
+# and took it over; a desktop release has no `changji-linux-x64.tar.gz`, so
+# this script died with "download failed" for everybody. The engine's stable
+# build always lives on `release`, so ask for it by name.
 #
 # ⚠️ **Since 2026-09-17 there is only one Release** (the user: "from now on
 # there is only one release too"): stable is always published on the fixed
@@ -43,7 +49,7 @@ PREFIX="${CHANGJI_PREFIX:-$HOME/.changji}"
 # does not look like a repository problem. Set CHANGJI_REPO to install from
 # somewhere else.
 REPO="${CHANGJI_REPO:-changji-ai/ChangJi}"
-VERSION="${CHANGJI_VERSION:-latest}"
+VERSION="${CHANGJI_VERSION:-release}"
 
 info()  { printf '\033[36m==>\033[0m %s\n' "$*"; }
 warn()  { printf '\033[33mwarning:\033[0m %s\n' "$*" >&2; }

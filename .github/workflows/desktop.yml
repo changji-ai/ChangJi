@@ -1142,7 +1142,16 @@ jobs:
           } > body.md
           # Prerelease: `/releases/latest` does not point at it, so anyone
           # downloading still gets the tagged build by default.
-          PRE=""
+          #
+          # ⚠️ **A stable desktop release must not become "latest" either.**
+          # `/releases/latest` belongs to the engine's `release` (release.yml
+          # passes `--latest`): install.sh and every README download link go
+          # through it. GitHub makes any new non-prerelease "latest" by
+          # default, so the first stable desktop release (desktop-v2.5.9,
+          # 2026-09-29, 18 minutes after the engine's) took it over and the
+          # one-line installer went 404 — `changji-linux-x64.tar.gz` is not
+          # in a desktop release.
+          PRE="--latest=false"
           [ "$CHANNEL" = "beta" ] && PRE="--prerelease"
           TITLE="Desktop CI release $VER"
           [ "$CHANNEL" = "beta" ] && TITLE="Desktop beta (${PRODUCT_REF})"
