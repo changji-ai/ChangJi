@@ -16,7 +16,7 @@ project(changji C CXX)
 # 就不一样了，而且永远不会归零）。
 #
 # 改版本：把下面这个串改掉，提交。那一下起计数就是 0。
-set(CHANGJI_VERSION_PREFIX "v2.2" CACHE STRING "版本前缀；一改它后面那个计数从 0 重来")
+set(CHANGJI_VERSION_PREFIX "v2.5" CACHE STRING "版本前缀；一改它后面那个计数从 0 重来")
 
 set(CHANGJI_VERSION "dev" CACHE STRING "写进二进制的版本号，--version 打印它")
 # C 也要启用：ggml 是 C 写的，而且 sd.cpp 声明了 target_compile_features(c_std_11)。

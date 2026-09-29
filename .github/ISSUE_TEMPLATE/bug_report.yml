@@ -12,8 +12,8 @@ body:
     id: version
     attributes:
       label: Version · 版本
-      description: Output of `changji --version`. For the desktop app, the tag you downloaded it from (`desktop-v2.2.N`). · `changji --version` 的输出；桌面端写你下载时的标签（`desktop-v2.2.N`）。
-      placeholder: v2.2.123 / desktop-v2.2.123
+      description: Output of `changji --version`. For the desktop app, the tag you downloaded it from (`desktop-v2.5.N`). · `changji --version` 的输出；桌面端写你下载时的标签（`desktop-v2.5.N`）。
+      placeholder: v2.5.12 / desktop-v2.5.12
     validations:
       required: true
 
