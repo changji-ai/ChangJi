@@ -1,5 +1,6 @@
 #include "http/tts_api.hpp"
 
+#include <atomic>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -65,13 +66,20 @@ ApiResult post_tts_say(const json& body) {
         stages::pick_tts_backend(s, ff, llm::default_http_post());
     if (!backend.synthesize) throw ApiError(503, SAY("配音后端没准备好"));
 
-    // 落点：项目的 audio/ 下面一个固定名字。**固定名字是刻意的**——朗读是
-    // 随手点的，一天点几十次；按内容起名的话 audio/ 里会堆满再也用不上的
+    // 落点：项目的 audio/ 下面**几个轮着用的固定名字**。固定是刻意的——朗读
+    // 是随手点的，一天点几十次；按内容起名的话 audio/ 里会堆满再也用不上的
     // wav，而它们和镜头配音混在同一个目录里，看着像是出了一堆废文件。
+    //
+    // ⚠️ **不能只有一个名字。** 原来是单一个 say.wav，而异步朗读最多八条
+    // 同时在跑（Offload）：两段同时念，写的是同一个文件，两个回包指的也是
+    // 它——一个人听到的是另一个人那段，或者半截文件（2026-09-25 审出来）。
+    // 轮着用四个：同时念的错开，文件数也封了顶。
+    static std::atomic<unsigned> say_turn{0};
     std::error_code ec;
     const fs::path dir = store.paths().audio();
     fs::create_directories(dir, ec);
-    const fs::path out = dir / "say.wav";
+    const fs::path out =
+        dir / ("say-" + std::to_string(say_turn.fetch_add(1) % 4) + ".wav");
 
     // 念一段几秒钟，但它要借配音那一槽——而那一槽和大模型抢同一张卡。
     // 顶栏那本账上要看得见，否则别的活被它挡住时没人知道是谁挡的。
@@ -91,7 +99,7 @@ ApiResult post_tts_say(const json& body) {
     //   · 进来先看一眼——排在 Offload 队列里、以及下面借槽读权重那一段，
     //     可能几十秒，而人正是在这一段里按的停；
     //   · 出来再看一眼——念完了也别把结果送回去，不然前一句白查。文件已经
-    //     落盘不要紧：say.wav 是个固定名字（见上面那段），下次朗读就盖掉。
+    //     落盘不要紧：say-N.wav 是轮着用的几个固定名字（见上面那段），过几次就盖掉。
     //
     // 同步那条路（老客户端、curl、对拍）一个字没变：没有 JobScope 时
     // `current_cancel()` 回的是哑元，永远不是 cancelled。

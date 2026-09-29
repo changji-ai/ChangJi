@@ -138,9 +138,22 @@ G.request_json = ppio_fake
 rows = G.PPIOPlatform("k").price_table(lambda m: None)
 assert [r["spot"] for r in rows] == [0.88, 12.6], [r["spot"] for r in rows]
 check("PPIO：有抢占价用抢占价，没有就用按量价，两档都没有的不列")
-assert rows[0]["note"] == "可用 6 卡" and rows[0]["pick"] == {"product":"prod-4090"}
+assert rows[0]["note"] == "可用 6 卡"
+# 报的是竞价那一档，填回表单的计费就得是竞价（原来只填 product，建出来是按量）
+assert rows[0]["pick"] == {"product":"prod-4090","billing":"spot"}, rows[0]["pick"]
+assert rows[1]["pick"] == {"product":"prod-a100","billing":"postpaid"}, rows[1]["pick"]
 assert rows[1]["region"] == "自动调度"
-check("PPIO 每行带库存和 product_id，没绑地域的写「自动调度」")
+check("PPIO 每行带库存和 product_id、报哪档价就填哪档计费，没绑地域的写「自动调度」")
+def ppio_empty(method, url, headers, body=None, timeout=30, form=None):
+    return {"data": [
+        {"id":"prod-gone","name":"卖完了","resource_spec":{"gpu":{"name":"RTX4090","max":8,"available":0}},
+         "pricing":{"precision":3,"spot":{"final_price":500}}},
+        {"id":"prod-unknown","name":"不报库存","resource_spec":{"gpu":{"name":"RTX4090","max":8}},
+         "pricing":{"precision":3,"spot":{"final_price":600}}}]}
+G.request_json = ppio_empty
+rows = G.PPIOPlatform("k").price_table(lambda m: None)
+assert [r["stock"] for r in rows] == [False, True], [r["stock"] for r in rows]
+check("PPIO 一张空闲卡都没有的标成没货（一键最便宜不挑它），不报库存的当有货")
 
 # ========== 窗口：数字列必须按数值排 ==========
 app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])

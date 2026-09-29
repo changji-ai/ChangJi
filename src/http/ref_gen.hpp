@@ -107,4 +107,20 @@ ApiResult post_references_generate_all_stop(const nlohmann::json& body);
 /// **刷新过页面的人靠它把进度接回来**：`ref_queue` 是广播，错过就错过。
 ApiResult get_references_queue(const std::string& project);
 
+/// 把这部片子缺的参考图画齐，**画完才回**（出片那一件开头、一键成片第 5 步都走它）。
+///
+/// 画图是显卡活，跟首帧、成片放在一起做：前面大纲、正文、理解、剧本、分镜都是纯文字，
+/// 先走完；要出片了，缺的参考图在出片那一件里先画上（用户 2026-09-27：「画图应该和后面
+/// 首帧成片一起做，前面是单纯 llm 内容」）。
+///
+/// 已经有一批在画（409）不算过了：是这部片子自己那一批就等它画完再补一遍（那一批可能
+/// 不包括新写出来的角色），别的片子那一批等它空出来。最多来三遍。画不出来不在这儿断，
+/// `note` 说一声就回真——哪几镜拿不到图由调用方按真要跑的那几镜判。
+///
+/// `lane` 记在这一批上（停的时候只停自己起的）；`cancelled` 为真时连同这一批一起停，
+/// 回假。`note` 报进度（「还剩 3 张（共 8）」这种）。
+bool ensure_refs(const std::string& root, const std::string& lane,
+                 const std::function<bool()>& cancelled,
+                 const std::function<void(const std::string&)>& note);
+
 }  // namespace changji::http

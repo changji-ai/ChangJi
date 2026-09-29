@@ -3,6 +3,11 @@
 #   push a branch (not main)  → rolling prerelease, **always on the same
 #                               `desktop-beta` tag**
 #   push a `desktop-v*` tag   → a proper release
+#   dispatched with the product repo's `main`
+#                             → a proper release too, tag `desktop-<version>`
+#                               (用户 2026-09-27：「提交主分支打包直接成 release」)
+#
+# Proper releases are titled **"Desktop CI release <version>"**.
 #   run by hand               → same, also beta
 #
 # ⚠️ **It does not share a Release with `release.yml`.** That `beta` belongs to
@@ -52,7 +57,7 @@
 # and, like every workflow in this repository, `CHANGJI_PRODUCT_TOKEN` to read
 # the private product repo, which is where `desktop/` lives.
 
-name: Desktop release
+name: CI desktop release
 
 on:
   # ⚠️ **No branch pushes here (2026-09-25).** Since that date the sources live
@@ -207,6 +212,14 @@ jobs:
             echo "tag=desktop-${WANT}" >> "$GITHUB_OUTPUT"
             echo "version=${WANT}"     >> "$GITHUB_OUTPUT"
             echo "channel=release"     >> "$GITHUB_OUTPUT"
+          elif [ "$PRODUCT_REF" = "main" ]; then
+            # **A push to the product repo's main is a release, not a prerelease**
+            # (用户 2026-09-27). One tag per version: stable releases pile up like
+            # tagged ones do, only beta is rolling.
+            v=$(sh changji/cpp/tools/version.sh)
+            echo "tag=desktop-${v}" >> "$GITHUB_OUTPUT"
+            echo "version=${v}"     >> "$GITHUB_OUTPUT"
+            echo "channel=release"  >> "$GITHUB_OUTPUT"
           else
             # **Always the same tag**: a branch push is a rolling prerelease and
             # the last push wins.
@@ -348,6 +361,24 @@ jobs:
           - { target: linux-arm64,        runner: ubuntu-24.04-arm, gpu: cpu,    qthost: linux_arm64,   qtarch: linux_gcc_arm64,      ssl: linux-arm64 }
           - { target: linux-arm64-cuda,   runner: ubuntu-24.04-arm, gpu: cuda,   qthost: linux_arm64,   qtarch: linux_gcc_arm64,      ssl: linux-arm64 }
     steps:
+      # ⚠️ **macOS 一律用 Xcode 26**（用户 2026-09-27：「mac 打包使用 xcode 26」）。
+      # runner 镜像默认是 Xcode 16.x；换到 26 挑镜像里装着的最新一份 26.x，**一份都
+      # 没有就当场红**——静悄悄退回 16 的话，编出来的包和说好的不是同一套工具链，
+      # 而一切看起来正常。
+      - name: Use Xcode 26
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          x=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1 || true)
+          if [ -z "$x" ]; then
+            echo "::error::no Xcode 26 on this runner image; installed:"
+            ls -d /Applications/Xcode*.app || true
+            exit 1
+          fi
+          sudo xcode-select -s "$x/Contents/Developer"
+          echo "DEVELOPER_DIR=$x/Contents/Developer" >> "$GITHUB_ENV"
+          xcodebuild -version
+          clang++ --version | head -1
       # One checkout, the product repo (engine included); see the meta job in
       # release.yml.
       - name: Check out the product repo
@@ -358,7 +389,8 @@ jobs:
           # Empty means that repo's default branch, which is what a push to
           # THIS repo wants. A push to the product repo passes its own ref
           # through, or a branch there would silently be built against main.
-          ref: ${{ needs.meta.outputs.product_ref }}
+          # Pinned to the commit meta resolved (see the same spot in release.yml).
+          ref: ${{ needs.meta.outputs.product_sha }}
           path: changji
 
       # CHANGJI_LLAMA=ON needs a Python: llama.cpp is patched in place with
@@ -803,14 +835,27 @@ jobs:
       # a missing QML plugin in a CUDA package would reach a user.
       - name: Actually open it (Linux)
         if: runner.os == 'Linux' && matrix.gpu != 'cuda'
+        # **Through the launcher, with the runner's own Qt out of the way.**
+        # Running the bare binary here loaded the runner's Qt (install-qt-action
+        # puts it on the library and plugin paths, and the binary's RUNPATH points
+        # at it), so a package missing a plugin's dependency -- libqxcb.so needs
+        # libQt6XcbQpa, which the main binary's ldd never lists -- still opened
+        # here and failed on a machine without Qt.
         run: |
           set -euo pipefail
           sudo apt-get install -y xvfb
-          xvfb-run -a env QML_DISABLE_DISK_CACHE=1 \
+          hidden=""
+          if [ -n "${QT_ROOT_DIR:-}" ] && [ -d "$QT_ROOT_DIR" ]; then
+            mv "$QT_ROOT_DIR" "$QT_ROOT_DIR.hidden"
+            hidden=1
+          fi
+          trap '[ -z "$hidden" ] || mv "$QT_ROOT_DIR.hidden" "$QT_ROOT_DIR"' EXIT
+          xvfb-run -a env -u LD_LIBRARY_PATH -u QT_PLUGIN_PATH -u QML2_IMPORT_PATH \
+            -u QT_QPA_PLATFORM_PLUGIN_PATH QML_DISABLE_DISK_CACHE=1 \
             CHANGJI_DESKTOP_SHOT="$RUNNER_TEMP/shot.png" CHANGJI_DESKTOP_SHOT_MS=12000 \
-            dist/changji-desktop/changji-desktop
+            dist/changji-desktop/changji-desktop.sh
           test -s "$RUNNER_TEMP/shot.png" || { echo "it opened, but no screenshot came out"; exit 1; }
-          echo "it opens outside the build tree"
+          echo "it opens outside the build tree, with only what the package carries"
 
       # ⚠️ **`&` does not wait for a GUI program on Windows, and
       # `$LASTEXITCODE` is never set.**
@@ -1099,7 +1144,7 @@ jobs:
           # downloading still gets the tagged build by default.
           PRE=""
           [ "$CHANNEL" = "beta" ] && PRE="--prerelease"
-          TITLE="Desktop $VER"
+          TITLE="Desktop CI release $VER"
           [ "$CHANNEL" = "beta" ] && TITLE="Desktop beta (${PRODUCT_REF})"
           gh release create "$TAG" \
             --repo "$GITHUB_REPOSITORY" \

@@ -26,6 +26,14 @@ std::string strip_ws(const std::string& s);
 /// （比如全角空格 U+3000），这里不匹配——见 .cpp 里的说明。
 std::string collapse_ws(const std::string& s);
 
+/// 一串十进制数字 → int，**不抛**。不是纯数字、或者大到 int 装不下，回 `fallback`。
+///
+/// ⚠️ **别拿 `std::stoi` 去吃"判过全是数字"的串。** 判过全是数字不等于装得下：
+/// 「ch99999999999」「s12345678901」这种 id、「第1-99999999999场」这种区间，
+/// 从模型输出、从 /api/story 都进得来，`stoi` 当场 out_of_range——2026-09-25
+/// 审出来的那一处（加章）是**一次坏 id 之后这部片子再也加不了章**。
+int parse_int_or(const std::string& digits, int fallback);
+
 /// 清洗模型给的字段：压空白、两端去空白、剥尾部标点。
 ///
 /// 对应 bible.py 的 _clean()。尾部标点必须去掉，因为这些字段拼提示词时
@@ -101,6 +109,13 @@ std::string indent_rest(const std::string& s, const std::string& pad);
 
 /// 一个 UTF-8 字符的码点。不是合法字符时返回 0。
 char32_t utf8_codepoint(const std::string& ch);
+
+/// 去掉尾巴上**没写完的那半个字**（按字节截过的一段，截口落在一个多字节字的
+/// 中间）。尾巴是完整的、或者尾巴上的字节本来就不是 UTF-8 的，原样返回。
+///
+/// 按字节读满一个上限再判 UTF-8 的几处要先过它：半个字让整段验不过，后面的
+/// "不是 UTF-8 就当 GBK 解"把一整份 UTF-8 解成乱码。
+std::string drop_partial_utf8_tail(std::string s);
 
 /// 按 UTF-8 字符截断到最多 n 个字符。
 ///

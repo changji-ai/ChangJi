@@ -223,3 +223,24 @@ TEST_CASE("老版本存的那份没有票，读回来补一张") {
     CHECK(t.size() == 32);
     CHECK(b.by_ticket(t).use);
 }
+
+TEST_CASE("他给我的票跟着地址走：有人拿他的 id 报一个别的地址，票作废") {
+    PeerBook b;
+    b.saw(one("abc", "老王", "10.0.0.5", 8080));
+    b.theirs("abc", "ticket-from-wang", 30, 4, 24);
+    REQUIRE(b.list().front().their_ticket == "ticket-from-wang");
+
+    // 同一个地址再报一次（mDNS 常态）：票不动
+    b.saw(one("abc", "老王", "10.0.0.5", 8080, 2000));
+    CHECK(b.list().front().their_ticket == "ticket-from-wang");
+
+    // 冒名的那台：同一个 id、别的地址。票不能跟着搬过去
+    b.saw(one("abc", "老王", "10.0.0.66", 8080, 3000));
+    CHECK(b.list().front().their_ticket.empty());
+    CHECK(b.list().front().their_gpu == -1);
+
+    // 端口变了同理
+    b.theirs("abc", "again", 0, 0, 0);
+    b.saw(one("abc", "老王", "10.0.0.66", 9090, 4000));
+    CHECK(b.list().front().their_ticket.empty());
+}

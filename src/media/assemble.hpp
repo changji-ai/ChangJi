@@ -44,6 +44,13 @@ struct TimelineEntry {
     models::Transition transition_in = models::Transition::CUT;
     double transition_dur_s = 0.0;
     std::vector<std::filesystem::path> audio_paths;
+    /// 每一条配音在时间线上从第几秒起，和 `audio_paths` 一一对应。
+    ///
+    /// **别拿 `cues` 的时长去推**：字幕只给「有字、有时长」的那几句，配音只给
+    /// 「有文件」的那几句，两张表按下标对不上。原来混音就是按下标拿字幕时长
+    /// 往后推的——人清掉第 2 句的字（配音还在），第 3 句的声音就提前了第 2 句
+    /// 那么长，跟字幕错开（2026-09-25 审出来）。
+    std::vector<double> audio_starts;
     std::vector<SubtitleCue> cues;
 };
 
@@ -131,6 +138,10 @@ struct NormalizeOptions {
     ///
     /// ⚠️ 别改成无条件补——那就是两个角标叠在一起。
     WatermarkPlan watermark;
+    /// 缩放**之前**先跑的那一段（空 = 没有）。现在只有一种：这一镜尺寸和整章
+    /// 不一样时，先 `delogo` 抹掉它自己烧的角标（见 `Assembler::assemble`），
+    /// 这时 `watermark` 也一定给了——抹了不补就是没有标识。
+    std::string pre_vf;
 };
 
 std::vector<std::string> normalize_args(const std::filesystem::path& src,
@@ -223,6 +234,10 @@ int assembly_watermark_upscale(const config::LookConfig& look,
                                const config::UpscaleConfig& upscale,
                                int target_w, int target_h);
 
+/// 遮幅裁掉之后剩多高；不裁（没开、竖屏、比例不比画面窄）回 0。`look_filters` 和
+/// `assembly_watermark_upscale` 都问它——两处各判一遍的话会一个说裁了一个说没裁。
+int letterbox_height(const config::LookConfig& look, int target_w, int target_h);
+
 /// 把路径转成 ffmpeg 滤镜能接受的形式。
 ///
 /// Windows 上 `C:\x` 里的冒号是滤镜的参数分隔符，反斜杠是转义符，
@@ -270,6 +285,9 @@ public:
 
     /// 取最大的那个分辨率作为统一规格，**避免放大模糊**。
     std::pair<int, int> target_size(const Timeline& timeline) const;
+    /// 同上，顺带把每一镜自己的尺寸记下来（读不出的记 {0, 0}）。
+    std::pair<int, int> target_size(const Timeline& timeline,
+                                    std::vector<std::pair<int, int>>& sizes) const;
 
 private:
     const FFmpeg& ff_;

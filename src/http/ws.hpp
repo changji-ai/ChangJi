@@ -106,8 +106,11 @@ public:
     ///
     /// ⚠️ 调用方要自己持锁：它读写 `last_sent_`，而 `broadcast` 已经
     /// 拿着 `mu_` 了，这里再锁一次就是自锁。
+    ///
+    /// `lane`：同一条频道里再分一层桶。参考图那条频道（`ref_preview`）是全片共用的，
+    /// 不按 `target` 分的话一张图的预览会把另一张图的挡掉。
     bool should_throttle(const std::string& job_id, const std::string& type,
-                         const std::string& kind);
+                         const std::string& kind, const std::string& lane = {});
 
 private:
 
@@ -123,6 +126,12 @@ private:
 
 /// 进度消息的节流间隔。
 inline constexpr auto kThrottleInterval = std::chrono::milliseconds(200);
+
+/// 预览图（`job_preview` / `ref_preview`）的节流间隔。**一张几十 KB**：原来这两种
+/// 一条都不节流（`should_throttle` 见 type 不是 progress 就放行），采样每一步一张。
+/// 而 Crow 的写队列没有上限——一台睡着了的笔记本、半开着的连接，每分钟攒下几 MB，
+/// 要等 TCP 自己放弃（十来分钟）才释放。看个大概，两张一秒够了。
+inline constexpr auto kPreviewInterval = std::chrono::milliseconds(500);
 
 /// 全局单例。流水线各处都要推进度，逐层传引用不划算。
 Hub& hub();

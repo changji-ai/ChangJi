@@ -160,6 +160,23 @@ TEST_CASE("开跑立刻返回，把队列一起给出来") {
     CHECK(fakes.videos.size() == 2);
 }
 
+TEST_CASE("认识的键类型不对：进门 400，不排进队列") {
+    // 请求体会原样排进队列，被 /api/run 的轮询按类型读。一件
+    // `"all_episodes": "yes"` 排进去，所有页面的轮询就一直 500，按片子清也清不掉。
+    quiesce();
+    const auto store = make_store("类型", {{"ep01", 1}});
+    Fakes fakes;
+    for (const json& bad : {json{{"all_episodes", "yes"}}, json{{"lane", 1}},
+                            json{{"preview_s", "120"}}, json{{"force", 1}}}) {
+        json body = {{"project", project_arg(store)}, {"episode_id", "ep01"}};
+        body.update(bad);
+        const auto r = http::guard([&] { return http::post_run(body, fakes.deps()); });
+        CHECK_MESSAGE(r.status == 400, bad.dump());
+    }
+    CHECK(fakes.frames.empty());
+    CHECK(http::post_run_queue_clear().body.at("cleared") == 0);
+}
+
 TEST_CASE("草稿档：默认不跑，显式要才跑") {
     // 这条把"默认值是什么"钉死。默认改过一次（2026-09-10），
     // 而默认值这种东西改了不会有任何编译错误——只有用例会红。

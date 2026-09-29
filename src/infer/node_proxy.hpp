@@ -24,7 +24,28 @@ struct ProxyResult {
     nlohmann::json body;
 };
 
+/// 这个地址转不转、转的话带哪个口令。
+///
+/// ⚠️ **只有机器表里登记过的才转**（`[[peer.nodes]]` 的 url，逐字比）。
+/// 这里原来是"不在配置里也照发，带全局口令"——而转发的地址是从请求里来的
+/// （`/api/nodes/setup?url=…` 是 GET，同源门的 Origin 那一道管不着 GET），
+/// 一个 `?url=http://随便哪/` 就让引擎带着 `Authorization: Bearer <peer.token>`
+/// 去敲那个地址；那个口令守着每一台工作进程的 `/task`（2026-09-25 审出来）。
+/// 界面上转发的永远是机器表里那几行，不在表里的直接回一句人话。
+struct ProxyTarget {
+    bool listed = false;
+    std::string token;   ///< 那台单独配了就用它的，否则 `[peer].token`
+};
+
+inline ProxyTarget proxy_target(const config::Settings& s, const std::string& node_url) {
+    for (const auto& n : s.peer.nodes) {
+        if (n.url == node_url) return {true, n.token.empty() ? s.peer.token : n.token};
+    }
+    return {};
+}
+
 /// 转一个 GET 过去。`path` 形如 `/setup/state`。
+/// `node_url` 不在机器表里的回 404、一个字节都不发（见 `proxy_target`）。
 ProxyResult node_get(const config::Settings& s, const std::string& node_url,
                      const std::string& path, int timeout_s = 10);
 

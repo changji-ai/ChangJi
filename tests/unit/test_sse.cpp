@@ -152,3 +152,34 @@ TEST_CASE("SSE：服务端在流里报错要单独说，不能当成写完了") 
     plain.feed("data: {\"error\":\"rate limited\"}\n\n");
     CHECK(plain.error() == "rate limited");
 }
+
+TEST_CASE("SSE：\"error\": null 不是报错（有的网关每一块都带这个可空字段）") {
+    SseDeltas s;
+    const std::string out = s.feed(
+        "data: {\"error\":null,\"choices\":[{\"delta\":{\"content\":\"好\"},\"index\":0}]}\n\n");
+    CHECK(out == "好");
+    CHECK(s.error().empty());
+}
+
+TEST_CASE("SSE：并行的工具调用不带 index、换了 id——是两个，不是拼成一个") {
+    SseDeltas s;
+    s.feed("data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"id\":\"a\",\"function\":"
+           "{\"name\":\"project_state\",\"arguments\":\"{}\"}}]}}]}\n\n");
+    s.feed("data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"id\":\"b\",\"function\":"
+           "{\"name\":\"assets_read\",\"arguments\":\"{}\"}}]}}]}\n\n");
+    REQUIRE(s.tool_calls().size() == 2);
+    CHECK(s.tool_calls()[0].name == "project_state");
+    CHECK(s.tool_calls()[0].arguments == "{}");
+    CHECK(s.tool_calls()[1].name == "assets_read");
+    // 同一个 id 接着来的参数照旧拼到它自己身上
+    s.feed("data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"id\":\"b\",\"function\":"
+           "{\"arguments\":\" \"}}]}}]}\n\n");
+    CHECK(s.tool_calls().size() == 2);
+}
+
+TEST_CASE("SSE：对面给个天大的 index 不许 resize 出几 TB") {
+    SseDeltas s;
+    CHECK_NOTHROW(s.feed("data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":1000000000000,"
+                         "\"function\":{\"name\":\"x\"}}]}}]}\n\n"));
+    CHECK(s.tool_calls().empty());
+}

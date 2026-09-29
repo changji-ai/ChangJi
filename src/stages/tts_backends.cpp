@@ -209,17 +209,17 @@ std::optional<TTSBackend> local_tts_backend(const fs::path& backbone,
         // `why` 一路摆到设置页的「能力」那一栏和 `/api/voice/take` 的报错
         // 上，一个字都不进提示词。判的是"这句话给谁看"，不是"它躺在哪个
         // 目录"（同 `stages/storyboard.cpp` 的 `check_coverage`）。
-        why = SAY("这个二进制没编进程内配音（构建时 CHANGJI_LLAMA=OFF）");
+        why = SAY("当前程序未包含内置配音（CHANGJI_LLAMA=OFF）");
         return std::nullopt;
     }
     if (backbone.empty() || decoder.empty()) {
         // 两个都要。只填一个是最常见的配错法，所以要分别点名，
         // 不能笼统说一句"模型没配"。
-        why = SAYF("进程内配音要两份模型：%1，%2",
-                   backbone.empty() ? SAY("[models].tts 没填")
-                                    : SAY("[models].tts 已填"),
-                   decoder.empty() ? SAY("[models].tts_decoder 没填")
-                                   : SAY("[models].tts_decoder 已填"));
+        why = SAYF("内置配音需要两个模型文件：%1，%2",
+                   backbone.empty() ? SAY("[models].tts 未填写")
+                                    : SAY("[models].tts 已填写"),
+                   decoder.empty() ? SAY("[models].tts_decoder 未填写")
+                                   : SAY("[models].tts_decoder 已填写"));
         return std::nullopt;
     }
 

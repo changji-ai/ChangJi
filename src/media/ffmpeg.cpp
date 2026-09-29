@@ -306,20 +306,22 @@ std::string FFmpeg::run_exe(const std::string& exe,
             SAYF("找不到 %1。在配置里填 assembly.ffmpeg_path 指定完整路径",
                  exe));
     }
+    // 最后那 800 字节。**截在字的边界上**：ffmpeg 的输出里满是中文的片子路径和
+    // 元数据，按字节截会劈开一个字，这段话进了闸门的理由、一路进 project.json，
+    // 存盘时 dump 抛 type_error.316——整部片子存不上。
+    std::string tail = r.out;
+    text::keep_tail_utf8(tail, 800);
     if (r.timed_out) {
         // **超时要单独说。** 混在"退出码 N"里的话，一次跑了半小时被杀掉的
         // 编码看起来就像编码参数写错了，人会去翻滤镜串。
         throw FFmpegError(
             SAYF("%1 超时（%2 秒）被中止。\n"
                  "要么这一段太长，要么它卡住了。最后的输出：\n%3",
-                 exe, std::to_string(static_cast<int>(timeout_s)),
-                 r.out.size() > 800 ? r.out.substr(r.out.size() - 800) : r.out));
+                 exe, std::to_string(static_cast<int>(timeout_s)), tail));
     }
     if (r.exit_code != 0) {
         // 把 ffmpeg 自己的报错贴出来，截断到 800 字——它的日志很长，
         // 而有用的那一行通常在最后。
-        const std::string tail =
-            r.out.size() > 800 ? r.out.substr(r.out.size() - 800) : r.out;
         throw FFmpegError(SAYF("%1 退出码 %2：\n%3", exe,
                                std::to_string(r.exit_code), tail));
     }
@@ -378,7 +380,9 @@ std::vector<PixelStats> FFmpeg::sample_pixel_stats(const fs::path& p,
     std::vector<PixelStats> out;
     for (const double frac : sample_points(samples)) {
         try {
-            out.push_back(pixel_stats(p, info.duration_s * frac));
+            PixelStats one = pixel_stats(p, info.duration_s * frac);
+            one.at = frac;
+            out.push_back(one);
         } catch (const FFmpegError&) {
             // 某一个取样点取不到不该让整次取样失败：片尾那一帧取不到
             // 是常事（时长有零点几秒的误差），而前面几个点已经够判断了。

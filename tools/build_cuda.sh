@@ -78,11 +78,16 @@ fi
 JOBS="$(nproc 2>/dev/null || echo 4)"
 info "并发: $JOBS"
 
+# **开 CUDA 用 CHANGJI_SD_CUDA，不是直接给 GGML_CUDA。** 原来这儿只给了
+# `-DGGML_CUDA=ON`：llama.cpp 那一半带上了 CUDA，而 stable-diffusion.cpp 认的是
+# SD_CUDA——没人设它，出图出片照旧跑在 CPU 上，CMake 那头还打一行「GPU 后端：
+# 没有」。下面那道 strings 检查也拦不住（llama.cpp 的 CUDA 符号照样链进来了）。
+# CHANGJI_SD_CUDA 在 cpp/CMakeLists.txt 里把 SD_CUDA、GGML_CUDA、架构三样一起设。
 cmake -S "$SRC_DIR" -B "$BUILD_DIR" -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
   -DCHANGJI_SD=ON -DCHANGJI_LLAMA=ON -DCHANGJI_BUILD_TESTS=OFF \
-  -DGGML_NATIVE=OFF -DGGML_CUDA=ON \
-  -DCMAKE_CUDA_ARCHITECTURES="$ARCH" \
+  -DGGML_NATIVE=OFF \
+  -DCHANGJI_SD_CUDA=ON -DCHANGJI_CUDA_ARCH="$ARCH" \
   -DPython3_EXECUTABLE="$PY" \
   "${EXTRA[@]}"
 

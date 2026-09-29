@@ -434,6 +434,12 @@ TEST_CASE("章节 id 的合法性") {
     CHECK(try_id("第三集") == 400);
     CHECK(try_id("ep 03") == 400);
     CHECK(try_id("ep03") == 200);
+    // 长成「别的 id + _两位数」的不许新建：成片文件名 ep01_02.mp4 会被认作 ep01 的
+    // 第 2 份——装配 ep01 时被当孤儿删掉，合成整部电影时被算进 ep01。
+    CHECK(try_id("ep01_02") == 400);
+    CHECK(try_id("act_01") == 400);
+    CHECK(try_id("ep_1") == 200);
+    CHECK(try_id("ep01_002") == 200);
 
     std::error_code ec;
     fs::remove_all(root, ec);

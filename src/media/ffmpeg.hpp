@@ -57,6 +57,10 @@ struct MediaInfo {
 /// 极差会被单个亮点或暗点带偏：一张几乎全黑但有一个高光点的废图，
 /// 极差能到 250，看起来很正常。百分位之差不吃这一套。
 struct PixelStats {
+    /// 取在片子的哪儿（0~1）。`sample_pixel_stats` 填；-1 = 没说。取不到的点会被
+    /// 跳过，所以**不能拿下标反推位置**：片尾那一点没取到，剩下两张里的第二张
+    /// 其实是片中，按下标会被说成「片尾」。
+    double at = -1.0;
     double mean = 0.0;
     double spread = 0.0;
     double minimum = 0.0;

@@ -99,7 +99,23 @@ size_t Hub::subscriber_count(const std::string& job_id) {
 }
 
 bool Hub::should_throttle(const std::string& job_id, const std::string& type,
-                          const std::string& kind) {
+                          const std::string& kind, const std::string& lane) {
+    const auto now = std::chrono::steady_clock::now();
+    // 桶是按 job_id 记的，而 job_id 每件活一个新的——不清的话这张表跟着进程一直长。
+    // 攒多了就把十秒没动过的扔掉（那些活早结束了）。
+    if (last_sent_.size() > 4096) {
+        for (auto it = last_sent_.begin(); it != last_sent_.end();) {
+            it = now - it->second > std::chrono::seconds(10) ? last_sent_.erase(it) : std::next(it);
+        }
+    }
+    // 预览图单独一档（见 kPreviewInterval）。
+    if (type == "job_preview" || type == "ref_preview") {
+        const std::string key = job_id + "|" + type + "|" + lane;
+        auto it = last_sent_.find(key);
+        if (it != last_sent_.end() && now - it->second < kPreviewInterval) return true;
+        last_sent_[key] = now;
+        return false;
+    }
     // 完成和失败永远不节流。这两条消息漏发一次，前端就会一直显示
     // 「生成中」直到用户手动刷新——比进度条不流畅严重得多。
     if (type != "progress") return false;
@@ -132,7 +148,6 @@ bool Hub::should_throttle(const std::string& job_id, const std::string& type,
     // 这个 200ms 的槽，紧接着的真进度就被丢掉——表现是预览在动、步数
     // 却冻在开跑那一下（2026-09-10 实测：6 秒里 6 条预览、0 条进度）。
     const std::string key = job_id + "|" + (kind.empty() ? type : kind);
-    auto now = std::chrono::steady_clock::now();
     auto it = last_sent_.find(key);
     if (it != last_sent_.end() && now - it->second < kThrottleInterval) {
         return true;
@@ -172,7 +187,12 @@ void Hub::broadcast(const std::string& job_id, const json& msg) {
         (kind_it != msg.end() && kind_it->is_string())
             ? kind_it->get<std::string>()
             : std::string{};
-    if (should_throttle(job_id, type, kind)) return;
+    std::string lane;
+    if (type == "ref_preview") {
+        const auto t = msg.find("target");
+        if (t != msg.end() && t->is_string()) lane = t->get<std::string>();
+    }
+    if (should_throttle(job_id, type, kind, lane)) return;
 
     // 收件人有两种：订了这个**具体 job_id** 的，和订了这一**类**任务的。
     //

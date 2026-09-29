@@ -30,12 +30,25 @@
 //       （回环也要同端口——本机别的端口上跑着的网页不算自己人）、或者名单里的。`null`、
 //       认不出的都不认。不带的放行：桌面端（Qt）、curl、别的引擎都不带。
 //   四，Content-Type（POST / PUT / PATCH）：**只认名单上的**——JSON；`/blob/…`（别的
-//       引擎送参考图）认 octet-stream；三条传文件的路由认 multipart。别的一律不认
+//       引擎送参考图）认 octet-stream；四条传文件的路由认 multipart。别的一律不认
 //       （`text/ping`、`application/csp-report` 这种浏览器自己会发的也在里头）。
 //
-// ⚠️ 这一道**只防浏览器里的网页**，不防网络上的人：对外监听时 curl 不带 Origin、
-// 自己挑 Content-Type，照样进得来。对外监听的 /api 要鉴权是另一件事。
+// 五，口令（**只在对外监听时**，2026-09-26 起）。前四条只防浏览器里的网页，不防网络上
+//     的人：curl 不带 Origin、自己挑 Content-Type，照样进得来——而进来能干的事里有
+//     `/api/mcp/add`（接一个扩展 = 在这台机器上起一条任意命令）、`/api/connections`
+//     （大模型后端改成「命令行」）。审查时拿 `--host 0.0.0.0` 真起过：一条 curl 就在这台
+//     机器上以引擎的身份跑了命令。所以对外监听时，除了自己验票的那几条（工作进程那几条、
+//     局域网要票、带票读负载），一律要口令：
+//       · `Authorization: Bearer <口令>`（桌面端、别的程序）；
+//       · 网页：头一回带着 `?token=<口令>` 打开，引擎种一个 HttpOnly、SameSite=Strict 的
+//         cookie、跳回不带口令的地址，之后 fetch、WebSocket、<img>、<video> 都带着它；
+//       · 查询串 `token=`（播放器那种加不了头的）。
+//     认的口令**只有一个**：这台机器的 `[peer].token`（2026-09-28 起，`http/ui_token.hpp`
+//     那头写着怎么定、原来为什么是两个）。配置里空着就拿 `CHANGJI_UI_TOKEN` 顶上，再没有就
+//     现生一个写进配置；启动时把带口令的地址打在日志上，设置 ▸ 机器表里能看、能改。回环监听
+//     一概不判：本机进程本来就能读数据目录。
 
+#include <functional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -73,7 +86,28 @@ struct GuardPolicy {
     /// 额外认的主机名（小写、不带端口；IPv6 带方括号）：`CHANGJI_ALLOWED_HOSTS`，逗号分隔。
     /// 反向代理、自己的域名要写进来。
     std::vector<std::string> allowed_hosts;
+    /// 对外监听时认的口令（第五条）。空串不算；一条都没有就谁都进不去（除了自己验票的那几条）。
+    std::vector<std::string> tokens;
+    /// 这台机器**现在**的口令（`config::runtime().peer_token()`）。设置页能改它，所以每一条
+    /// 请求现问，不在起服务时抄进 `tokens`——抄进去的话改完旧的照样进得来。和 `tokens` 并着认。
+    std::function<std::string()> live_token;
+    /// 局域网那张票认不认（`lan::Sense::by_ticket`）。只用在「带票读负载」那一条上。
+    std::function<bool(const std::string&)> lan_ticket_ok;
 };
+
+/// 网页登录那个 cookie 的名字。
+inline constexpr std::string_view kUiCookie = "changji_ui";
+
+/// `Cookie` 头里某一个 cookie 的值；没有回空。
+std::string cookie_value(std::string_view cookie_header, std::string_view name);
+
+/// 这个串是不是认的口令之一（逐字节比完，不提前返回）。
+bool token_matches(std::string_view got, const GuardPolicy& policy);
+
+/// 对外监听时这一条自己验票、不归口令管：工作进程那几条（`/task`、`/blob/…`、`/setup/…`、
+/// `/status`、`/health`、`/slots/…`，挂着 `[peer].token` 和局域网票那道门）、局域网要票
+/// （`/api/lan/ticket`，对面没点头就 403）。
+bool auth_exempt(std::string_view method, std::string_view path);
 
 /// 按监听地址和环境变量 `CHANGJI_ALLOWED_HOSTS` 拼一份。
 GuardPolicy guard_policy_for(const std::string& bind_host);
@@ -87,9 +121,17 @@ struct RequestFacts {
     std::string_view host;
     std::string_view fetch_site;   ///< `Sec-Fetch-Site`
     std::string_view fetch_mode;   ///< `Sec-Fetch-Mode`
+    std::string_view authorization = {};   ///< `Authorization`
+    std::string_view cookie = {};          ///< `Cookie`
+    std::string_view query_token = {};     ///< 查询串里的 `token=`
+    std::string_view lan_ticket = {};      ///< `X-Changji-Lan-Ticket`
 };
 
-enum class Refusal { none, host, origin, content_type };
+/// 这个请求**真进了门**没有（口令对上了，或者回环监听）——不看上面那些免检的路。
+/// 登录页问「我进没进门」（`GET /api/cloud/gate`）用它：那一条自己是免检的。
+bool is_authed(const RequestFacts& r, const GuardPolicy& policy);
+
+enum class Refusal { none, host, origin, content_type, auth };
 
 struct GuardVerdict {
     Refusal refusal = Refusal::none;
@@ -105,7 +147,7 @@ GuardVerdict judge_request(const RequestFacts& r, const GuardPolicy& policy);
 /// 都能连上来订阅对话、正文的推送——这一道是唯一挡它的）。
 GuardVerdict judge_upgrade(const RequestFacts& r, const GuardPolicy& policy);
 
-/// 不认时回什么状态码：Content-Type 415，别的 403。
+/// 不认时回什么状态码：Content-Type 415、没口令 401，别的 403。
 ///
 /// ⚠️ **别用 421**（Misdirected Request，按理最贴切）：这一版 Crow 的状态码表里没有它，
 /// 连接那一层把不认识的码一律改成 500（同 cmake/patch_crow_422.cmake 修的那件事），
@@ -114,5 +156,8 @@ int refusal_status(const GuardVerdict& v);
 
 /// 不认时那一句（给人看的，SAY）。
 std::string refusal_message(const GuardVerdict& v);
+
+/// 对外监听、没带口令打开界面那几页时回的那一页（一个原生表单，填口令、GET 回根上）。
+std::string login_page();
 
 }  // namespace changji::http

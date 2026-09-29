@@ -1,6 +1,8 @@
 #include "config/settings.hpp"
 
 #include <algorithm>
+#include <chrono>
+#include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <fstream>
@@ -9,6 +11,12 @@
 #include <set>
 #include <sstream>
 #include <stdexcept>
+
+#ifndef _WIN32
+#include <cerrno>
+#include <fcntl.h>
+#include <unistd.h>
+#endif
 
 #include <nlohmann/json.hpp>
 #include <toml++/toml.hpp>
@@ -19,8 +27,11 @@
 #include "config/model_index.hpp"
 #include "models/project.hpp"
 #include "stages/limits.hpp"
+#include "cloud/cloud.hpp"
+#include "util/atomic_file.hpp"
 #include "util/paths.hpp"
 #include "util/say.hpp"
+#include "util/text.hpp"
 
 namespace changji::config {
 
@@ -340,6 +351,8 @@ std::vector<std::string> LLMConfig::validate() const {
         check_range(errs, "llm.context_tokens",
                     static_cast<double>(context_tokens), 10240.0, 200000.0);
     }
+    // 负数 = 一直留着；上界一天（再长就是"一直留着"，写负数）
+    check_range(errs, "llm.keep_alive_minutes", keep_alive_minutes, -1.0, 1440.0);
     return errs;
 }
 
@@ -768,6 +781,20 @@ std::string read_api_key_file() {
     return s.substr(b, e - b + 1);
 }
 
+namespace {
+
+/// 密钥落盘：**一生下来就只有自己读得到**，写全了再换名，写不全就抛。
+///
+/// 原来是先按默认权限（0644）建文件、写进去、**再** chmod 成 0600——中间那一下
+/// 同机别的账号读得到；写的结果也不看，盘满了照样回"存好了"，而文件是空的或
+/// 半截（2026-09-25 审出来）。做法收在 `util::write_file_atomic`，lan.json、
+/// config.toml 也走它。
+void write_private_file(const fs::path& p, const std::string& data) {
+    util::write_file_atomic(p, data, /*private_only=*/true);
+}
+
+}  // namespace
+
 fs::path write_api_key_file(const std::string& key) {
     const fs::path p = user_api_key_path();
     std::error_code ec;
@@ -776,15 +803,7 @@ fs::path write_api_key_file(const std::string& key) {
         fs::remove(p, ec);   // 清空 = 删掉，别留一个空文件在那儿让人猜
         return p;
     }
-    {
-        std::ofstream out(p, std::ios::binary | std::ios::trunc);
-        out << key;
-    }
-#ifndef _WIN32
-    // 只给自己读写。Windows 上没有对应的简单做法，跳过。
-    fs::permissions(p, fs::perms::owner_read | fs::perms::owner_write,
-                    fs::perm_options::replace, ec);
-#endif
+    write_private_file(p, key);
     return p;
 }
 
@@ -823,6 +842,8 @@ fs::path api_key_path_for(const std::string& base_url) {
 }
 
 bool has_own_api_key(const std::string& base_url) {
+    // 场记云那一家：登着就算填过（钥匙是设备钥匙，在 cloud.json 里）
+    if (cloud::key_for(base_url)) return true;
     std::error_code ec;
     const fs::path p = api_key_path_for(base_url);
     if (!fs::is_regular_file(p, ec)) return false;
@@ -849,6 +870,8 @@ bool any_own_api_key() {
 }
 
 std::string read_api_key_for(const std::string& base_url) {
+    // **场记云那一家的钥匙是设备钥匙**，只给登着的那朵云自己的 `/v1`（见 cloud::key_for）。
+    if (auto k = cloud::key_for(base_url)) return *k;
     std::error_code ec;
     const fs::path p = api_key_path_for(base_url);
     if (fs::is_regular_file(p, ec)) {
@@ -889,14 +912,7 @@ fs::path write_api_key_for(const std::string& base_url, const std::string& key) 
         fs::remove(p, ec);
         return p;
     }
-    {
-        std::ofstream out(p, std::ios::binary | std::ios::trunc);
-        out << key;
-    }
-#ifndef _WIN32
-    fs::permissions(p, fs::perms::owner_read | fs::perms::owner_write,
-                    fs::perm_options::replace, ec);
-#endif
+    write_private_file(p, key);
     return p;
 }
 
@@ -1001,6 +1017,7 @@ void apply_table(const toml::table& doc, Settings& s) {
         take(t, "call_log_max_mb", s.llm.call_log_max_mb);
         take(t, "parallel", s.llm.parallel);
         take(t, "context_tokens", s.llm.context_tokens);
+        take(t, "keep_alive_minutes", s.llm.keep_alive_minutes);
         take(t, "thinking", s.llm.thinking);
         take(t, "reasoning_effort", s.llm.reasoning_effort);
         // [llm.models] —— 按任务分流。**只覆盖写了的键**，没写的留着默认，
@@ -1097,6 +1114,9 @@ void apply_table(const toml::table& doc, Settings& s) {
         take(t, "subtitle_font", s.assembly.subtitle_font);
         take(t, "ffmpeg_path", s.assembly.ffmpeg_path);
         take(t, "ffprobe_path", s.assembly.ffprobe_path);
+    }
+    if (auto t = doc["cloud"].as_table()) {
+        take(t, "url", s.cloud.url);
     }
     if (auto t = doc["update"].as_table()) {
         take(t, "auto_check", s.update.auto_check);
@@ -1195,11 +1215,54 @@ void apply_table(const toml::table& doc, Settings& s) {
 /// 没说的那一支要去 assets.json 里推（见 orientation_from_assets）。
 /// **不能拿"读出来的值等于内置默认"当判据**：明写 landscape 和什么都没写，
 /// 读完一模一样，而这两件事要走不同的路。
-bool read_toml_into(const fs::path& path, Settings& s) {
+/// 片子里那份 changji.toml **只认这部电影的设置**，机器的一律不认。
+///
+/// 片子目录是会被拷来拷去的（别人给的、网上下的）。原来两份走同一个
+/// apply_table，于是片子里一句 `[upscale] command = "…"` 在装配时就当命令跑了，
+/// `[assembly].ffmpeg_path` 换掉 ffmpeg，`[llm].command` 换掉写作那条命令，
+/// `[llm].base_url` 把人的密钥送到别家（2026-09-25 审出来）。扩展（mcp）那边
+/// 对「拷来的片子」早就要人点「信任」，这儿却是开着的。
+///
+/// 认的就是项目模板（kProjectToml）里写着的那几节：画幅、预告、装配的编码
+/// 参数和字幕、后期、声音、闸门、这部电影要哪一档模型和采样旋钮。**起程序的
+/// 路径、模型文件放在哪、连谁、用什么命令**都是这台机器的属性，只在全局那份里。
+void keep_film_settings_only(toml::table& doc) {
+    static const std::set<std::string> kFilm = {"video", "preview", "assembly", "look",
+                                                "sound", "gates", "models"};
+    std::vector<std::string> drop;
+    for (const auto& [k, v] : doc) {
+        if (!kFilm.count(std::string(k.str()))) drop.emplace_back(k.str());
+    }
+    for (const auto& k : drop) doc.erase(k);
+    if (auto* a = doc["assembly"].as_table()) {
+        a->erase("ffmpeg_path");
+        a->erase("ffprobe_path");
+    }
+    // 配乐是「跑一条命令出一段音乐」——命令同上，归机器。风格、音量照认。
+    if (auto* snd = doc["sound"].as_table()) snd->erase("music_command");
+    if (auto* m = doc["models"].as_table()) {
+        // 模型文件是机器的（模板上那段：「模型文件名不要写在这里」）。
+        for (const char* k : {"engine", "dir", "llm", "video", "video_vae", "video_text_encoder",
+                              "image", "image_base", "image_vae", "image_text_encoder",
+                              "image_text_encoder_vision", "tts", "tts_decoder", "video_llm",
+                              "video_llm_vision", "video_audio_vae", "video_lora",
+                              "vram_reserve_gb", "vae_vram_min_gb", "weights", "image_weights",
+                              // 下面这几样也是机器的：高噪那一半是个模型文件；帧数上限、
+                              // 步长、底数跟着那份模型文件走；flash attention 和 VAE
+                              // 分块看的是这台的显卡和显存（2026-09-26 审出来漏了）。
+                              "video_high_noise", "video_max_frames", "video_frame_step",
+                              "video_frame_base", "diffusion_flash_attn", "video_vae_tile"}) {
+            m->erase(k);
+        }
+    }
+}
+
+bool read_toml_into(const fs::path& path, Settings& s, bool film_only = false) {
     std::error_code ec;
     if (!fs::is_regular_file(path, ec)) return false;
     try {
         auto doc = toml::parse_file(paths::to_utf8(path));
+        if (film_only) keep_film_settings_only(doc);
         apply_table(doc, s);
         const auto* video = doc["video"].as_table();
         // 类型不对（写成数字之类）算没说：那时候 take() 也没覆盖，
@@ -1349,20 +1412,52 @@ void apply_env(Settings& s) {
 
 }  // namespace
 
+Settings load_settings_impl(const fs::path& global_file,
+                            const std::optional<fs::path>& project_dir);
+
 Settings load_settings(const std::optional<fs::path>& project_dir) {
+    return load_settings_impl(user_config_path(), project_dir);
+}
+
+Settings load_settings_file(const fs::path& toml_file) {
+    return load_settings_impl(toml_file, std::nullopt);
+}
+
+Settings load_settings_impl(const fs::path& global_file,
+                            const std::optional<fs::path>& project_dir) {
     Settings s;  // 内置默认值就是成员初始化器
-    read_toml_into(user_config_path(), s);
+    read_toml_into(global_file, s);
     if (project_dir) {
         // **项目自己没写画幅时，从它自己的 assets.json 推**，而不是落到
         // 内置默认。优先级照旧「项目 > 全局 > 内置默认」——推出来的这个值
         // 也是项目级的记录，所以它压全局那份。见 orientation_from_assets。
+        const Settings machine = s;
         const bool toml_says_orientation =
-            read_toml_into(*project_dir / "changji.toml", s);
+            read_toml_into(*project_dir / "changji.toml", s, /*film_only=*/true);
         if (!toml_says_orientation) {
             if (const auto o = orientation_from_assets(*project_dir)) {
                 s.video.orientation = *o;
             }
         }
+        // **片子里那几节叠上来之后再验一遍。** 本机那份起来时验过，片子里那份
+        // 从没验过——拷来的片子写一个 `fps = 0`、`orientation = "方"`，一路到
+        // 出片那一步才炸（除零、档位表查不到），而那时候报的话指不到这份文件。
+        // 哪一节不对就那一节按本机的来，照实打一行；本机那份本来就不对的不管
+        //（那是另一件事，起来时已经报过）。
+        const auto settle = [](auto& now, const auto& was, const char* name) {
+            const auto errs = now.validate();
+            if (errs.empty() || !was.validate().empty()) return;
+            std::fprintf(stderr, "[配置] 片子里的 [%s] 不对，这一节按本机的来：%s\n", name,
+                         errs.front().c_str());
+            now = was;
+        };
+        settle(s.video, machine.video, "video");
+        settle(s.preview, machine.preview, "preview");
+        settle(s.assembly, machine.assembly, "assembly");
+        settle(s.look, machine.look, "look");
+        settle(s.sound, machine.sound, "sound");
+        settle(s.gates, machine.gates, "gates");
+        settle(s.models, machine.models, "models");
     }
     // **密钥单独一个文件，压过 config.toml 里那份。**
     // 老配置里写了 [llm].api_key 的照样认（上面那行已经读进来了），
@@ -1394,6 +1489,20 @@ Settings load_settings(const std::optional<fs::path>& project_dir) {
     // 被当成两个不同的服务
     s.llm.base_url = strip_trailing_slash(s.llm.base_url);
     if (s.tts.base_url) s.tts.base_url = strip_trailing_slash(*s.tts.base_url);
+
+    // **登着场记云，机器表里多一台「场记云」**（虚的：只在内存里，写回时跳过——见
+    // save_peer_nodes）。退出登录下一次读配置就没了。
+    s.cloud.url = strip_trailing_slash(text::strip_ws(s.cloud.url));
+    if (const auto v = cloud::virtual_node(s.cloud.url)) {
+        bool have = false;
+        for (const auto& n : s.peer.nodes) have = have || cloud::bare_url(n.url) == v->url;
+        if (!have) {
+            PeerNodeConfig n;
+            n.url = v->url;
+            n.token = v->token;
+            s.peer.nodes.push_back(std::move(n));
+        }
+    }
 
     // 往 stderr 打，不走日志：这一步发生在任何日志接上之前。
     for (const auto& note : migrate_legacy(s)) {
@@ -1508,12 +1617,21 @@ PlacementInfo image_placement(const Settings& expanded) {
     return image_placement_of(expanded, expanded.models.image);
 }
 
-int steps_on_node(const Settings& node, int dispatched_steps, bool steps_pinned) {
+bool video_lora_on_tier(const Settings& s, bool final_tier) {
+    const std::string& t = s.models.video_lora_tiers;
+    return t == "both" || t == (final_tier ? "final" : "draft");
+}
+
+int steps_on_node(const Settings& node, int dispatched_steps, bool steps_pinned,
+                  bool final_tier) {
     if (steps_pinned || dispatched_steps <= 0) return dispatched_steps;
-    const auto eff = effective_spec(node, dispatched_steps);
     // 这台自己的 [tiers].final_steps 不算数：那是它本地跑时的偏好，
-    // 派来的活听派活那部电影的。只拿"挂没挂上 Turbo"这一个结论。
-    return eff.turbo ? 6 : dispatched_steps;
+    // 派来的活听派活那部电影的。只拿"这一档挂不挂得上 Turbo"这一个结论。
+    std::error_code ec;
+    const auto lora = node.models.resolve(node.models.video_lora, node.workspace_path());
+    const bool turbo = !node.models.video_lora.empty() && fs::is_regular_file(lora, ec) &&
+                       video_lora_on_tier(node, final_tier);
+    return turbo ? 6 : dispatched_steps;
 }
 
 EffectiveSpec effective_spec(const Settings& s, int table_final_steps) {
@@ -1527,8 +1645,11 @@ EffectiveSpec effective_spec(const Settings& s, int table_final_steps) {
     // 画面反而变差。
     std::error_code ec;
     const auto lora = s.models.resolve(s.models.video_lora, s.workspace_path());
+    // **还要这一档真挂它。** `video_lora_tiers = "draft"`（配置模板里推荐的那一种：
+    // 草稿挂 Turbo 看叙事，成片跑满步数不挂）原来照样压到 6 步——成片档裸模型跑
+    // 6 步，一镜全糊，而且不报错。
     out.turbo = !s.models.video_lora.empty() &&
-                fs::is_regular_file(lora, ec);
+                fs::is_regular_file(lora, ec) && video_lora_on_tier(s, true);
     out.steps_pinned = s.tiers.final_steps != 0;
 
     out.final_steps = out.steps_pinned ? s.tiers.final_steps : table_final_steps;
@@ -1753,6 +1874,11 @@ call_log = true
 # 一次调用的正文几十 KB，比 1 MB 还小的上限等于刚写下就被剪光；
 # 真不想留就把上面那个 call_log 关掉。
 call_log_max_mb = 1024.0
+
+# 本地模型（backend = "local"，或者对话里挑了「本地」）闲多久就把显存还回去，分钟。
+# 5 = 最后一次用完闲满五分钟就卸；0 = 每次用完就卸；-1 = 一直留着（显存不够时
+# 才被出图出片挤掉）。
+keep_alive_minutes = 5.0
 
 # 兜底模型：下面 [llm.models] 里没点名的任务用它。
 # glm-4.7-flash 是这家唯一免费的模型，也是默认——代价是限流很紧

@@ -1,5 +1,6 @@
 #include "infer/worker_farm.hpp"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -24,7 +25,16 @@ struct Kid {
     int port = 0;
     std::string log;
     int restarts = 0;
+    /// 这一次是什么时候拉起来的。活满 `kStableFor` 就把重拉次数清零（见 watch）。
+    std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
 };
+
+/// 活过这么久就算"这张卡是好的"，之前那几次重拉不再记账。
+///
+/// 不清零的话 kMaxRestarts 数的是**整个进程这辈子**：连跑几天、隔一阵被
+/// OOM 带走一次的卡，第六次死了就再也没人拉，而它明明每次都能好好跑几个钟头。
+/// 上限要挡的只是"一起来就崩"的那种。
+constexpr std::chrono::minutes kStableFor{10};
 
 struct WorkerFarm::Impl {
     std::vector<Kid> kids;
@@ -55,12 +65,21 @@ struct WorkerFarm::Impl {
         constexpr int kMaxRestarts = 5;
         std::unique_lock lk(mu);
         while (!cv.wait_for(lk, std::chrono::seconds(10), [this] { return stop; })) {
+            const auto now = std::chrono::steady_clock::now();
             for (Kid& k : kids) {
-                if (k.h != 0 && proc::alive(k.h)) continue;
-                if (k.restarts >= kMaxRestarts) continue;
+                if (k.h != 0 && proc::alive(k.h)) {
+                    if (k.restarts > 0 && now - k.started >= kStableFor) k.restarts = 0;
+                    continue;
+                }
+                if (k.restarts >= kMaxRestarts) {
+                    // 不再拉了：那一格别留着死掉的 id（它随时会被系统发给别的进程）。
+                    k.h = 0;
+                    continue;
+                }
                 ++k.restarts;
                 if (k.h != 0) proc::kill_spawned(k.h, 0);   // 收掉句柄
                 k.h = launch(exe, k);
+                k.started = now;
                 std::fprintf(stderr,
                              SAY_NEVER("[多卡] 卡 %d 的工作进程没了，重拉（第 %d 次）\n"),
                              k.gpu, k.restarts);
@@ -114,6 +133,10 @@ std::shared_ptr<WorkerFarm> WorkerFarm::start(
     std::shared_ptr<WorkerFarm> farm(new WorkerFarm());
     farm->impl_->exe = paths::to_utf8(self);
     const int base = settings.workers.base_port;
+    // **先全拉起来，再一张一张等应答。** 原来是拉一张、等它应答（最多两分钟）、
+    // 再拉下一张：几张卡的启动时间是**加起来**的，而且一张起不来的卡要把后面
+    // 每一张都拖两分钟。这一步是第一次出片时才走的（run_deps 的 shared_farm），
+    // 人正盯着进度条等。一起拉，等的就只是最慢那一张。
     for (int gpu = 0; gpu < gpus; ++gpu) {
         const int port = worker_port_for(base, gpu);
         const std::string log =
@@ -129,23 +152,33 @@ std::shared_ptr<WorkerFarm> WorkerFarm::start(
             continue;
         }
         farm->impl_->kids.push_back(Kid{h, gpu, port, log, 0});
-        const std::string base_url = "http://127.0.0.1:" + std::to_string(port);
-        // **等它真的能应答再算数。** 只看 fork 成功的话，模型载不起来的
-        // 那张卡会被当成可用的，然后每一镜派过去都失败——而 WorkerRoster
-        // 要连着失败几次才会把它隔离，那几镜的重试次数就白烧了。
-        // 没给探活函数就只信"进程起来了"——那是测试路径，
-        // 生产里 run_deps 一定会传一个真的。
-        if (healthy && !healthy(base_url, 120)) {
+    }
+    // **等它真的能应答再算数。** 只看 fork 成功的话，模型载不起来的
+    // 那张卡会被当成可用的，然后每一镜派过去都失败——而 WorkerRoster
+    // 要连着失败几次才会把它隔离，那几镜的重试次数就白烧了。
+    // 没给探活函数就只信"进程起来了"——那是测试路径，
+    // 生产里 run_deps 一定会传一个真的。
+    //
+    // 两分钟是**从拉起那一刻算的总期限**，不是每张各等两分钟：前面那张等了
+    // 九十秒，后面那张也已经跟着起了九十秒。
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(120);
+    auto& kids = farm->impl_->kids;
+    for (auto it = kids.begin(); it != kids.end();) {
+        const std::string base_url = "http://127.0.0.1:" + std::to_string(it->port);
+        const auto left = std::chrono::duration_cast<std::chrono::seconds>(
+                              deadline - std::chrono::steady_clock::now()).count();
+        if (healthy && !healthy(base_url, static_cast<int>(std::max<long long>(1, left)))) {
             std::fprintf(stderr,
                          SAY_NEVER("[多卡] 卡 %d 的工作进程两分钟没应答，"
                                    "跳过。日志在 %s\n"),
-                         gpu, log.c_str());
-            proc::kill_spawned(h);
-            farm->impl_->kids.pop_back();
+                         it->gpu, it->log.c_str());
+            proc::kill_spawned(it->h);
+            it = kids.erase(it);
             continue;
         }
         farm->endpoints_.push_back(base_url);
-        std::fprintf(stderr, SAY_NEVER("[多卡] 卡 %d 就绪：%s\n"), gpu, base_url.c_str());
+        std::fprintf(stderr, SAY_NEVER("[多卡] 卡 %d 就绪：%s\n"), it->gpu, base_url.c_str());
+        ++it;
     }
 
     if (farm->endpoints_.empty()) {

@@ -159,6 +159,7 @@
             "order": 0,
             "real_duration_s": 5.0,
             "scene_id": "ep01_s01",
+            "short_id": "s01_sh001",
             "shot_id": "ep01_s01_sh001",
             "shot_size": "MS",
             "status": "planned",
@@ -208,6 +209,7 @@
             "order": 6,
             "real_duration_s": 5.0,
             "scene_id": "ep01_s03",
+            "short_id": "s03_sh007",
             "shot_id": "ep01_s03_sh007",
             "shot_size": "MCU",
             "status": "audio_done",
@@ -286,7 +288,7 @@
             "has_ref": false
           }
         ],
-        "reference_hint": "参考图会传给出图模型，但当前这个是纯文生图的，它不会照着画——画面靠的是下面那段拼出来的提示词。要让参考图真生效，去项目页「模型」那一行点开首帧那一个，挑一档 Qwen-Image-Edit 2509 下下来（视觉塔会跟着一起下）。⚠️ 引擎是按**文件名**认的，名字里带 edit 才算——官方那几份自带，改过名就认不出来。",
+        "reference_hint": "参考图会传给出图模型，但当前模型仅支持文生图，不会参照参考图生成，画面完全取决于下方拼接的提示词。如需参考图生效，请在「设置 ▸ 模型文件」中下载「首帧模型（图像编辑）」的 Qwen-Image-Edit 2509 版本（视觉模块会一并下载）。⚠️ 引擎按文件名识别，文件名中包含 edit 才能识别；官方文件自带该字样，重命名后将无法识别。",
         "reference_images_used": false,
         "style": {
           "aspect_ratio": "9:16",

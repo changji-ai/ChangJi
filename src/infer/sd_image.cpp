@@ -203,6 +203,26 @@ void remove_preview_sink(int token) {
     preview_sinks().erase(token);
 }
 
+namespace {
+thread_local std::string t_preview_scope;
+constexpr char kScopeSep = '\x1f';
+}  // namespace
+
+PreviewScope::PreviewScope(std::string scope) : prev_(std::move(t_preview_scope)) {
+    t_preview_scope = std::move(scope);
+}
+
+PreviewScope::~PreviewScope() { t_preview_scope = std::move(prev_); }
+
+std::string scoped_preview_tag(const std::string& tag) {
+    if (t_preview_scope.empty() || tag.empty()) return tag;
+    return t_preview_scope + kScopeSep + tag;
+}
+
+bool preview_tag_is_local(const std::string& tag) {
+    return tag.find(kScopeSep) == std::string::npos;
+}
+
 void publish_preview(const std::string& tag, int step, std::string data_url) {
     std::vector<PreviewSink> sinks;
     {
@@ -573,7 +593,7 @@ void write_png(const fs::path& dest, const sd_image_t& img) {
     std::error_code ec;
     fs::create_directories(dest.parent_path(), ec);
     std::ofstream f(dest, std::ios::binary | std::ios::trunc);
-    if (!f) throw SdError(SAYF("写不了 %1", paths::to_utf8(dest)));
+    if (!f) throw SdError(SAYF("无法写入 %1", paths::to_utf8(dest)));
     f.write(reinterpret_cast<const char*>(buf.data()),
             static_cast<std::streamsize>(buf.size()));
     f.close();
@@ -974,7 +994,7 @@ void SdContext::generate(const ImageRequest& req, const fs::path& dest,
         a.on_step = &on_step;
         a.tok = &tok;
         a.want_steps = req.steps;
-        a.tag = req.tag;
+        a.tag = scoped_preview_tag(req.tag);   // 替别人跑的活带上前缀，见 PreviewScope
         a.slot = Slot::Image;
         a.work = static_cast<std::size_t>(req.width) * req.height;
         a.sampled = false;   // 每次生成重新量一遍，见 progress_trampoline
@@ -1135,7 +1155,7 @@ void SdContext::generate_video(const VideoRequest& req, const fs::path& raw_dest
         a.on_step = &on_step;
         a.tok = &tok;
         a.want_steps = req.steps;
-        a.tag = req.tag;
+        a.tag = scoped_preview_tag(req.tag);   // 替别人跑的活带上前缀，见 PreviewScope
         a.slot = Slot::Video;
         a.work = static_cast<std::size_t>(req.width) * req.height *
                  std::max(1, req.frames);
@@ -1195,7 +1215,7 @@ void SdContext::generate_video(const VideoRequest& req, const fs::path& raw_dest
     std::error_code ec;
     fs::create_directories(raw_dest.parent_path(), ec);
     std::ofstream f(raw_dest, std::ios::binary | std::ios::trunc);
-    if (!f) throw SdError(SAYF("写不了 %1", paths::to_utf8(raw_dest)));
+    if (!f) throw SdError(SAYF("无法写入 %1", paths::to_utf8(raw_dest)));
     for (int i = 0; i < count; ++i) {
         const sd_image_t& img = frames[i];
         if (img.channel != 3) {
@@ -1224,7 +1244,7 @@ void SdContext::generate_video(const VideoRequest& req, const fs::path& raw_dest
         const std::uint64_t n = audio->sample_count * audio->channels;
         const std::uint32_t data_bytes = static_cast<std::uint32_t>(n * 2);
         std::ofstream w(wav, std::ios::binary | std::ios::trunc);
-        if (!w) throw SdError(SAYF("写不了 %1", paths::to_utf8(wav)));
+        if (!w) throw SdError(SAYF("无法写入 %1", paths::to_utf8(wav)));
         const auto u32 = [&w](std::uint32_t v) {
             const unsigned char b[4] = {
                 static_cast<unsigned char>(v & 0xFF),

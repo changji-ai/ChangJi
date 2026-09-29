@@ -96,14 +96,17 @@ std::string cannot_do(const Task& t, const config::Settings& base) {
         // 不分开说的话，用户看到的是"这台没配模型"——而他明明在那台上
         // 装过、`/status` 上那一格也是亮的，接着就会去查网络和口令。
         // 判据是「不盖这部电影那一层就干得成」。
+        //
+        // 指路要指到那一类：下模型在「设置 ▸ 模型文件」里（2026-09-28 设置页重排
+        // 起分九类，只说"去设置页"等于让人挨个翻）。
         const auto group = cap == Capability::Video  ? "video"
                            : cap == Capability::Tts  ? "tts"
                                                      : "image";
         const auto want = t.pick.find(group);
         if (want != t.pick.end() && !want->second.empty() &&
             missing_for(cap, probe_facts(base)).empty()) {
-            return SAYF("%1。这台装的是别的档——这部电影挑的是「%2」，"
-                        "去设置页给这台补上这一档，或者给这部电影换一档",
+            return SAYF("%1。执行任务的机器上安装的是其他版本，本片选择的是「%2」。"
+                        "请在该机器的「设置 ▸ 模型文件」中下载此版本，或为本片更换版本",
                         why, want->second);
         }
         return why;
@@ -202,7 +205,8 @@ TaskResult run_task_locally(const Task& t, const config::Settings& base,
             plan.spec = t.spec;
             // 步数由这台按自己有没有 Turbo LoRA 重定，见 steps_on_node。
             plan.spec.steps =
-                config::steps_on_node(s, t.spec.steps, t.spec.steps_pinned);
+                config::steps_on_node(s, t.spec.steps, t.spec.steps_pinned,
+                                      t.tier == models::Tier::FINAL);
             plan.frames = t.frames;
             plan.prompts = t.prompts;
             plan.motion = t.motion;
@@ -226,6 +230,12 @@ TaskResult run_task_locally(const Task& t, const config::Settings& base,
         result.ok = false;
         // 这句会一路变成派活方事件流里的那条 warn，所以要能直接给用户看。
         result.error = e.what();
+    }
+    // 沙箱用完就删：产物已经按内容收进 blob 库了（派活方从那儿取），留着就是
+    // 每一件活在盘上多躺一份、永远没人删（2026-09-25 审出来）。砸了的也删。
+    if (t.return_artifact) {
+        std::error_code ec;
+        std::filesystem::remove_all(sandbox, ec);
     }
     return result;
 }

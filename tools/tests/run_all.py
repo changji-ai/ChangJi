@@ -16,6 +16,7 @@
 import os
 import subprocess
 import sys
+import tempfile
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -31,7 +32,16 @@ def main(argv):
     env.setdefault("QT_QPA_PLATFORM", "offscreen")
     # 用例里自己会把配置路径指到临时目录，但万一哪条漏了，这儿再兜一层：
     # **绝不能让用例读到使用者真正的 cloud.json**，那里面是真钥匙。
-    env["HOME"] = env.get("CHANGJI_TEST_HOME") or env["HOME"]
+    # 原来这行是 `HOME = CHANGJI_TEST_HOME 或者原来的 HOME`——没设那个变量时
+    # 等于什么都没做。现在默认给一个空的临时目录。
+    env["HOME"] = env.get("CHANGJI_TEST_HOME") or tempfile.mkdtemp(prefix="autodl-test-")
+    env["USERPROFILE"] = env["HOME"]
+    # 钥匙也认环境变量（优先于配置文件）：使用者机器上设着的那几个不能漏进用例
+    for k in ("AUTODL_TOKEN", "PPIO_API_KEY", "PPIO_TOKEN",
+              "ALIBABA_CLOUD_ACCESS_KEY_ID", "ALIBABA_CLOUD_ACCESS_KEY_SECRET",
+              "ALICLOUD_ACCESS_KEY", "ALICLOUD_SECRET_KEY",
+              "TENCENTCLOUD_SECRET_ID", "TENCENTCLOUD_SECRET_KEY"):
+        env.pop(k, None)
 
     bad, total, t0 = [], 0, time.time()
     for name in want:

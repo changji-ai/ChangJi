@@ -7,6 +7,18 @@
 
 namespace changji::text {
 
+int parse_int_or(const std::string& digits, int fallback) {
+    if (digits.empty()) return fallback;
+    long long v = 0;
+    for (const char c : digits) {
+        if (c < '0' || c > '9') return fallback;
+        v = v * 10 + (c - '0');
+        if (v > 2147483647LL) return fallback;
+    }
+    return static_cast<int>(v);
+}
+
+
 namespace {
 
 /// 要从各段尾部剥掉的标点，对应 Python 的 rstrip("。.；;，,、 ")。
@@ -240,6 +252,19 @@ std::size_t utf8_char_len(unsigned char lead) {
     if ((lead & 0xF0) == 0xE0) return 3;
     if ((lead & 0xF8) == 0xF0) return 4;
     return 1;
+}
+
+std::string drop_partial_utf8_tail(std::string s) {
+    // 往回最多看三个字节：一个字最长四字节，完整的话从起头那个字节算到末尾正好够长。
+    std::size_t i = s.size();
+    for (std::size_t back = 0; back < 4 && i > 0; ++back) {
+        --i;
+        const auto b = static_cast<unsigned char>(s[i]);
+        if ((b & 0xC0) == 0x80) continue;   // 后续字节，接着往回找起头的
+        if (b >= 0xC0 && i + utf8_char_len(b) > s.size()) s.resize(i);
+        return s;
+    }
+    return s;
 }
 
 std::string truncate_utf8(const std::string& s, std::size_t n) {

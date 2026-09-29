@@ -577,28 +577,31 @@ void parse_scene_body(const std::string& body, SceneBlock& out) {
     out.place = place;
 }
 
-std::optional<std::string> resolve_scene_location(const std::string& place_in,
-                                                  const AssetLibrary& assets) {
+std::optional<std::string> match_place_name(const std::string& place_in,
+                                            const std::vector<std::string>& names_in) {
     const std::string place = text::strip_ws(place_in);
     if (place.empty()) return std::nullopt;
-    for (const auto& [id, loc] : assets.locations) {
-        if (text::strip_ws(loc.name) == place) return id;
+    std::vector<std::string> names;
+    for (const std::string& n : names_in) {
+        const std::string t = text::strip_ws(n);
+        if (!t.empty()) names.push_back(t);
+    }
+    for (const std::string& name : names) {
+        if (name == place) return name;
     }
     std::optional<std::string> best;
     std::size_t best_len = 0;
-    for (const auto& [id, loc] : assets.locations) {
-        const std::string name = text::strip_ws(loc.name);
-        if (name.empty()) continue;
+    for (const std::string& name : names) {
         const bool hit = name.find(place) != std::string::npos ||
                          place.find(name) != std::string::npos;
         if (hit && name.size() > best_len) {
-            best = id;
+            best = name;
             best_len = name.size();
         }
     }
     if (best.has_value()) return best;
 
-    // **最后一手：场景名的字按顺序出现在剧本那一行里就算同一个地方。**
+    // **第三手：名单上那个名字的字按顺序出现在地名里就算同一个地方。**
     //
     // 剧本是模型写的，场次头上的地名常常比资产库里那个多几个字：
     // 2026-09-16 实测 ep06，资产库里是「城南酒吧」，剧本写的是
@@ -611,11 +614,10 @@ std::optional<std::string> resolve_scene_location(const std::string& place_in,
     // 判据是**按顺序**（子序列），不是「有几个字重合」：「城南酒吧」的
     // 城·南·酒·吧 依次出现在「城南深巷小酒吧」里才算。乱序的重合太容易
     // 撞上——「曾老板办公室」和「宋律师办公室」重合五个字，但顺序一对
-    // 就分得开（曾字根本不在里面）。再要求资产名至少三个字，免得一两个字
-    // 的名字什么都能匹配上。同样取最长的那个，最具体。
+    // 就分得开（曾字根本不在里面）。再要求名单上的名字至少三个字，免得一两个
+    // 字的名字什么都能匹配上。同样取最长的那个，最具体。
     const std::vector<std::string> hay = text::utf8_chars(place);
-    for (const auto& [id, loc] : assets.locations) {
-        const std::string name = text::strip_ws(loc.name);
+    for (const std::string& name : names) {
         const std::vector<std::string> needle = text::utf8_chars(name);
         if (needle.size() < 3 || needle.size() > hay.size()) continue;
         std::size_t k = 0;
@@ -623,11 +625,74 @@ std::optional<std::string> resolve_scene_location(const std::string& place_in,
             if (hay[i] == needle[k]) ++k;
         }
         if (k == needle.size() && name.size() > best_len) {
-            best = id;
+            best = name;
             best_len = name.size();
         }
     }
-    return best;
+    if (best.has_value()) return best;
+
+    // **第四手：一头接一头。** 2026-09-27 实测「走路带风」：剧本写「城西人才
+    // 市场」，资产库是「人才市场大厅」；「军营营区」对「营区门口」。上面三条
+    // 全不中——谁也不包含谁，子序列也差着「大厅」「门口」两个字。于是这部片子
+    // **每一场**都被写成「地点不在场景清单里」，模型开头一万字都在辩"听指令
+    // 还是听清单"，而 location_id 全空，场景层整段不拼。
+    //
+    // 共同点是**一个名字的尾巴是另一个名字的开头**：大厅是人才市场的大厅，
+    // 门口是营区的门口——写的是同一个地方的一部分。判据：place 的后 k 个字
+    // == name 的前 k 个字，或者反过来；k 至少两个字，而且不少于短的那个名字的
+    // 一半（免得「口」「街」一个字就接上）。
+    //
+    // **只认头尾相接，不认共同的前缀或后缀**：「城南仓库」和「城南酒吧」共前缀
+    // 「城南」，是两个地方；「酒店大厅」和「人才市场大厅」共后缀「大厅」，也是
+    // 两个地方。「城中村出租屋」对「林知夏的出租屋」这种共后缀的，字面上分不出
+    // 是不是一个地方（和「曾老板办公室」对「宋律师办公室」一个形状），留给模型
+    // ——拆分镜那句提示词改成让它在清单里挑（kLocUnknownPre）。两个名字接得
+    // 一样长就不猜。
+    {
+        std::optional<std::string> pick;
+        std::size_t pick_k = 0;
+        bool tie = false;
+        for (const std::string& name : names) {
+            const std::vector<std::string> needle = text::utf8_chars(name);
+            if (needle.size() < 2 || hay.size() < 2) continue;
+            const std::size_t shorter = std::min(hay.size(), needle.size());
+            const std::size_t floor_k = std::max<std::size_t>(2, (shorter + 1) / 2);
+            std::size_t k_best = 0;
+            for (std::size_t k = floor_k; k <= shorter; ++k) {
+                bool place_tail = true;   // place 的尾 == name 的头
+                bool name_tail = true;    // name 的尾 == place 的头
+                for (std::size_t i = 0; i < k && (place_tail || name_tail); ++i) {
+                    if (hay[hay.size() - k + i] != needle[i]) place_tail = false;
+                    if (needle[needle.size() - k + i] != hay[i]) name_tail = false;
+                }
+                if (place_tail || name_tail) k_best = k;
+            }
+            if (k_best == 0) continue;
+            if (k_best > pick_k) {
+                pick = name;
+                pick_k = k_best;
+                tie = false;
+            } else if (k_best == pick_k && *pick != name) {
+                tie = true;
+            }
+        }
+        if (pick.has_value() && !tie) return pick;
+    }
+    return std::nullopt;
+}
+
+std::optional<std::string> resolve_scene_location(const std::string& place,
+                                                  const AssetLibrary& assets) {
+    // 判据全在 match_place_name 里——读故事那一步把模型报的地名往名单上接，用的
+    // 是同一份四手（CLAUDE.md「同一件事别在两处各写一遍」）。这儿只把名字换回 id。
+    std::vector<std::string> names;
+    for (const auto& [id, loc] : assets.locations) names.push_back(loc.name);
+    const auto hit = match_place_name(place, names);
+    if (!hit.has_value()) return std::nullopt;
+    for (const auto& [id, loc] : assets.locations) {
+        if (text::strip_ws(loc.name) == *hit) return id;
+    }
+    return std::nullopt;
 }
 
 std::vector<SceneBlock> split_scenes(const std::string& script,
@@ -713,7 +778,13 @@ std::string build_scene_storyboard_prompt(const SceneBlock& scene,
         out += *scene.location_id;
         out += prompt::storyboard_scene::kLocKnownTail;
     } else {
-        out += prompt::storyboard_scene::kLocUnknown;
+        // 引擎接不上的，**别替模型下结论**。原来这儿写死「地点不在场景清单里，
+        // location_id 留空」，而清单里明明有「人才市场大厅」对着「城西人才市场」
+        // ——2026-09-27 读模型的思考，开头一万字都在辩"听指令还是听清单"。
+        // 现在把地名给它、让它在清单里挑，挑的结果由 stamp_scene 按多数统一。
+        out += prompt::storyboard_scene::kLocUnknownPre;
+        out += scene.place.empty() ? scene.body : scene.place;
+        out += prompt::storyboard_scene::kLocUnknownPost;
     }
     out += prompt::storyboard_scene::kSeg4;
     const std::string tail = text::strip_ws(prev_tail);
@@ -781,11 +852,35 @@ ordered llm_scene_shot_schema(const AssetLibrary& assets, ShotCountBounds bounds
 }
 
 void stamp_scene(std::vector<Shot>& shots, const SceneBlock& scene) {
+    // 引擎接上了地点就盖引擎的；接不上时提示词让模型在清单里挑（kLocUnknownPre），
+    // 它挑的要**整场一致**——「每一镜的画面描述都要落在同一个地方」，场景层和
+    // 空景图都按场喂。按多数定，少数几镜跟着改；票数相同取先出现的；一个都没
+    // 挑就照旧空着。
+    std::optional<std::string> loc = scene.location_id;
+    if (!loc.has_value() || loc->empty()) {
+        std::vector<std::pair<std::string, int>> votes;   // 按先出现的次序
+        for (const Shot& s : shots) {
+            if (!s.location_id.has_value() || s.location_id->empty()) continue;
+            auto it = std::find_if(votes.begin(), votes.end(),
+                                   [&](const auto& v) { return v.first == *s.location_id; });
+            if (it == votes.end()) {
+                votes.emplace_back(*s.location_id, 1);
+            } else {
+                ++it->second;
+            }
+        }
+        loc.reset();
+        int most = 0;
+        for (const auto& [id, n] : votes) {
+            if (n > most) {
+                most = n;
+                loc = id;
+            }
+        }
+    }
     for (Shot& s : shots) {
         s.scene_id = "s" + std::to_string(std::max(1, scene.index));
-        if (scene.location_id.has_value() && !scene.location_id->empty()) {
-            s.location_id = *scene.location_id;
-        }
+        if (loc.has_value() && !loc->empty()) s.location_id = *loc;
     }
     // 跨场不接帧：上一场的最后一帧是另一个地方。
     if (!shots.empty()) shots.front().continuous_with_prev = false;
@@ -802,7 +897,7 @@ nlohmann::json scenes_array(const std::vector<Shot>& shots) {
             if (cur.size() > 1 && cur[0] == 's' &&
                 std::all_of(cur.begin() + 1, cur.end(),
                             [](unsigned char c) { return std::isdigit(c); })) {
-                idx = std::stoi(cur.substr(1));
+                idx = text::parse_int_or(cur.substr(1), idx);
             }
             out.push_back({{"scene", idx}, {"scene_id", cur}, {"shots", nlohmann::json::array()}});
         }
@@ -913,9 +1008,11 @@ ordered llm_shot_schema(const AssetLibrary& assets, ShotCountBounds bounds) {
         {"type", "string"},
         {"minLength", 12},
         {"maxLength", 400},
+        // 怎么写（谁在动、朝哪个方向、快还是慢、按秒分段）在规则表「motion_prompt
+        // 按秒分段写」那条里，这儿不再说一遍（2026-09-27 砍重复）；只留这一栏
+        // 自己的那句：别复述首帧。
         {"description",
-         "这几秒画面怎么动：谁在动、朝哪个方向动、快还是慢，镜头跟不跟。"
-         "首帧已经定死了长相、服装和场景，这里只写动的部分，不要复述它们"}};
+         "只写动的部分：首帧已经定死了长相、服装和场景，不要复述它们"}};
     // 枚举从 $defs 里取，不在这儿抄第二份——`Shot` 里加一种运镜这儿会跟着走。
     // **去掉 default**：留着等于告诉模型「这一栏可以不管」，而它正是这么做的。
     ordered move_enum = ordered::array({"static"});
@@ -928,25 +1025,24 @@ ordered llm_shot_schema(const AssetLibrary& assets, ShotCountBounds bounds) {
     // object close-up with motion… Strict compliance → no static. Use
     // push_in. Eh — that's a lot of push_ins. Let me instead use handheld」。
     //
-    // 现在两半合成一句，照 `camera_angle` 那一栏的形状写——那一栏是个查表
-    //（「压迫用 low，脆弱用 high…」），模型从来不在它上面纠结。static 的判据
-    // 也从"归到哪一类"换成"画面里有没有东西在动"，一步就能答。
+    // 现在合成一句写在规则表「camera_move 一场里要有变化」那条里：查表
+    //（「推进情绪用 push_in…」）+ static 的判据（"画面里没有任何东西在动"，
+    // 一步就能答）+ 整场分布（「任何一种都不要超过三成」）。
     //
     // 约束一条没松：static 照旧受限，enum 六种照旧，camera_move 照旧在
     // required 里——2026-09-13 那次 198/198 全默认，治住它的是 required，
     // 不是措辞（见上面那一大段）。
     //
-    //（这一句和规则表那条是同一件事说两遍，而这次是有意的：CLAUDE.md 第七条
-    // 说的是"改了一处另一处静悄悄不跟"，而提示词这一族没有第三个地方能收——
-    // 规则表管整体分布、字段描述管这一栏怎么填，两处都得说得完整。）
+    // **这一栏的描述只剩一个名字**（2026-09-27）。之前这儿把规则表那条整句
+    // 抄了一遍，理由是"规则表管整体分布、字段描述管这一栏怎么填"；结果是
+    // 同一句话每场发两遍，而且这一份还悄悄留着老写法的括号（「定格的物件
+    // 特写、静止的空镜」——正是 CLAUDE.md「禁令要写成一步能答完的」那条
+    // 退掉的归类式判据）。两份注定走散，砍成一份：规则表那条是完整的，
+    // 字段这儿只标名字。
     kept["camera_move"] = {
         {"type", "string"},
         {"enum", move_enum},
-        {"description",
-         "这一镜的运镜。推进情绪用 push_in，交代环境用 pull_out 或 "
-         "pan_left / pan_right，跟着人走用 handheld，绕着看用 orbit；"
-         "画面里没有任何东西在动时才填 static（定格的物件特写、静止的空镜）。"
-         "一场里任何一种都不要超过三成"}};
+        {"description", "这一镜的运镜"}};
 
     // ---- 机位、焦段、光：同样必填（2026-09-14）----
     //
@@ -1163,54 +1259,13 @@ void clean_dialogue_text(json& item) {
     }
 }
 
-/// 认不出的枚举取值，当它没填过。
+/// 认不出的枚举取值，当它没填过（models::drop_unknown_shot_enums，那儿写着为什么）。
 ///
-/// nlohmann 的枚举反序列化在认不出取值时**静默回落到表里第一项**，不报错。
-/// 客户端那条路早就为这件事回头验了一次（`editing.cpp` 的 `parse_enum`，
-/// 对拍语料里 `shot_size: "XXL"` 就是一条 400），**模型这条路一直是照单收
-/// 的**。
-///
-/// 最刺眼的是 shot_size：
-///
-///   缺这个键        → `ShotSize::MS`（中景，结构体默认值）
-///   填「medium」    → `ShotSize::ECU`（**大特写**，表里第一项）
-///
-/// 同一件事——没有可用的取值——两种结果，而且错的那种更离谱：一镜本该是
-/// 中景，出来是一张大特写，全程不报错。camera_angle 一样（缺了是 eye_level，
-/// 认不出是 low 仰拍）。
-///
-/// **是抹掉不是报错**：这一栏填错不值得把另外十几个好镜头一起作废——
-/// 上面 transition_dur_s 那段是同一条理由（「实跑撞上过一次，84 秒的显卡
-/// 时间没了」）。抹掉之后走的是结构体默认值，和模型压根没填这一栏一模一样，
-/// 而那条路流水线本来就走得通。
-template <typename E>
-void drop_if_unknown(json& obj, const char* key) {
-    const auto it = obj.find(key);
-    if (it == obj.end()) return;
-    // **null 也抹掉。** 这几栏都不是可空的（可空的是 location_id 那种，
-    // schema 里写成 anyOf[string, null]）。留着 null 的话，
-    // `NLOHMANN_..._WITH_DEFAULT` 展开出来的 `value(key, 默认值)` 会拿这个
-    // null 去转枚举——照样落到表里第一项，绕过了这道闸。
-    if (!it->is_string()) {
-        obj.erase(key);
-        return;
-    }
-    const std::string want = it->get<std::string>();
-    if (std::string(to_string(it->get<E>())) != want) obj.erase(key);
-}
-
+/// 模型这条路原来一直是照单收的：缺 shot_size 是中景，填「medium」却是**大特写**（表里第一项）。
+/// **是抹掉不是报错**：这一栏填错不值得把另外十几个好镜头一起作废——下面 transition_dur_s 那段
+/// 是同一条理由（「实跑撞上过一次，84 秒的显卡时间没了」）。
 void drop_unknown_enums(json& item) {
-    if (!item.is_object()) return;
-    drop_if_unknown<ShotSize>(item, "shot_size");
-    drop_if_unknown<CameraAngle>(item, "camera_angle");
-    drop_if_unknown<CameraMove>(item, "camera_move");
-    drop_if_unknown<Lens>(item, "lens");
-    drop_if_unknown<Transition>(item, "transition_in");
-    const auto cit = item.find("characters");
-    if (cit == item.end() || !cit->is_array()) return;
-    for (auto& c : *cit) {
-        if (c.is_object()) drop_if_unknown<FacePose>(c, "face_pose");
-    }
+    models::drop_unknown_shot_enums(item);
 }
 
 /// 只留下**允许大模型填**的那些字段，台词行里那三项也一并剥掉。

@@ -82,7 +82,8 @@ TEST_CASE("想多久：认不出就一个字段都不发") {
     nlohmann::ordered_json p = nlohmann::ordered_json::object();
     llm::apply_thinking(p, "", "glm-4.7-flash", "max");
     CHECK(p.empty());
-    // 空档（「爱想不想」）：谁都一样，什么都不发。
+    // 空档（config.toml 里手写留空）：谁都一样，什么都不发。界面上那一档
+    // 「爱想不想」2026-09-27 去掉了，对话里存的空串按没挑读，这儿只剩配置文件那条路。
     llm::apply_thinking(p, "", "glm-5.3", "");
     CHECK(p.empty());
 }

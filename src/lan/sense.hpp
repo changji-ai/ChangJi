@@ -15,10 +15,14 @@
 // 见那个文件里 `kSharedConn` 那一段。2026-09-22 在树莓派上真编真跑过：
 // 两台互相看得见。
 //
-// **Windows 还没接**：那边要么装 Apple 的 Bonjour SDK（一个额外的安装包），
-// 要么走 Win10 自带的 `DnsServiceRegister`（另一套 API，得另写一份）。
-// 这条路上做半套比不做更糟，所以先空着——那时候 `supported()` 回 false，
-// 界面照实说，**不摆一个开了没反应的开关**。
+// **Windows 走系统自带的另一套**（2026-09-23 接上）：Win10 1703 起的
+// `DnsService*`（`windns.h` / `dnsapi`），不是 Apple 的 Bonjour SDK——那条
+// 要人另装一个安装包。函数名完全不同，所以 `sense.cpp` 里是**另一份实现**
+//（`CHANGJI_HAS_WINDNS` 那一段）。
+//
+// 哪个平台上都是 CMake **探到了才开**；探不到时 `supported()` 回 false，
+// 界面照实说，**不摆一个开了没反应的开关**。说这句话时别点名"只有某某
+// 接上了"——那种句子每接一个平台就过期一次（这儿和设置页上都过期过）。
 //
 // ---
 //
@@ -31,6 +35,7 @@
 // 默认一个都不给。
 
 #include <filesystem>
+#include <atomic>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -58,6 +63,10 @@ public:
     /// 是这台机器的一个状态，下次起来要照旧。
     void set_on(bool on);
     bool on() const;
+
+    /// 进程要退了：**只停，不落盘**。别拿 `set_on(false)` 收尾——那会把
+    /// "关着"写进 lan.json，人开着的开关下次起来就成了关的，而他从没关过。
+    void shutdown();
 
     /// 这台机器自报的身份。
     std::string my_id() const;
@@ -106,6 +115,7 @@ private:
     void start();            ///< 真的开始广播 + 浏览
     void stop();             ///< 停下来并等那条线程收工
     void save() const;       ///< 落盘（开没开 + 权限）
+    void set_trouble(std::string why);   ///< 在锁里改 trouble_
 
     mutable std::mutex mu_;
     PeerBook book_;
@@ -113,7 +123,12 @@ private:
     std::string id_;
     std::string name_;
     int port_ = 0;
-    bool on_ = false;
+    /// 开关。原子的：`on()`、`to_json` 不拿锁读它。
+    std::atomic<bool> on_{false};
+    /// 开 / 关 / 收工排成一队。**两下 set_on 并着来**（界面连点两下、退出那一刻
+    /// 又点了一下）的话，两边各自 start / stop，Guts 被一边 reset 而另一边正在
+    /// 用，或者同一条线程 join 两次。
+    std::mutex onoff_mu_;
     bool running_ = false;
     /// 转不起来时那句话（报不出去、听不见）。**咽下去的话界面一直显示
     /// "开着"，而整个网段上没人看得见这一台**，人只会以为"对方没开"。

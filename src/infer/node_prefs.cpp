@@ -71,7 +71,7 @@ void save_node_prefs(const fs::path& workspace, const NodePrefs& prefs) {
     {
         std::ofstream f(tmp, std::ios::trunc);
         if (!f) {
-            throw std::runtime_error(SAYF("写不了 %1", paths::to_utf8(tmp)));
+            throw std::runtime_error(SAYF("无法写入 %1", paths::to_utf8(tmp)));
         }
         f << json{{"off", off}}.dump(2) << "\n";
         if (!f) {

@@ -205,6 +205,29 @@ check("重填下拉没把自己再触发一遍（不挡信号这里会无限拉�
 assert w.platforms[2].region == "cn-beijing"
 check("表单上选的地域推给了平台（阿里云所有请求都要按地域发）")
 
+# ---- 地域：列表跟着换；对一台机器的动作发到它自己的地域 ----
+listed, released = [], []
+def inst(self):
+    listed.append(self.region)
+    return [{"id": "i-sh", "name": "上海那台", "status": "Running", "spec": "ecs.gn7i",
+             "gpu": 1, "billing": "按量", "region": "cn-shanghai-l", "created": ""}]
+G.AliyunPlatform.instances = inst
+G.AliyunPlatform.release_safely = lambda self, iid, log, wait_s=180: released.append(self.region)
+combo.setCurrentIndex(combo.findData("cn-hangzhou"))
+wait(900)
+assert listed and listed[-1] == "cn-hangzhou", listed
+assert ids() == ["i-sh"]
+check("改地域：实例列表也跟着重拉（原来只重拉规格，表上还是旧地域的机器）")
+
+combo.setCurrentIndex(combo.findData("cn-beijing"))   # 人又把表单换到北京
+wait(900)
+w.table.setCurrentCell(0, 0)
+QtWidgets.QMessageBox.warning = staticmethod(lambda *a, **k: QtWidgets.QMessageBox.Yes)
+w.on_release(); wait(600)
+assert released == ["cn-shanghai"], released
+assert w.platforms[2].region == "cn-beijing"       # 共享的那份没被动过
+check("释放发到那台机器自己的地域（上海），不是表单上刚换的北京；表单那份不被改")
+
 w.switch_platform("AutoDL"); wait(600)
 
 # ---- 「出网24h」这一栏只在报流量的平台上出现 ----
@@ -356,4 +379,33 @@ w.resize(1380, 880); wait(200)
 shot = "/tmp/qt_ui.png"
 w.grab().save(shot)
 print("\n截图：", shot)
+
+# ---- 等待光标是个栈 ----
+wait(1500)                                   # 截图前切平台那几件先收完
+assert w.busy == 0 and QtWidgets.QApplication.overrideCursor() is None
+w.set_busy(+1); w.set_busy(+1); w.set_busy(-1); w.set_busy(-1)
+assert QtWidgets.QApplication.overrideCursor() is None, "转圈的光标没回来"
+check("两件活交错收完，等待光标回来（原来每次变动压一层、归零只弹一层）")
+
+# ---- 活在路上时关窗 ----
+done_flag = []
+def slow(log):
+    time.sleep(0.8)
+    done_flag.append(1)
+w.run_bg(slow, guard=False)
+wait(50)
+asked = []
+real_q = QtWidgets.QMessageBox.question
+QtWidgets.QMessageBox.question = lambda *a, **k: (asked.append(1), QtWidgets.QMessageBox.Cancel)[1]
+assert not w.close() and w.isVisible() and asked
+check("有活在路上时关窗先问一句，按取消窗口还在")
+QtWidgets.QMessageBox.question = lambda *a, **k: QtWidgets.QMessageBox.Yes
+assert w.close() and done_flag == [1], "关窗没等那件活做完"
+QtWidgets.QMessageBox.question = real_q
+n_jobs = len(w.jobs)
+w.run_bg(lambda log: None)
+assert len(w.jobs) == n_jobs, "关了窗还在开新活"
+check("选了等：那件活做完才关；关了之后不再开新活（刷新那种收尾）")
+wait(100)
+
 print("Qt 层 %d 项全过" % len(ok))

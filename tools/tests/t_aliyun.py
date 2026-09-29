@@ -105,7 +105,35 @@ sent[:] = []
 p.power_on("i-1"); p.power_off("i-1"); p.release("i-1")
 assert [x["form"]["Action"] for x in sent] == ["StartInstance","StopInstance","DeleteInstance"]
 assert "ForceStop" not in sent[1]["form"]     # 手点「关机」是优雅关机
-check("开机/关机/删除三个 Action 对，手点关机不强制断电")
+# 停机不收费：不带的话按账号默认走，没开「节省停机」的账号停着照扣算力钱
+assert sent[1]["form"].get("StoppedMode") == "StopCharging", sent[1]["form"]
+check("开机/关机/删除三个 Action 对，手点关机不强制断电、停机不收费")
+
+# 一次确认只建一台：带着确认那一下摇的 ClientToken
+sent[:] = []
+p.create({"spec":"cn-beijing-i|ecs.gn7i", "image":"i", "sg":"s", "vsw":"v", "disk":40,
+          "disk_cat":"cloud_ssd", "strategy":"SpotAsPriceGo", "price":"",
+          "bandwidth":0, "name":"", "password":"Changji#2026", "client_token":"tok-1"})
+assert sent[0]["form"]["ClientToken"] == "tok-1"
+check("建机带上 ClientToken：超时了再发一遍，阿里云认得出是同一件")
+
+# 不支持节省停机的：退回普通停机，并照实说停着照扣钱
+calls = []
+orig_call = p._call
+def picky(action, params):
+    calls.append(dict(params))
+    if params.get("StoppedMode"):
+        raise G.CloudError("HTTP 400：InvalidParameter.StoppedMode 经典网络实例不支持")
+    return {}
+p._call = picky
+try:
+    p.power_off("i-2")
+    raise AssertionError("应该照实说这台停着照扣钱")
+except G.CloudError as e:
+    assert "照样扣钱" in str(e), str(e)
+assert calls[-1] == {"InstanceId": "i-2"}, calls
+p._call = orig_call
+check("不支持节省停机的：退回普通停机，照实说停着照扣钱")
 
 # ========== 3. 大小写：阿里云的状态是 Stopped 不是 stopped ==========
 assert G.is_off("Stopped") and G.is_off("STOPPED") and G.is_off(" stopped ")
@@ -235,5 +263,37 @@ check("显示：不到 1 GB 说 MB，够了说 GB，没有说「—」")
 assert A.TRAFFIC is True
 assert G.AutoDLPlatform.TRAFFIC is False and G.PPIOPlatform.TRAFFIC is False
 check("AutoDL / PPIO 的接口不报流量，这一栏在它们那儿会被整列藏起来")
+
+# ---- 地域挂在线程上：一件后台活的地域不串到另一件 ----
+import threading as _th
+z = A({"key_id":"AK","key_secret":"SK"}); z.set_context({"region": "cn-beijing"})
+seen = {}
+gate = _th.Barrier(2)
+def worker(name, region):
+    z.bind_region(region)
+    gate.wait()                 # 两条线程都绑好了再读：共享一份的话必有一条读错
+    seen[name] = z.region
+    z.bind_region("")
+ts = [_th.Thread(target=worker, args=("a", "cn-shanghai")),
+      _th.Thread(target=worker, args=("b", "cn-wulanchabu"))]
+[t.start() for t in ts]; [t.join() for t in ts]
+assert seen == {"a": "cn-shanghai", "b": "cn-wulanchabu"}, seen
+assert z.region == "cn-beijing"
+check("一件活的地域只挂在它那条线程上：两件并行各发各的，表单那份不被改")
+
+# ---- 列表翻页 ----
+pg = A({"key_id":"AK","key_secret":"SK"}); pg.set_context({"region": "cn-beijing"})
+asked = []
+def paged(act, p, **k):
+    asked.append(p.get("PageNumber"))
+    n = p["PageNumber"]
+    ids_ = range((n - 1) * 100, min(n * 100, 150))
+    return {"TotalCount": 150, "Instances": {"Instance": [
+        {"InstanceId": "i-%d" % i, "Status": "Running"} for i in ids_]}}
+pg._call = paged
+pg._fill_traffic = lambda rows: None
+got = pg.instances()
+assert len(got) == 150 and asked == [1, 2], (len(got), asked)
+check("150 台分两页问全（原来只问第一页，第 101 台起在界面上不存在）")
 
 print("\n阿里云 %d 项全过" % len(ok))

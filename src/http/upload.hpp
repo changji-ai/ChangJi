@@ -112,4 +112,27 @@ ApiResult post_character_reference_clear(const nlohmann::json& body);
 /// POST /api/location/reference/clear
 ApiResult post_location_reference_clear(const nlohmann::json& body);
 
+/// 对话里带的一件附件，从浏览器传上来。
+///
+/// `POST /api/chat` 收的是**引擎那台机器上的绝对路径**（`agent/attachments.hpp`：
+/// 存原路径、不拷）——桌面端能给，浏览器给不了：它手里只有文件内容。所以网页
+/// 先走这儿把文件放到引擎那台上，拿回路径，再跟着那句话发过去。
+///
+/// 落在 `<片子>/uploads/`（还没有片子就落在用户数据目录的 `uploads/`，和那时候
+/// 的对话落在一处）；名字是 `<毫秒>-<原名>`，同名传两次不互相盖。**读不懂的
+/// 当场拒**（同 `POST /api/chat`：别等模型拿到一个它什么都做不了的路径）。
+///
+/// 回 `{path, name, kind}`。
+ApiResult post_chat_attachment(const std::string& project_path,
+                               const std::string& filename,
+                               const std::string& data);
+
+/// 一件附件最多多大。片子也收（场记要拿它当参考），所以给得宽；再大的
+/// 走桌面端（它传的是路径，不搬字节）。
+inline constexpr std::size_t kAttachmentMaxBytes = 512ull * 1024 * 1024;
+
+/// 传上来的文件名只留最后一段、去掉控制字符和路径分隔符，截到 80 字节以内。
+/// 空的（或者洗完什么都不剩）回 "file"。
+std::string clean_upload_name(const std::string& raw);
+
 }  // namespace changji::http

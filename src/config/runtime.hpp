@@ -25,6 +25,11 @@ public:
     Settings snapshot() const;
     void replace(Settings s);
 
+    /// 这台机器的口令（`[peer].token`）。**要口令的请求每一条都现问一次**（网页那道门、
+    /// 派活那道门）：设置页能改它，改完下一条请求就只认新的——所以别在起服务时抄一份
+    /// 捕进 lambda。只拷这一个串，不拷整份 Settings。
+    std::string peer_token() const;
+
     /// 画质档位的**进程内**覆盖。
     ///
     /// 不写回配置文件是刻意的：档位是按显存推出来的，写死在配置里等于

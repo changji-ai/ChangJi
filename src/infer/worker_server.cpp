@@ -68,6 +68,13 @@ struct Live {
     /// 不能是"派活的那头没影了"——见 infer::orphan_check。
     std::chrono::steady_clock::time_point started =
         std::chrono::steady_clock::now();
+    /// 真动起来没有（收到过第一步进度）。**动起来那一下 `started` 重新计时**：
+    /// 收下之后可能还在子进程门口排着（多卡机上别的机器派来的活要等本机那几
+    /// 张卡），那段等待不算"跑了太久"——原来一起算，30 分钟一到就被当成卡住
+    /// 收掉（2026-09-25 审出来）。
+    bool stepped = false;
+    /// 已经请它停了（见 reap 里 CancelStuck 那段）：什么时候请的。
+    std::optional<std::chrono::steady_clock::time_point> cancel_at;
 };
 
 struct State {
@@ -151,6 +158,19 @@ struct State {
         release_locked();
     }
 
+    /// 指纹是 `key` 的那几条 id → 指纹记录一起划掉（还在跑的那几条留着，
+    /// 它们收尾时要靠它找到自己的指纹）。**原来只增不删**，一件活一条，
+    /// 常年开着的节点上越攒越多，收活时还要把整张表扫一遍。
+    void forget_ids_locked(const std::string& key) {
+        for (auto it = id_to_key.begin(); it != id_to_key.end();) {
+            if (it->second == key && !running.count(it->first)) {
+                it = id_to_key.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    }
+
     std::size_t reap_locked() {
         const auto now = std::chrono::steady_clock::now();
         std::size_t gone = 0;
@@ -171,6 +191,7 @@ struct State {
             std::fprintf(stderr, SAY_NEVER("[节点] 放了一个钟头没人来取，扔掉结果 %s"
                                  "（产物还在 blob 库里）\n"),
                          it->first.c_str());
+            forget_ids_locked(it->first);
             it = finished.erase(it);
             ++gone;
         }
@@ -179,8 +200,10 @@ struct State {
                                  it->second->progress.state == "failed";
             const auto idle = std::chrono::duration_cast<std::chrono::seconds>(
                 now - it->second->seen);
+            // 还没动起来的（排着队）给宽四倍：排队本身不是卡住。
             const auto ran = std::chrono::duration_cast<std::chrono::seconds>(
-                now - it->second->started);
+                                 now - it->second->started) /
+                             (it->second->stepped ? 1 : 4);
             // 落定了的本该在 settle_locked 里就挪走了；万一漏了（老路径、
             // 异常路上），这儿兜一次——**挪走，不是删掉**。
             if (settled) {
@@ -196,10 +219,30 @@ struct State {
             // **取消的理由只有"跑了太久，多半卡住了"。**
             // 派活方在不在，这儿不问——它不在，这件跑完了会放到一边等它
             // 回来取（见 settle_locked）。
-            it->second->tok.request();
+            //
+            // ⚠️ **只请它停，记录和位置先留着**，等那条线程自己走到
+            // settle_locked：原来这儿当场 erase 加放位置，线程还活着——它
+            // 后来收尾时表里已经没有它，结果丢了；派活方轮询拿到 404 当成那台
+            // 掉线，从头再派；放出去的位置又让这张卡同时跑两件。**停了十分钟
+            // 还不回来**才当它真挂死了，硬放。
+            auto& live = *it->second;
+            if (!live.cancel_at) {
+                live.tok.request();
+                live.cancel_at = now;
+                std::fprintf(stderr,
+                             SAY_NEVER("[节点] 跑了 %lld 秒还没完，多半卡住了，请它停 %s\n"),
+                             static_cast<long long>(ran.count()), it->first.c_str());
+                ++it;
+                continue;
+            }
+            if (now - *live.cancel_at < std::chrono::minutes(10)) {
+                ++it;
+                continue;
+            }
             std::fprintf(stderr,
-                         SAY_NEVER("[节点] 跑了 %lld 秒还没完，多半卡住了，取消 %s\n"),
-                         static_cast<long long>(ran.count()), it->first.c_str());
+                         SAY_NEVER("[节点] 请停十分钟了还不回来，当它挂死了，放掉位置 %s\n"),
+                         it->first.c_str());
+            id_to_key.erase(it->first);
             it = running.erase(it);
             release_locked();
             ++gone;
@@ -238,18 +281,38 @@ crow::response json_res(const json& body, int code = 200) {
 ///
 /// **握 weak_ptr**：主程序退出时 state 一没，这条线程下一拍就自己收摊，
 /// 不用另外接一套停止信号。
-void start_reaper(const std::shared_ptr<State>& state) {
+void start_reaper(const std::shared_ptr<State>& state, std::filesystem::path cache = {}) {
     std::weak_ptr<State> weak = state;
-    std::thread([weak] {
+    std::thread([weak, cache = std::move(cache)] {
+        auto last_prune = std::chrono::steady_clock::now();
         for (;;) {
             std::this_thread::sleep_for(std::chrono::seconds(10));
             const auto st = weak.lock();
             if (!st) return;   // 进程在退了
-            std::lock_guard lg(st->mu);
-            st->reap_locked();
+            {
+                std::lock_guard lg(st->mu);
+                st->reap_locked();
+            }
+            // blob 库一小时清一次：七天没人碰过的扔掉（见 blob_prune）。
+            // 不在锁里：扫目录可能要一会儿，别让 /task 等它。
+            if (!cache.empty() &&
+                std::chrono::steady_clock::now() - last_prune > std::chrono::hours(1)) {
+                last_prune = std::chrono::steady_clock::now();
+                try {
+                    const auto n = blob_prune(cache, std::chrono::hours(24 * 7));
+                    if (n > 0) {
+                        std::fprintf(stderr, SAY_NEVER("[节点] blob 库扔了 %zu 个七天没人用的\n"), n);
+                    }
+                } catch (...) {
+                    // 清不动下次再清；这条线程不能死（死了就没人收卡住的活了）
+                }
+            }
         }
     }).detach();
 }
+
+/// 敲门的是谁。见 mount_worker_api_impl 里 `who` 那段。
+enum class Caller { None, Full, Lan, LanPick };
 
 void mount_worker_api_impl(http::EngineApp& app,
                            const config::Settings& settings,
@@ -264,12 +327,17 @@ void mount_worker_api_impl(http::EngineApp& app,
     //
     // **/health 故意不要**：它只回 ok/gpu/busy，探活的那一头（可能是
     // 负载均衡、可能是脚本）不该为了 ping 一下就拿到口令。
-    const auto gate = [settings, opts](const crow::request& req)
-        -> std::optional<crow::response> {
-        if (!is_public_bind(opts.host)) return std::nullopt;
-        if (token_ok(req.get_header_value("Authorization"),
-                     settings.peer.token)) {
-            return std::nullopt;
+    //
+    // **谁来敲的门**，不只是"让不让进"：局域网那张票分两档（`lan::Grant`），
+    // 只给了第一档（借卡）的那台不能指定模型和步数、也不能在这台上装模型——
+    // 原来门一过就什么都能干，第二档那个开关是个摆设（2026-09-26 审出来）。
+    //
+    // **口令现问**（`runtime().peer_token()`），不认起服务那一刻抄下的 `settings`：设置页能改
+    // 它（2026-09-28），抄一份的话改完旧口令照样派得进活来。两条起法都先 `replace` 过 runtime。
+    const auto who = [opts](const crow::request& req) -> Caller {
+        if (!is_public_bind(opts.host)) return Caller::Full;
+        if (token_ok(req.get_header_value("Authorization"), config::runtime().peer_token())) {
+            return Caller::Full;
         }
         // **局域网上配好的那几台走另一条门。**
         //
@@ -281,20 +349,18 @@ void mount_worker_api_impl(http::EngineApp& app,
         //
         // ⚠️ **感知关着时这条门也不开**（`Sense::by_ticket` 里判的）：
         // 关掉的意思是"这台机器现在不参与"。
-        const std::string auth = req.get_header_value("Authorization");
-        if (lan::Sense::instance()
-                .by_ticket(req.get_header_value("X-Changji-Lan-Ticket"))
-                .use) {
-            return std::nullopt;
-        }
-        // **票也认 `Authorization: Bearer <票>` 这种写法。**
         //
-        // 派活那条路（`worker_pool`）只会发这一个头，它不知道"局域网"
-        // 这回事。认了它，局域网上配好的那台就能**原样走现成的派活路**
-        // ——一行调度代码都不用改。
-        if (lan::Sense::instance().by_ticket(bearer_of(auth)).use) {
-            return std::nullopt;
-        }
+        // **票也认 `Authorization: Bearer <票>` 这种写法。** 派活那条路
+        //（`worker_pool`）只会发这一个头，它不知道"局域网"这回事。认了它，
+        // 局域网上配好的那台就能**原样走现成的派活路**——一行调度代码都不用改。
+        auto& lan = lan::Sense::instance();
+        lan::Grant g = lan.by_ticket(req.get_header_value("X-Changji-Lan-Ticket"));
+        if (!g.use) g = lan.by_ticket(bearer_of(req.get_header_value("Authorization")));
+        if (!g.use) return Caller::None;
+        return g.params ? Caller::LanPick : Caller::Lan;
+    };
+    const auto gate = [who](const crow::request& req) -> std::optional<crow::response> {
+        if (who(req) != Caller::None) return std::nullopt;
         // ⚠️ **这一族 `detail` 是回给派活那台机器的**，而它会原样端到它
         // 自己的用户面前。所以它说的是**这台工作机**的语言，不是派活那台
         // 的——两台设成不同语言时，那句话就是这台的语言。比从前一律中文
@@ -413,20 +479,28 @@ void mount_worker_api_impl(http::EngineApp& app,
     };
 
     CROW_ROUTE(app, "/setup/state")(
-        [gate, settings, profile, api_res](const crow::request& req) {
+        [gate, profile, api_res](const crow::request& req) {
         if (auto deny = gate(req)) return std::move(*deny);
-        return api_res(http::get_setup_state(settings, profile));
+        // 现读运行期那份，不用挂路由时捕获的：远程装完一档之后 persist() 改的
+        // 是 runtime 那份，捕获的那份永远是启动那一刻的（见 /task 上那段）。
+        return api_res(http::get_setup_state(config::runtime().snapshot(), profile));
     });
 
     CROW_ROUTE(app, "/setup/download").methods(crow::HTTPMethod::POST)(
-        [gate, settings, api_res](const crow::request& req) {
+        [gate, who, api_res](const crow::request& req) {
         if (auto deny = gate(req)) return std::move(*deny);
+        // 往这台盘上下几十 G 的模型、停掉这台正在下的：票只管"借卡算"，
+        // 装不装模型是这台主人的事。
+        if (const Caller c = who(req); c == Caller::Lan || c == Caller::LanPick) {
+            return json_res({{"detail", SAY("局域网上给的权限只能借这台的卡算，不能在这台上装模型")}},
+                            403);
+        }
         const auto body = json::parse(req.body, nullptr, false);
         if (body.is_discarded()) {
             return json_res({{"detail", SAY("请求体不是 JSON")}}, 400);
         }
         try {
-            return api_res(http::post_setup_download(settings, body));
+            return api_res(http::post_setup_download(config::runtime().snapshot(), body));
         } catch (const http::ApiError& e) {
             return json_res({{"detail", e.detail()}}, e.status());
         }
@@ -439,8 +513,14 @@ void mount_worker_api_impl(http::EngineApp& app,
     });
 
     CROW_ROUTE(app, "/setup/cancel").methods(crow::HTTPMethod::POST)(
-        [gate, api_res](const crow::request& req) {
+        [gate, who, api_res](const crow::request& req) {
         if (auto deny = gate(req)) return std::move(*deny);
+        // 往这台盘上下几十 G 的模型、停掉这台正在下的：票只管"借卡算"，
+        // 装不装模型是这台主人的事。
+        if (const Caller c = who(req); c == Caller::Lan || c == Caller::LanPick) {
+            return json_res({{"detail", SAY("局域网上给的权限只能借这台的卡算，不能在这台上装模型")}},
+                            403);
+        }
         return api_res(http::post_setup_cancel());
     });
 
@@ -509,8 +589,16 @@ void mount_worker_api_impl(http::EngineApp& app,
     });
 
     CROW_ROUTE(app, "/task").methods(crow::HTTPMethod::POST)(
-        [state, settings, gate, runner](const crow::request& req) {
+        [state, gate, who, runner](const crow::request& req) {
             if (auto deny = gate(req)) return std::move(*deny);
+            const Caller caller = who(req);
+            // ⚠️ **现读运行期那份设置，别用挂路由时捕获的。** 捕获的那份是进程
+            // 启动那一刻的：别的机器远程给这台装完一档模型（/setup/download →
+            // persist() 改的是 config::runtime()），/status 读 runtime、报"能干"，
+            // 派活方就派过来——而这儿拿旧的那份去问 cannot_do，看到 [models]
+            // 还空着，每一件都回 400，派活那头当成出图失败，三次之后降级
+            //（2026-09-25 审出来）。跑活那条线程也用这一份。
+            const config::Settings settings = config::runtime().snapshot();
             // **先看这串字节是不是合法 UTF-8。** 不是的话下面每一条
             // 路都会炸在同一个地方：nlohmann 解析时照单全收，而把出错
             // 位置附近的原始字节拼进 {"detail": …} 再 dump，就在报错的
@@ -555,6 +643,19 @@ void mount_worker_api_impl(http::EngineApp& app,
                                      {"shot_id", task.shot_id}},
                                     400);
                 }
+            }
+
+            // **只给了借卡那一档的：模型和步数按这台自己的来。** 派来的档位 id
+            // 扔掉（照这台 [models] 里写的跑），步数换成这台档位表里这一档的。
+            // 不拒掉整件：借卡的本意就是"用你的卡、按你的设置跑一镜"。
+            if (caller == Caller::Lan) {
+                task.pick.clear();
+                const auto prof = config::runtime().profile();
+                if (const auto it = prof.tiers.find(task.tier); it != prof.tiers.end() &&
+                                                               it->second.steps > 0) {
+                    task.spec.steps = it->second.steps;
+                }
+                task.spec.steps_pinned = false;
             }
 
             // **先自检再排队。** 干不成就当场说——这一条是烧过一次换来的。
@@ -609,6 +710,20 @@ void mount_worker_api_impl(http::EngineApp& app,
                 }
                 return json_res({{"id", old_id}, {"cached", true}}, 202);
             }
+            // **同一件还在跑，就把那一件的号给它，别开第二份。** 派活那头连着一分钟
+            // 问不到进度就判这台断了（跨境链路常见），换位置重派——而位置是按卡数
+            // 列的，换到的常常是**同一台**的另一张卡。原来这儿只认做完了的：同一镜
+            // 两张卡各算一遍，先算完的那份白算。
+            for (const auto& [rid, live_other] : state->running) {
+                const auto k = state->id_to_key.find(rid);
+                // 叫停了的不接：派活那头判断线时会顺手发一个取消，那一件正在收尾。
+                if (k != state->id_to_key.end() && k->second == key &&
+                    !live_other->tok.cancelled()) {
+                    std::fprintf(stderr, SAY_NEVER("[节点] 这件还在跑，接着等那一份：%s key=%s\n"),
+                                 task.shot_id.c_str(), key.substr(0, 12).c_str());
+                    return json_res({{"id", rid}, {"resumed", true}}, 202);
+                }
+            }
             if (state->running.size() >= state->slots()) {
                 // **不排队。** 见文件头。
                 //
@@ -646,15 +761,24 @@ void mount_worker_api_impl(http::EngineApp& app,
                 const auto on_step = [state, live](int step, int steps,
                                                   double, Phase phase) {
                     std::lock_guard lg(state->mu);
+                    if (!live->stepped) {
+                        // 真动起来了：从这一下开始算"跑了多久"（见 Live::stepped）
+                        live->stepped = true;
+                        live->started = std::chrono::steady_clock::now();
+                    }
                     live->progress.step = step;
                     live->progress.steps = steps;
                     live->progress.phase = phase_name(phase);
                 };
                 // 采样中途的预览存进进度里，派活方轮询时按需带走
                 // （见 TaskProgress::preview）。只认这件活自己的 tag。
+                // 这件活自己的前缀：这条线程上起的生成、转发的预览都带着它，
+                // 本机自己在出的同名镜头（每部片子都有 ep01_sh001）不会混进来，
+                // 这件活的预览也不会画到本机的镜头墙上。见 PreviewScope。
+                const PreviewScope preview_scope("task:" + id);
                 const PreviewSinkHandle preview_sink(
-                    [state, live, tag = task.shot_id](const std::string& t, int step,
-                                                      std::string url) {
+                    [state, live, tag = scoped_preview_tag(task.shot_id)](
+                        const std::string& t, int step, std::string url) {
                         if (t != tag) return;
                         std::lock_guard lg(state->mu);
                         live->progress.preview_step = step;
@@ -785,9 +909,19 @@ bool mount_worker_api(http::EngineApp& app, const config::Settings& settings,
     static const auto profile =
         models::HardwareProfile::detect(settings.vram_gb_override);
     static auto state = std::make_shared<State>();
-    // 能同时接几件由执行器那头说了算（见头文件 Capacity 那段）。
-    state->capacity = std::move(capacity);
-    start_reaper(state);
+    // 能同时接几件由执行器那头说了算（见头文件 Capacity 那段）。换的时候拿着锁：
+    // 桌面端在同一个进程里重启引擎时，上一轮的活可能还在查这个数。
+    {
+        std::lock_guard lg(state->mu);
+        state->capacity = std::move(capacity);
+    }
+    // **回收线程只起一条。** state 是函数里的 static、永远不死，回收线程靠 weak_ptr
+    // 判"该收工了"也就永远不收——桌面端每重启一次引擎（同一个进程里再跑一遍
+    // http::run）就多一条，一直攒着。
+    static std::once_flag reaper_once;
+    std::call_once(reaper_once, [&] {
+        start_reaper(state, infer::cache_root_of(settings.workspace_path()));
+    });
     mount_worker_api_impl(app, settings, opts, profile, state, runner);
     return true;
 }
@@ -848,7 +982,7 @@ bool run_worker(const config::Settings& settings, const WorkerOptions& opts) {
 
     auto state = std::make_shared<State>();
     // `--worker` 这条也要自己收：它一样会被一台下了线的机器丢下没人认领的活。
-    start_reaper(state);
+    start_reaper(state, infer::cache_root_of(settings.workspace_path()));
     // 门在 app 里（`http/crow_guard.hpp`）：工作进程也监听端口——按卡拉起的那几个在
     // 回环上，浏览器里的网页一样摸得到；`/task` 能让它把产物写到任意路径。
     http::EngineApp app;

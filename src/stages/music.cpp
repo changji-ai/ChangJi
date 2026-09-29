@@ -75,19 +75,35 @@ MusicOutcome ensure_music(const config::Settings& settings,
     char buf[32];
     std::snprintf(buf, sizeof(buf), "%d",
                   std::max(5, static_cast<int>(std::lround(seconds))));
+    // **让命令写到旁边一个临时名上，跑成了再换名。** 上面那句「文件在就沿用」
+    // 只看大小不为零：命令写到一半失败、超时被杀，留下半截文件——报一次错之后，
+    // 往后每一次装配都一声不响地沿用这条坏配乐（2026-09-25 审出来）。扩展名
+    // 留着（配乐工具多半按它挑格式），名字里带 .part 好认。
+    const fs::path part = out.path.parent_path() /
+                          (out.path.stem().native() + fs::path(".part").native() +
+                           out.path.extension().native());
+    fs::remove(part, ec);
     const std::map<std::string, std::string> vars = {
         {"prompt", music_prompt(ep, settings.sound, seconds)},
         {"seconds", buf},
-        {"out", paths::to_utf8(out.path)},
+        {"out", paths::to_utf8(part)},
     };
     const auto argv = util::expand_command(settings.sound.music_command, vars);
     const auto r = util::run_command(argv, settings.sound.music_timeout_s);
     if (!r.ok) {
+        fs::remove(part, ec);
         out.error = "配乐命令失败：" + r.error;
         return out;
     }
-    if (!fs::is_regular_file(out.path, ec) || fs::file_size(out.path, ec) == 0) {
+    if (!fs::is_regular_file(part, ec) || fs::file_size(part, ec) == 0) {
+        fs::remove(part, ec);
         out.error = "配乐命令跑完了，但没有写出 " + paths::to_utf8(out.path);
+        return out;
+    }
+    fs::rename(part, out.path, ec);
+    if (ec) {
+        fs::remove(part, ec);
+        out.error = "配乐写不进去：" + paths::to_utf8(out.path);
         return out;
     }
     out.ok = true;

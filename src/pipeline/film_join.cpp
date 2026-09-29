@@ -2,7 +2,12 @@
 
 #include <algorithm>
 #include <fstream>
+#include <cmath>
 #include <map>
+#include <optional>
+#include <string>
+#include <tuple>
+#include <vector>
 #include <stdexcept>
 
 #include <nlohmann/json.hpp>
@@ -69,6 +74,66 @@ models::Story story_or_empty(const ProjectStore& store) {
     }
 }
 
+/// 各章成片的规格：尺寸 + 帧率（取到 0.01）。
+struct FilmSpec {
+    int w = 0;
+    int h = 0;
+    long fps100 = 0;
+    bool operator<(const FilmSpec& o) const {
+        return std::tie(w, h, fps100) < std::tie(o.w, o.h, o.fps100);
+    }
+    bool operator==(const FilmSpec& o) const {
+        return w == o.w && h == o.h && fps100 == o.fps100;
+    }
+};
+
+/// 规格不齐的那几章先重编成多数那一种（见 join_film 里那段）。量不到的就当齐了——
+/// 为了一次量不到把能拼的拼不成，比花一截强不到哪儿去。
+std::vector<fs::path> conform_films(const std::vector<fs::path>& films,
+                                    const config::Settings& settings,
+                                    const media::FFmpeg& ff, const fs::path& work,
+                                    JobProgress& progress) {
+    std::vector<std::optional<media::MediaInfo>> infos;
+    std::map<FilmSpec, int> votes;
+    for (const auto& f : films) {
+        try {
+            const media::MediaInfo m = ff.probe(f);
+            if (m.width > 0 && m.height > 0) {
+                infos.push_back(m);
+                ++votes[FilmSpec{m.width, m.height, std::lround(m.fps * 100.0)}];
+                continue;
+            }
+        } catch (const std::exception&) {
+        }
+        infos.push_back(std::nullopt);
+    }
+    if (votes.size() <= 1) return films;
+    FilmSpec target;
+    int best = -1;
+    for (const auto& [spec, n] : votes) {
+        if (n > best) {
+            best = n;
+            target = spec;
+        }
+    }
+    config::AssemblyConfig cfg = settings.assembly;
+    if (target.fps100 > 0) cfg.fps = static_cast<int>(std::lround(target.fps100 / 100.0));
+    std::vector<fs::path> out = films;
+    for (std::size_t i = 0; i < films.size(); ++i) {
+        const auto& m = infos[i];
+        if (!m || FilmSpec{m->width, m->height, std::lround(m->fps * 100.0)} == target) continue;
+        progress.set_message(SAYF("第 %1 段的尺寸、帧率和别的不一样，先统一一下",
+                                  std::to_string(i + 1)));
+        const fs::path fixed = work / ("conform_" + std::to_string(i) + ".mp4");
+        media::NormalizeOptions opt;
+        opt.keep_audio = true;
+        opt.source_has_audio = m->has_audio;
+        ff.run(media::normalize_args(films[i], target.w, target.h, cfg, fixed, opt));
+        out[i] = fixed;
+    }
+    return out;
+}
+
 }  // namespace
 
 std::string film_join_blocker(const ProjectStore& store) {
@@ -82,11 +147,9 @@ std::string film_join_blocker(const ProjectStore& store) {
     return SAY("还没有一章出片。这一章出了片就能合成");
 }
 
-// `settings` 在这儿没人读：拼接是零重编码，用不上 [assembly] 里那套编码参数。
-// 它留在签名上，是因为调用点本来就拿着它（ffmpeg/ffprobe 的路径从它来），
-// 去掉的话每个调用点都要改一次，而这一步随时可能又要读配置。
+// `settings` 只在各章规格不齐、要把那几章重编一遍时才读（[assembly] 那套编码参数）。
 FilmJoinReport join_film(const ProjectStore& store,
-                         [[maybe_unused]] const config::Settings& settings,
+                         const config::Settings& settings,
                          const media::FFmpeg& ff, JobProgress& progress) {
     const std::string blocker = film_join_blocker(store);
     if (!blocker.empty()) throw std::runtime_error(blocker);
@@ -143,7 +206,12 @@ FilmJoinReport join_film(const ProjectStore& store,
         }
     } cleanup{work};
 
-    // **各章的成片是同一个装配器出的，参数一样，拼接零重编码。**
+    // **各章规格齐了才零重编码拼。** 每一章按它自己那几镜里最大的尺寸装配——换过机器、
+    // 换过画质档、开关过放大、改过 [video] 或帧率之后出的那几章，尺寸帧率就和别的不一样。
+    // concat 分离器拿 -c copy 硬拼，不报错，后半截参数全变：播放器花屏、卡住，而合成报
+    // 成功。量一遍，不齐的那几章按多数那一种先重编一次（只动不齐的那几章）。
+    films = conform_films(films, settings, ff, work, progress);
+
     const fs::path listing = work / "concat.txt";
     {
         std::ofstream f(listing, std::ios::binary | std::ios::trunc);

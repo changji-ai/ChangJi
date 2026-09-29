@@ -107,16 +107,20 @@ echo "✅ the notarisation key is readable"
 # (OpenSSL 3 will not read RC2 by default, and that is often exactly what
 # Keychain Access exports).
 read -r -s -p "p12 password (not echoed): " CERT_PW; echo
+# Through the environment, not argv: `pass:…` on openssl's command line is
+# readable by anyone on the machine via `ps` for as long as it runs.
+export CERT_PW
 CERTS=""
-if CERTS="$(openssl pkcs12 -in "$P12" -nokeys -clcerts -passin pass:"$CERT_PW" -legacy 2>/dev/null)"; then
+if CERTS="$(openssl pkcs12 -in "$P12" -nokeys -clcerts -passin env:CERT_PW -legacy 2>/dev/null)"; then
   :
-elif CERTS="$(openssl pkcs12 -in "$P12" -nokeys -clcerts -passin pass:"$CERT_PW" 2>/dev/null)"; then
+elif CERTS="$(openssl pkcs12 -in "$P12" -nokeys -clcerts -passin env:CERT_PW 2>/dev/null)"; then
   :
 else
   echo "wrong password (it cannot read a certificate). Nothing was uploaded."
   exit 1
 fi
 echo "✅ the password is correct"
+export -n CERT_PW   # only openssl needed it in its environment
 
 # ---- Is it the right kind of certificate ----
 #
@@ -182,7 +186,7 @@ echo "==> set:"
 gh secret list --repo "$REPO" | grep -E "MACOS_|CHANGJI_" || true
 echo
 echo "Now push a branch, or tag a release:"
-echo "    git tag v1.2.0 && git push origin v1.2.0      the engine"
+echo "    git tag ci-v1.2.0 && git push origin ci-v1.2.0   the engine (only ci-v* tags release; also tag the product repo)"
 echo "    git tag desktop-v1.2 && git push origin desktop-v1.2   the desktop app"
 echo
 echo "The macOS binaries will be signed and notarised. If either is missing, a"

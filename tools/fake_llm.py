@@ -192,7 +192,11 @@ class Handler(BaseHTTPRequestHandler):
         # 120 毫秒一段）。字段名 `reasoning_content` 是智谱那套，引擎认它。
         if thinking:
             step = int(os.environ.get("FAKE_LLM_THINK_MS", "120") or 120)
-            size = max(1, len(thinking) // 12)
+            # 一段几个字（`FAKE_LLM_THINK_CHUNK`，默认整段分 12 截）。真模型是**一个词
+            # 一帧**、一秒几十帧地吐——「思考一多就卡死」（2026-09-27）只在那种节奏下
+            # 才冒出来，分 12 截发的话界面一共只重排 12 次，什么都看不出来。
+            chunk = int(os.environ.get("FAKE_LLM_THINK_CHUNK", "0") or 0)
+            size = chunk if chunk > 0 else max(1, len(thinking) // 12)
             for i in range(0, len(thinking), size):
                 frame({"reasoning_content": thinking[i:i + size]})
                 self.wfile.flush()

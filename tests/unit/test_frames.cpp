@@ -5,6 +5,7 @@
 // 这几样错了都不会当场报错，只会在跑完一整章之后表现为
 // "有些镜头明明失败了却显示已完成"。
 
+#include <atomic>
 #include <doctest/doctest.h>
 
 #include <nlohmann/json.hpp>
@@ -21,6 +22,7 @@
 #include "models/shot.hpp"
 #include "pipeline/jobs.hpp"
 #include "stages/frames.hpp"
+#include "util/lanes.hpp"
 #include "util/paths.hpp"
 
 using namespace changji;
@@ -239,6 +241,34 @@ TEST_CASE("引用了未注册角色算这一镜失败，不是整批挂掉") {
     CHECK(outs[0].error.find("未注册角色") != std::string::npos);
     CHECK(outs[1].ok);
 
+    std::error_code ec;
+    fs::remove_all(root, ec);
+}
+
+TEST_CASE("首帧途中只停这一镜：不记一次失败（attempts 和出片共用上限）") {
+    const fs::path root = temp_root("首帧途中停");
+    const models::ProjectPaths paths(root);
+    std::vector<models::Shot> owned = {make_shot("ep01_sh001")};
+    owned[0].attempts = 1;
+    std::vector<models::Shot*> shots = {&owned[0]};
+
+    pipeline::JobTable table;
+    pipeline::CancelToken tok;
+    std::vector<stages::FrameOutcome> outs;
+    auto renderer = [&](const models::Shot&, const stages::PromptBundle&,
+                        const models::TierSpec&, const fs::path&,
+                        pipeline::CancelToken& mine, const infer::StepCallback&) {
+        mine.request();   // 任务页上那一行的叉：只停这一镜
+        throw std::runtime_error("取消了");
+    };
+    table.start(pipeline::JobKind::Run, "ep01", [&](pipeline::JobProgress& p) {
+        outs = stages::run_frames(shots, make_assets(), make_spec(), paths,
+                                  renderer, p, tok, 1);
+    });
+    table.wait_idle();
+
+    CHECK(owned[0].attempts == 1);
+    CHECK(owned[0].status == models::ShotStatus::PLANNED);
     std::error_code ec;
     fs::remove_all(root, ec);
 }
@@ -823,4 +853,21 @@ TEST_CASE("一格都没跑就被取消：不许给镜头白记一次 attempts") 
         CHECK(owned[i].shot_id == before[i].shot_id);
         CHECK(owned[i].status == before[i].status);
     }
+}
+
+TEST_CASE("几路并着跑：一路抛了，不从线程里漏出去，在调用线程上照常抛") {
+    // 漏出去就是 std::terminate，整个引擎没了（一镜出完落盘时读不出 project.json、
+    // 盘满了都会从某一路里抛）。见 util/lanes.hpp。
+    std::atomic<int> ran{0};
+    CHECK_THROWS_WITH(changji::util::run_lanes(4,
+                                               [&] {
+                                                   const int me = ran.fetch_add(1);
+                                                   if (me == 1) {
+                                                       throw std::runtime_error("盘满了");
+                                                   }
+                                               }),
+                      "盘满了");
+    CHECK(ran.load() == 4);   // 别的几路照跑完、都 join 过
+    CHECK_THROWS_WITH(changji::util::run_lanes(1, [] { throw std::runtime_error("一路"); }),
+                      "一路");
 }

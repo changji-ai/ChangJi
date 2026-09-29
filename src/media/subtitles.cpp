@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdio>
 #include <fstream>
+#include <limits>
 #include <sstream>
 
 #include "util/say.hpp"
@@ -318,21 +319,48 @@ std::string build_ass(const std::vector<SubtitleCue>& cues,
     std::string out = os.str();
     for (const auto& cue : cues) {
         if (text::strip_ws(cue.text).empty()) continue;
-        const auto wrapped = wrap_chinese(
-            cue.text, static_cast<double>(m.max_chars_per_line), opt.max_lines);
-        std::string body;
-        for (std::size_t i = 0; i < wrapped.size(); ++i) {
-            if (i) body += "\\N";   // ASS 的硬换行
-            // **先转义再拼。** 反过来的话会把我们自己刚写的 \\N 也转掉。
-            body += ass_escape(wrapped[i]);
+        // **一屏装不下就拆成接连的几屏**，每屏最多 max_lines 行，时间按字数分。原来
+        // wrap_chinese 把多出来的全并进最后一行，而 WrapStyle 2 不会再折它：一句 60 字的
+        // 台词在默认 15 字 × 2 行下第二行 45 字宽，1920 宽的画面上三分之二画到了画外
+        //（2026-09-26 审出来）。台词最长 200 字，旁白过 30 字很常见。
+        const int per_screen = std::max(1, opt.max_lines);
+        const auto wrapped = wrap_chinese(cue.text, static_cast<double>(m.max_chars_per_line),
+                                          std::numeric_limits<int>::max());
+        std::vector<std::vector<std::string>> screens;
+        for (std::size_t i = 0; i < wrapped.size(); i += static_cast<std::size_t>(per_screen)) {
+            screens.emplace_back(wrapped.begin() + static_cast<std::ptrdiff_t>(i),
+                                 wrapped.begin() + static_cast<std::ptrdiff_t>(
+                                     std::min(wrapped.size(), i + per_screen)));
+        }
+        double total_w = 0.0;
+        std::vector<double> widths;
+        for (const auto& sc : screens) {
+            double w = 0.0;
+            for (const auto& ln : sc) w += std::max(1.0, display_width(ln));
+            widths.push_back(w);
+            total_w += w;
         }
         const std::string style =
             (cue.style == "dialogue" || cue.style == "narration" ||
              cue.style == "title")
                 ? cue.style
                 : "dialogue";
-        out += "\nDialogue: 0," + ass_time(cue.start_s) + "," +
-               ass_time(cue.end_s) + "," + style + ",,0,0,0,," + body;
+        const double span = std::max(0.0, cue.end_s - cue.start_s);
+        double at = cue.start_s;
+        for (std::size_t k = 0; k < screens.size(); ++k) {
+            std::string body;
+            for (std::size_t i = 0; i < screens[k].size(); ++i) {
+                if (i) body += "\\N";   // ASS 的硬换行
+                // **先转义再拼。** 反过来的话会把我们自己刚写的 \\N 也转掉。
+                body += ass_escape(screens[k][i]);
+            }
+            const double end = k + 1 == screens.size()
+                                   ? cue.end_s
+                                   : at + (total_w > 0 ? span * widths[k] / total_w : 0.0);
+            out += "\nDialogue: 0," + ass_time(at) + "," + ass_time(end) + "," + style +
+                   ",,0,0,0,," + body;
+            at = end;
+        }
     }
     return out + "\n";
 }

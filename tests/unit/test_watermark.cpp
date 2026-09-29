@@ -17,6 +17,9 @@
 #include <doctest/doctest.h>
 
 #include <algorithm>
+#include <cmath>
+#include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -147,6 +150,17 @@ TEST_CASE("装配补水印：只给会毁掉它的那两种后期兜底") {
         up.scale = 4;
         CHECK(media::assembly_watermark_upscale(look, up, 3840, 2160) == 4);
     }
+    SUBCASE("遮幅的比例没比画面窄：什么都没裁，不补（补了就是两个角标）") {
+        // 2026-09-26 审出来：1.66 放在 16:9 上，look_filters 一刀都不裁，这儿原来照样回 1。
+        look.letterbox = 1.66;
+        CHECK(media::letterbox_height(look, 1920, 1080) == 0);
+        CHECK(media::assembly_watermark_upscale(look, up, 1920, 1080) == 0);
+        CHECK(media::look_filters(look, 1920, 1080, fs::path()).find("crop=") == std::string::npos);
+        // 同时开着放大：落到放大那一档，按倍数补
+        up.command = "esrgan %{in} %{out}";
+        up.scale = 2;
+        CHECK(media::assembly_watermark_upscale(look, up, 1920, 1080) == 2);
+    }
     SUBCASE("两个都开：算遮幅那一档") {
         // 旧的先被放大、再被裁掉，还是没了——补标准尺寸的就行
         look.letterbox = 2.39;
@@ -256,7 +270,8 @@ TEST_CASE("水印：路径按滤镜的规矩转义") {
     plan.margin = 1;
     const std::string vf = media::with_watermark("null", plan);
     CHECK(has(vf, "c\\:d"));
-    CHECK(has(vf, "a'\\''b"));
+    CHECK(has(vf, "a'\\\\\\''b"));   // 两层都要解（见 escape_filter_path）
+    CHECK(has(vf, "movie=filename='"));
 }
 
 TEST_CASE("水印：画面尺寸不成立就不加，不抛") {
@@ -265,3 +280,112 @@ TEST_CASE("水印：画面尺寸不成立就不加，不抛") {
     CHECK(media::stage_watermark(dir / "g.png", -1, 100).empty());
 }
 
+
+// ---------------------------------------------------------------------------
+// 尺寸和整章不一样的那一镜：先抹、再补（2026-09-25，原来「还没堵」的那一条）
+// ---------------------------------------------------------------------------
+
+TEST_CASE("烧进去的角标在哪儿：和出片那一步是同一套算法，框得住它") {
+    const fs::path dir = temp_root("位置");
+    for (const auto [w, h] : {std::pair{832, 480}, std::pair{1280, 720}, std::pair{1080, 1920},
+                              std::pair{1920, 1080}}) {
+        CAPTURE(w);
+        CAPTURE(h);
+        const auto plan = media::stage_watermark(dir / "m.png", w, h);
+        const auto r = media::burned_watermark_rect(w, h);
+        REQUIRE_FALSE(r.empty());
+        // 角标本体：右下角，离边 margin
+        const int mx = w - plan.margin - plan.width;
+        const int my = h - plan.margin - plan.height;
+        CHECK(r.x <= mx);
+        CHECK(r.y <= my);
+        CHECK(r.x + r.w >= w - plan.margin);
+        CHECK(r.y + r.h >= h - plan.margin);
+        // delogo 要四边都在画面里面
+        CHECK(r.x >= 1);
+        CHECK(r.y >= 1);
+        CHECK(r.x + r.w <= w - 1);
+        CHECK(r.y + r.h <= h - 1);
+        // 也别大出一圈：多留的只有那 2px
+        CHECK(mx - r.x <= 2);
+    }
+    CHECK(media::burned_watermark_rect(0, 0).empty());
+    CHECK(media::delogo_filter({}).empty());
+}
+
+TEST_CASE("抹掉那一步排在缩放前面，补的那层排在最后") {
+    config::AssemblyConfig cfg;
+    media::NormalizeOptions opt;
+    opt.pre_vf = media::delogo_filter(media::burned_watermark_rect(832, 480));
+    const fs::path dir = temp_root("先抹");
+    opt.watermark = media::stage_watermark(dir / "fix.png", 1280, 720);
+    const std::string vf =
+        arg_value(media::normalize_args("in.mp4", 1280, 720, cfg, "out.mp4", opt), "-vf");
+    REQUIRE(has(vf, "delogo="));
+    CHECK(vf.find("delogo=") < vf.find("scale="));
+    CHECK(vf.rfind("overlay") > vf.find("scale="));
+    // 没有要抹的就一个字都不多
+    media::NormalizeOptions plain;
+    CHECK_FALSE(has(arg_value(media::normalize_args("in.mp4", 1280, 720, cfg, "out.mp4", plain), "-vf"),
+                    "delogo"));
+}
+
+TEST_CASE("放大过的那一镜尺寸和整章对不上：抹的框按放大出来的真实尺寸算") {
+    // 2026-09-26 审出来：放大命令拿到的是整章的目标尺寸（{short}），尺寸对不上的这一镜
+    // 实际放大的倍数不是配置里的 scale——按 scale 算，抹的框落在别处，重影。
+    const media::FFmpeg probe_ff("ffmpeg", "ffprobe", media::default_runner());
+    if (!probe_ff.available()) return;
+    const fs::path dir = temp_root("放大抹框");
+    const media::Runner real = media::default_runner();
+    const auto clip = [&](const fs::path& p, const char* size) {
+        real("ffmpeg",
+             {"-y", "-f", "lavfi", "-i", std::string("color=c=gray:s=") + size + ":d=1", "-c:v",
+              "libx264", "-pix_fmt", "yuv420p", "-r", "24", changji::paths::to_utf8(p)},
+             60);
+    };
+    clip(dir / "a.mp4", "832x480");   // 整章的尺寸
+    clip(dir / "b.mp4", "640x352");   // 对不上的那一镜
+    std::vector<std::string> delogos;
+    const media::Runner spy = [&](const std::string& exe, const std::vector<std::string>& args,
+                                  double t) {
+        for (const auto& a : args) {
+            const auto at = a.find("delogo=");
+            if (at != std::string::npos) delogos.push_back(a.substr(at, a.find(',', at) - at));
+        }
+        return real(exe, args, t);
+    };
+    const media::FFmpeg ff("ffmpeg", "ffprobe", spy);
+    media::Assembler as(ff, config::AssemblyConfig{}, models::ProjectPaths(dir / "proj"));
+    media::FinishOptions fin;
+    fin.look.preset = "off";
+    fin.sound.ambient = false;
+    fin.upscale.command = "ffmpeg -y -i {in} -vf scale=-2:{short} -pix_fmt yuv420p {out}";
+    fin.upscale.scale = 2;
+    as.set_finish(fin);
+    media::Timeline tl;
+    for (const char* n : {"a", "b"}) {
+        media::TimelineEntry e;
+        e.shot_id = n;
+        e.video_path = dir / (std::string(n) + ".mp4");
+        e.duration_s = 1.0;
+        tl.entries.push_back(e);
+    }
+    try {
+        as.assemble(tl, "ep01.mp4", false);
+    } catch (const std::exception&) {
+        // 只看抹框那一下发出去的参数
+    }
+    REQUIRE(delogos.size() == 1);
+    // 640×352 放到短边 960：约 1746×960（实际约 2.73 倍），不是配置里的 2 倍
+    const media::WatermarkRect r = media::burned_watermark_rect(640, 352);
+    CAPTURE(delogos[0]);
+    const auto num = [&](const char* key) {
+        const auto at = delogos[0].find(key);
+        return at == std::string::npos ? -1 : std::atoi(delogos[0].c_str() + at + std::strlen(key));
+    };
+    const double f = 960.0 / 352.0;
+    CHECK(std::abs(num("x=") - r.x * f) <= 3);
+    CHECK(std::abs(num("y=") - r.y * f) <= 3);
+    CHECK(std::abs(num("h=") - r.h * f) <= 3);
+    CHECK(num("x=") != r.x * 2);   // 原来按 scale 算的那个位置
+}

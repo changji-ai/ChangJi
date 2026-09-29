@@ -11,9 +11,11 @@
 #include <set>
 #include <vector>
 
+#include "agent/attachments.hpp"
 #include "models/project.hpp"
 #include "util/paths.hpp"
 #include "util/say.hpp"
+#include "util/text.hpp"
 
 namespace fs = std::filesystem;
 using json = nlohmann::json;
@@ -472,6 +474,71 @@ ApiResult post_location_reference_clear(const json& body) {
     l.ref_empty = std::nullopt;
     store.save_assets(assets);
     return {200, {{"cleared", true}, {"reset_shots", reset_shots_at_location(store, location_id)}}};
+}
+
+std::string clean_upload_name(const std::string& raw) {
+    // 只留最后一段：浏览器有的会带上 C:\fakepath\、有的整条路径都给
+    std::string name = raw;
+    const auto cut = name.find_last_of("/\\");
+    if (cut != std::string::npos) name = name.substr(cut + 1);
+    std::string out;
+    for (const unsigned char c : name) {
+        if (c < 0x20 || c == 0x7f || c == ':' || c == '*' || c == '?' || c == '"' ||
+            c == '<' || c == '>' || c == '|') {
+            continue;
+        }
+        out.push_back(static_cast<char>(c));
+    }
+    // 开头的点去掉：别传出一个 `.bashrc` 那样的隐藏文件、也别是 `..`
+    while (!out.empty() && (out.front() == '.' || out.front() == ' ')) out.erase(0, 1);
+    while (!out.empty() && out.back() == ' ') out.pop_back();
+    if (out.size() > 80) {
+        // 按 UTF-8 截，别截在半个字上；扩展名留着（读不读得懂按它判）
+        const auto dot = out.rfind('.');
+        const std::string ext =
+            dot != std::string::npos && out.size() - dot <= 10 ? out.substr(dot) : "";
+        out = text::truncate_utf8(out.substr(0, out.size() - ext.size()), 60) + ext;
+    }
+    return out.empty() ? std::string("file") : out;
+}
+
+ApiResult post_chat_attachment(const std::string& project_path,
+                               const std::string& filename,
+                               const std::string& data) {
+    const std::string name = clean_upload_name(filename);
+    const std::string kind = agent::attachment_kind(name);
+    if (kind.empty()) throw ApiError(400, SAYF("这种文件还读不了：%1", name));
+    if (data.empty()) throw ApiError(400, SAY("文件是空的"));
+    if (data.size() > kAttachmentMaxBytes) {
+        throw ApiError(413, SAY("太大了：网页一次最多传 512 MB，更大的用桌面端（它不搬文件）"));
+    }
+
+    fs::path dir;
+    if (project_path.empty()) {
+        dir = paths::user_data_dir("changji") / "uploads";
+    } else {
+        const ProjectStore store = open_project(project_path);
+        dir = store.root() / "uploads";
+    }
+    std::error_code ec;
+    fs::create_directories(dir, ec);
+    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::system_clock::now().time_since_epoch())
+                        .count();
+    // 同一毫秒里传两个同名的（一次拖进来一摞，常有）：编号往后挪，不互相盖。
+    fs::path dest = dir / paths::from_utf8(std::to_string(ms) + "-" + name);
+    for (int n = 2; fs::exists(dest, ec) && n < 1000; ++n) {
+        dest = dir / paths::from_utf8(std::to_string(ms) + "-" + std::to_string(n) + "-" + name);
+    }
+    {
+        std::ofstream out(dest, std::ios::binary | std::ios::trunc);
+        if (!out) throw ApiError(500, SAYF("附件写不进去：%1", paths::to_utf8(dest)));
+        out.write(data.data(), static_cast<std::streamsize>(data.size()));
+        if (!out) throw ApiError(500, SAYF("附件没写完：%1", paths::to_utf8(dest)));
+    }
+    return {200, {{"path", paths::to_utf8(fs::absolute(dest, ec))},
+                  {"name", name},
+                  {"kind", kind}}};
 }
 
 }  // namespace changji::http

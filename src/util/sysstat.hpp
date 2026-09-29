@@ -76,6 +76,10 @@ std::optional<std::pair<double, double>> parse_meminfo(const std::string& text);
 /// "max" 或者大得离谱（没设上限时 v1 写的是 2^63 附近的数）回 nullopt。
 std::optional<unsigned long long> parse_cgroup_limit(const std::string& text);
 
+/// `memory.stat` 里某一栏的字节数（`inactive_file 123`）。没有这一栏回 nullopt。
+std::optional<unsigned long long> parse_memory_stat(const std::string& text,
+                                                    const std::string& key);
+
 /// `nvidia-smi --query-gpu=index,name,utilization.gpu,memory.used,memory.total
 /// --format=csv,noheader,nounits` 的输出，一张卡一行。
 std::vector<GpuLoad> parse_nvidia_smi(const std::string& out);

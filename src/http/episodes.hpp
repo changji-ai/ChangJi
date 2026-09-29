@@ -59,4 +59,16 @@ ApiResult post_episode(const nlohmann::json& body);
 /// 是要重跑的，把状态也带过去会让它显示成已完成但没有文件。
 ApiResult post_episode_action(const nlohmann::json& body);
 
+/// 章号只认小写字母、数字、下划线。**它会拼进文件名**（`frames/<章号>_sh001.png`、
+/// `output/<章号>.mp4`），所以凡是从请求里拿章号来**建**一章的入口都要过这一道：
+/// `../../x` 这种进来，出图出片就写到项目目录外面去了。
+bool is_valid_episode_id(const std::string& s);
+
+/// **新建**一章时的 id 还要多一道：不许长成 `<别的id>_NN`（`ep01_02`）。
+///
+/// 成片文件名 `ep01_02.mp4` 在 `media::episode_of_output` 那儿认作「ep01 的第 2 份」：
+/// 装配 ep01 时清旧文件会把 ep01_02 那一章的成片当孤儿删掉；合成整部电影时它被算进
+/// ep01、自己那一章报成「没片」。老片子里已经有这种 id 的照用，只是不再新建。
+bool is_new_episode_id_ok(const std::string& s);
+
 }  // namespace changji::http

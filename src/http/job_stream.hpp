@@ -102,10 +102,27 @@ private:
 
     std::string id_;
     std::string prev_;                    ///< 上一层的 stream id
-    pipeline::CancelToken* prev_token_;   ///< 同一个 id 上一层登记的那个
     pipeline::CancelToken* prev_cancel_;  ///< 上一层这条线程的令牌
     pipeline::CancelToken token_;         ///< 自带的那个；借外面的时候不用它
     pipeline::CancelToken* use_;          ///< 真正登记、真正给 current_cancel 的
+};
+
+/// **还排着队、没开跑的那件活**，先把令牌登上。
+///
+/// 慢活挪到后台线程池（`Offload`，八条线程）上跑；池子满了后面的排着。JobScope
+/// 要等轮到它、在那条线程上才登记——排着的那一段按「停下」，`cancel_job` 找不到
+/// 这个 id，回 `{stopped:false}`，而那件活轮到了照样开跑。先拿这个登上，开跑时
+/// 看一眼令牌亮没亮；JobScope 借同一个令牌接着管（见 `start_async`）。
+class JobPending {
+public:
+    JobPending(std::string stream_id, pipeline::CancelToken& token);
+    ~JobPending();
+    JobPending(const JobPending&) = delete;
+    JobPending& operator=(const JobPending&) = delete;
+
+private:
+    std::string id_;
+    pipeline::CancelToken* use_;
 };
 
 /// 这条后台线程这件活的取消令牌。
@@ -216,11 +233,19 @@ void job_preview(const std::string& stream_id, int step, std::string data_url);
 // 页面一进来就订它，不用知道任何 id。
 inline constexpr const char* kRefChannel = "refs";
 
-void ref_progress(const std::string& target, int current, int total);
-void ref_preview(const std::string& target, int step, std::string data_url);
+//
+// ⚠️ **每条都带 `project`**（2026-09-25 补的）。`target` 在各部电影之间是重的
+// （`c_wang_front` 两部片子都可能有），不带项目的话 A 那一批画到一半的小图、
+// 百分比、「等待中」会画到 B 同名那一格上（CLAUDE.md 十¾ 那一族）。带的是请求
+// 里给的那串（和页面手里那串同一个写法），页面按它认。
+void ref_progress(const std::string& project, const std::string& target, int current,
+                  int total);
+void ref_preview(const std::string& project, const std::string& target, int step,
+                 std::string data_url);
 /// 画完了。界面据此重新拉一遍那张图。
-void ref_done(const std::string& target);
-void ref_error(const std::string& target, const std::string& message);
+void ref_done(const std::string& project, const std::string& target);
+void ref_error(const std::string& project, const std::string& target,
+               const std::string& message);
 
 /// 整批出图排到哪儿了：`{project, total, done, failed, queued, running:[…]}`。
 ///

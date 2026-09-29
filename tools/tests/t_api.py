@@ -135,4 +135,37 @@ label, _ = G.PPIOPlatform("k").load_choices()["product"][0]
 assert label == "L20 按量¥3.00/时", label
 check("没有抢占档的产品不瞎编价")
 
+# ========== 读的那一段超时、连接被掐：也是 CloudError ==========
+# urlopen 只把「连不上」包成 URLError；读回包时超时、对面掐了连接是原样往外冒的
+# TimeoutError / ConnectionResetError。底下一路只接 CloudError：重试不重试、比价
+# 一个慢地域拖垮整张表、安全释放在关机之后的等待里被打断（关了没删，照样扣钱）。
+import socket, http.client
+for exc in (TimeoutError("timed out"), socket.timeout("read timed out"),
+            ConnectionResetError(104, "reset"), http.client.RemoteDisconnected("closed")):
+    def slow_urlopen(req, timeout=0, _e=exc):
+        class R:
+            def read(s): raise _e
+            def close(s): pass
+        return R()
+    G.urllib.request.urlopen = slow_urlopen
+    try:
+        # 前面几段把 G.request_json 换成了桩，这儿直接调底下那一层 _send
+        G._send(G.urllib.request.Request("https://api.example.com/x"), "https://api.example.com/x", 30)
+        raise AssertionError("应该抛 CloudError：%r" % exc)
+    except G.CloudError as e:
+        assert "api.example.com" in str(e), str(e)
+check("读回包时超时、连接被掐（4 种）都成 CloudError，带上是哪台主机")
+
+# ---- AutoDL 列表翻页 ----
+ad = G.AutoDLPlatform("tok")
+asked = []
+def paged(method, path, body=None, **k):
+    asked.append(body["page_index"])
+    start = (body["page_index"] - 1) * 50
+    return {"list": [{"uuid": "pro-%d" % i} for i in range(start, min(start + 50, 120))]}
+ad._call = paged
+got = ad.instances()
+assert len(got) == 120 and asked == [1, 2, 3], (len(got), asked)
+check("AutoDL 120 台分三页问全（一页 50 台，原来第 51 台起看不见）")
+
 print("\nAPI 层 %d 项全过" % len(ok))

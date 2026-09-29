@@ -74,6 +74,16 @@ std::string position_name(int index, int total) {
     return SAY("片中");
 }
 
+/// 这一张取在哪儿。**按它自己记的位置说**，不按它在表里排第几：取不到的点是被
+/// 跳过的，片尾那一点没取到的话，第二张（片中）按下标就成了「片尾」——而这
+/// 几个字正是用来分「模型没起头」和「帧数超了」的。没记位置的退回按下标。
+std::string position_name(const media::PixelStats& s, int index, int total) {
+    if (s.at < 0.0) return position_name(index, total);
+    if (s.at <= 0.3) return SAY("片头");
+    if (s.at >= 0.7) return SAY("片尾");
+    return SAY("片中");
+}
+
 std::string motion_note(const GateResult& result) {
     const auto mean = result.metrics.find("motion_mean");
     const auto mx = result.metrics.find("motion_max");
@@ -172,8 +182,8 @@ GateResult gate_video(const models::Shot& shot, const fs::path& video_path,
     std::vector<std::string> blank_where;
     for (std::size_t i = 0; i < samples.size(); ++i) {
         if (samples[i].looks_blank()) {
-            blank_where.push_back(
-                position_name(static_cast<int>(i), static_cast<int>(samples.size())));
+            blank_where.push_back(position_name(samples[i], static_cast<int>(i),
+                                                static_cast<int>(samples.size())));
         }
     }
     if (!blank_where.empty()) {
@@ -197,8 +207,8 @@ GateResult gate_video(const models::Shot& shot, const fs::path& video_path,
     std::vector<std::string> clipped_where;
     for (std::size_t i = 0; i < samples.size(); ++i) {
         if (samples[i].looks_clipped()) {
-            clipped_where.push_back(
-                position_name(static_cast<int>(i), static_cast<int>(samples.size())));
+            clipped_where.push_back(position_name(samples[i], static_cast<int>(i),
+                                                  static_cast<int>(samples.size())));
         }
     }
     if (!clipped_where.empty()) {

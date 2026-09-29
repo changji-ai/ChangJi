@@ -416,6 +416,44 @@ TEST_CASE("出片途中人改了同一章的镜头：存盘不把那一笔冲回
     CHECK(said);
 }
 
+TEST_CASE("出片途中整张分镜被重拆：不把旧表写回去，这一章停下") {
+    // 出片一轮手里握着开跑时那张表。原来这期间重拆分镜（3 镜 → 2 镜新的），
+    // 下一次存盘把旧表写回去：旧的 sh003 回来了，sh001、sh002 是新文字配旧片子，
+    // 不留底、不问人（出片算 Writer::derived）。
+    const auto store = make_store("中途重拆", 3);
+    Recorder rec;
+    rec.on_frame = [&](const std::string& id) {
+        if (id != "ep01_sh001") return;
+        // 就是 /api/plan 干的事：一把锁里读、整张表换掉、存。
+        const auto guard = store.lock();
+        models::Project p = store.load_project();
+        models::Episode* ep = p.episode_by_id("ep01");
+        std::vector<models::Shot> fresh(2);
+        fresh[0].shot_id = "ep01_sh001";
+        fresh[0].order = 0;
+        fresh[0].first_frame_prompt = "新表第一镜";
+        fresh[1].shot_id = "ep01_sh002";
+        fresh[1].order = 1;
+        fresh[1].first_frame_prompt = "新表第二镜";
+        ep->shots = fresh;
+        store.save_project(p);
+    };
+    pipeline::CancelToken tok;
+    pipeline::RunOptions opts;
+    opts.episode_id = "ep01";
+    opts.skip_final = true;
+    run_it(store, opts, rec, tok);
+
+    const models::Episode ep = reload(store);
+    REQUIRE(ep.shots.size() == 2);
+    CHECK(ep.shot_by_id("ep01_sh003") == nullptr);
+    CHECK(ep.shot_by_id("ep01_sh001")->first_frame_prompt == "新表第一镜");
+    CHECK_FALSE(ep.shot_by_id("ep01_sh001")->video_path.has_value());
+    CHECK(ep.shot_by_id("ep01_sh002")->status == models::ShotStatus::PLANNED);
+    // 这一章停下了，没有接着按旧表出
+    CHECK(tok.cancelled());
+}
+
 TEST_CASE("出片那一轮自己开跑时的归位不算别人改的") {
     // 合并判"别人改过"是拿盘上的和"自己上一次写下去的"比。开跑时那几笔
     // 归位（降级了却没视频的退回配音完成）是这一轮自己干的——基线要取在

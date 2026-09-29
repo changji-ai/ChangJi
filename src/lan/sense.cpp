@@ -1,10 +1,12 @@
 #include "lan/sense.hpp"
 
 #include "llm/client.hpp"
+#include "util/atomic_file.hpp"
 #include "util/say.hpp"
 
 #include <algorithm>
 #include <chrono>
+#include <cstdio>
 #include <fstream>
 #include <map>
 #include <system_error>
@@ -39,7 +41,8 @@
 // 它们拉进来了，Linux 上不会——2026-09-22 在树莓派上第一次编，四个错里
 // 有两个是这个。
 #include <arpa/inet.h>
-#include <sys/select.h>
+#include <cerrno>
+#include <poll.h>
 #include <unistd.h>
 #endif
 
@@ -164,7 +167,9 @@ struct Sense::Guts {
     /// select 要盯的那几条。**共用那一档只有一条**（shared）；各起各的那
     /// 一档，注册一条、浏览一条、每个正在解析的各一条。
     std::vector<DNSServiceRef> watch;
-    /// 解析回来了、等着收的那几条。**只在各起各的那一档用得上。**
+    /// 解析回来了（或者出错了）、等着收的那几条。两档都收：共用那一档里
+    /// 解析是挂在共用连接上的子操作，单独释放只停它自己（Bonjour 文档写明的），
+    /// 不收的话每一下"来了"都留一个一直在问的解析，直到收工。
     ///
     /// ⚠️ **不在回调里直接释放。** 那会儿正站在这条连接自己的
     /// `DNSServiceProcessResult` 里，把脚下的东西拆了。记一笔，等下一圈
@@ -192,7 +197,14 @@ std::string txt_get(const unsigned char* txt, uint16_t len, const char* key) {
 struct ResolveCtx {
     Sense* self = nullptr;
     std::string instance;   ///< 网上那个实例名
+    DNSServiceRef ref = nullptr;   ///< 这一次解析的那条，收它时连上下文一起放
 };
+
+namespace {
+/// 同时在问细节的上限。一个网段上机器反复上下线（或者有人刷广播）时，每一下
+/// "来了"都开一次解析；不设上限的话解析和上下文一路攒到收工，fd 也跟着漏。
+constexpr std::size_t kMaxResolving = 64;
+}  // namespace
 
 Sense::~Sense() { stop(); }
 
@@ -203,7 +215,7 @@ Sense& Sense::instance() {
 
 void Sense::start() {
     if (running_) return;
-    trouble_.clear();
+    set_trouble({});
     guts_ = std::make_unique<Guts>();
     auto* g = guts_.get();
 
@@ -252,8 +264,8 @@ void Sense::start() {
     // 没人看得见这一台，人只会以为"对方没开"。
     if (err != kDNSServiceErr_NoError) {
         g->reg = nullptr;
-        trouble_ = SAYF("往外报不出去（Bonjour 回 %1）",
-                        std::to_string(err));
+        set_trouble(SAYF("无法广播本机（Bonjour 返回 %1）",
+                         std::to_string(err)));
     } else if (!kSharedConn) {
         g->watch.push_back(g->reg);
     }
@@ -278,11 +290,11 @@ void Sense::start() {
                 return;
             }
             // 来了：再问一次细节（地址、端口、TXT）。
+            if (gg->resolving.size() >= kMaxResolving) return;
             auto fresh = std::make_unique<ResolveCtx>();
             fresh->self = self;
             fresh->instance = name != nullptr ? name : "";
             auto* raw = fresh.get();
-            gg->ctxs.push_back(std::move(fresh));
             DNSServiceRef r = gg->shared;
             if (DNSServiceResolve(
                     &r, kShareFlag, iface, name, type,
@@ -291,9 +303,17 @@ void Sense::start() {
                        DNSServiceErrorType er, const char*, const char* host,
                        uint16_t port, uint16_t tlen, const unsigned char* txt,
                        void* c) {
-                        if (er != kDNSServiceErr_NoError) return;
                         auto* cx = static_cast<ResolveCtx*>(c);
                         auto* s = cx->self;
+                        // 问完了（成没成都一样）：记一笔等着收。**不在这儿
+                        // 释放**——正站在它自己的 ProcessResult 里。
+                        if (s->guts_ != nullptr) {
+                            auto& fin = s->guts_->finished;
+                            if (std::find(fin.begin(), fin.end(), self_ref) == fin.end()) {
+                                fin.push_back(self_ref);
+                            }
+                        }
+                        if (er != kDNSServiceErr_NoError) return;
                         Peer p;
                         p.id = txt_get(txt, tlen, "id");
                         p.name = txt_get(txt, tlen, "name");
@@ -310,13 +330,10 @@ void Sense::start() {
                             std::lock_guard<std::mutex> lk(s->mu_);
                             s->book_.saw(p);
                         }
-                        // 各起各的那一档：这一条问完了，记一笔等着收。
-                        // 共用那一档不能收——那是大家共用的那条。
-                        if (!kSharedConn && s->guts_ != nullptr) {
-                            s->guts_->finished.push_back(self_ref);
-                        }
                     },
                     raw) == kDNSServiceErr_NoError) {
+                raw->ref = r;
+                gg->ctxs.push_back(std::move(fresh));   // 开不起来的不留上下文
                 gg->resolving.push_back(r);
                 if (!kSharedConn) gg->watch.push_back(r);
             }
@@ -324,7 +341,7 @@ void Sense::start() {
         this);
     if (err != kDNSServiceErr_NoError) {
         g->browse = nullptr;
-        trouble_ = SAYF("听不见别人（Bonjour 回 %1）", std::to_string(err));
+        set_trouble(SAYF("无法发现其他机器（Bonjour 返回 %1）", std::to_string(err)));
     } else if (!kSharedConn) {
         g->watch.push_back(g->browse);
     }
@@ -336,13 +353,23 @@ void Sense::start() {
     running_ = true;
     asking_ = true;
     asker_ = std::thread([this] { ask_around(); });
-    g->spin = std::thread([g] {
+    g->spin = std::thread([this, g] {
         auto drop = [g](DNSServiceRef r) {
             auto rm = [r](std::vector<DNSServiceRef>& v) {
                 v.erase(std::remove(v.begin(), v.end(), r), v.end());
             };
+            // 只收解析那几条：注册、浏览、共用连接出错了归下面"整个断了"那一档。
+            if (std::find(g->resolving.begin(), g->resolving.end(), r) ==
+                g->resolving.end()) {
+                return;
+            }
             rm(g->watch);
             rm(g->resolving);
+            g->ctxs.erase(std::remove_if(g->ctxs.begin(), g->ctxs.end(),
+                                         [r](const std::unique_ptr<ResolveCtx>& c) {
+                                             return c->ref == r;
+                                         }),
+                          g->ctxs.end());
             DNSServiceRefDeallocate(r);
         };
         while (true) {
@@ -351,31 +378,50 @@ void Sense::start() {
             for (DNSServiceRef r : g->finished) drop(r);
             g->finished.clear();
 
-            fd_set set;
-            FD_ZERO(&set);
-            FD_SET(g->wake[0], &set);
-            int top = g->wake[0];
+            // **poll，不用 select。** fd_set 只装得下 FD_SETSIZE（1024）以内的
+            // fd：进程里开着一千多个文件（出片时并不稀奇）时，FD_SET 写出界，
+            // 当场踩坏栈。
+            std::vector<pollfd> fds;
+            std::vector<DNSServiceRef> refs;
+            fds.push_back({g->wake[0], POLLIN, 0});
+            refs.push_back(nullptr);
             // 盯着的那几条：共用那一档只有一条，各起各的那一档一堆。
-            std::vector<std::pair<int, DNSServiceRef>> fds;
             for (DNSServiceRef r : g->watch) {
                 if (r == nullptr) continue;
                 const int fd = DNSServiceRefSockFD(r);
                 if (fd < 0) continue;
-                FD_SET(fd, &set);
-                if (fd > top) top = fd;
-                fds.emplace_back(fd, r);
+                fds.push_back({fd, POLLIN, 0});
+                refs.push_back(r);
             }
-            if (::select(top + 1, &set, nullptr, nullptr, nullptr) < 0) break;
-            if (FD_ISSET(g->wake[0], &set)) break;
-            bool broke = false;
-            for (const auto& [fd, r] : fds) {
-                if (!FD_ISSET(fd, &set)) continue;
-                if (DNSServiceProcessResult(r) != kDNSServiceErr_NoError) {
-                    broke = true;
-                    break;
+            if (::poll(fds.data(), static_cast<nfds_t>(fds.size()), -1) < 0) {
+                if (errno == EINTR) continue;
+                break;
+            }
+            if (fds[0].revents != 0) break;
+            DNSServiceErrorType dead = kDNSServiceErr_NoError;
+            for (std::size_t i = 1; i < fds.size(); ++i) {
+                if ((fds[i].revents & (POLLIN | POLLERR | POLLHUP)) == 0) continue;
+                const DNSServiceRef r = refs[i];
+                const DNSServiceErrorType e = DNSServiceProcessResult(r);
+                if (e == kDNSServiceErr_NoError) continue;
+                // **一条解析出错只收那一条**，别把整圈停了：原来一 break，
+                // 一台机器回了一句坏包，整个感知就一声不响地聋了。
+                if (std::find(g->resolving.begin(), g->resolving.end(), r) !=
+                    g->resolving.end()) {
+                    if (std::find(g->finished.begin(), g->finished.end(), r) ==
+                        g->finished.end()) {
+                        g->finished.push_back(r);
+                    }
+                    continue;
                 }
+                dead = e;   // 注册、浏览或共用那条断了（mDNS 守护进程重启之类）
+                break;
             }
-            if (broke) break;
+            if (dead != kDNSServiceErr_NoError) {
+                // 转不下去了要说出来，不然界面一直写着"开着"。
+                set_trouble(SAYF("无法发现其他机器（Bonjour 返回 %1）", std::to_string(dead)));
+                break;
+            }
         }
         for (auto& r : g->resolving) DNSServiceRefDeallocate(r);
         g->resolving.clear();
@@ -539,7 +585,7 @@ Sense& Sense::instance() {
 
 void Sense::start() {
     if (running_) return;
-    trouble_.clear();
+    set_trouble({});
     guts_ = std::make_unique<Guts>();
     auto* g = guts_.get();
 
@@ -635,14 +681,14 @@ void Sense::start() {
             // 网段上没人看得见这一台，人只会以为"对方没开"。
             if (st != ERROR_SUCCESS) {
                 std::lock_guard<std::mutex> lk(mu_);
-                trouble_ = SAYF("往外报不出去（Windows 回 %1）",
+                trouble_ = SAYF("无法广播本机（Windows 返回 %1）",
                                 std::to_string(static_cast<int>(st)));
             }
         } else {
             // 连实例都没构出来（名字拼错、内存不够）。**也走同一句话**
             // ——多一句要多翻十一种语言，而人看见的信息是一样的。
             std::lock_guard<std::mutex> lk(mu_);
-            trouble_ = SAYF("往外报不出去（Windows 回 %1）",
+            trouble_ = SAYF("无法广播本机（Windows 返回 %1）",
                             std::to_string(static_cast<int>(::GetLastError())));
         }
 
@@ -682,7 +728,7 @@ void Sense::start() {
                 if (!said_deaf) {
                     said_deaf = true;
                     std::lock_guard<std::mutex> lk(mu_);
-                    trouble_ = SAYF("听不见别人（Windows 回 %1）",
+                    trouble_ = SAYF("无法发现其他机器（Windows 返回 %1）",
                                     std::to_string(static_cast<int>(bs)));
                 }
                 if (::WaitForSingleObject(g->quit, 5000) == WAIT_OBJECT_0) break;
@@ -948,15 +994,29 @@ void Sense::boot(const fs::path& data_dir, int port) {
             }
         }
     }
+    std::lock_guard<std::mutex> lk(onoff_mu_);
     if (on_ && supported()) start();
 }
 
 void Sense::set_on(bool on) {
-    if (on == on_) return;
-    on_ = on;
-    if (on && supported()) start();
-    else stop();
+    {
+        std::lock_guard<std::mutex> lk(onoff_mu_);
+        if (on == on_) return;
+        on_ = on;
+        if (on && supported()) start();
+        else stop();
+    }
     save();
+}
+
+void Sense::shutdown() {
+    std::lock_guard<std::mutex> lk(onoff_mu_);
+    stop();
+}
+
+void Sense::set_trouble(std::string why) {
+    std::lock_guard<std::mutex> lk(mu_);
+    trouble_ = std::move(why);
 }
 
 bool Sense::on() const { return on_; }
@@ -1020,12 +1080,24 @@ Grant Sense::grant_of(const std::string& id) const {
 }
 
 void Sense::save() const {
-    std::lock_guard<std::mutex> lk(mu_);
-    if (dir_.empty()) return;
+    std::string text;
+    fs::path dir;
+    {
+        std::lock_guard<std::mutex> lk(mu_);
+        if (dir_.empty()) return;
+        dir = dir_;
+        text = json{{"on", on_.load()}, {"grants", book_.grants_json()}}.dump(1) + "\n";
+    }
     std::error_code ec;
-    fs::create_directories(dir_, ec);
-    std::ofstream out(dir_ / "lan.json");
-    out << json{{"on", on_}, {"grants", book_.grants_json()}}.dump(1) << "\n";
+    fs::create_directories(dir, ec);
+    // **整份换、0600。** 这份里有发出去的票（拿着它就能往这台派活）；原来按
+    // 默认权限原地截断重写，同机别的账号读得到，写到一半没了的话下次起来
+    // 开关和权限一起丢。
+    try {
+        util::write_file_atomic(dir / "lan.json", text, /*private_only=*/true);
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "[lan] %s\n", e.what());
+    }
 }
 
 json Sense::to_json() const {
@@ -1047,9 +1119,14 @@ json Sense::to_json() const {
                        {"vramUsed", p.their_vram_used},
                        {"vramTotal", p.their_vram_total}});
     }
+    std::string trouble;
+    {
+        std::lock_guard<std::mutex> lk(mu_);
+        trouble = trouble_;
+    }
     return {{"supported", supported()},
             {"on", on()},
-            {"error", trouble_},
+            {"error", trouble},
             {"me", {{"id", my_id()}, {"name", my_name()}}},
             {"peers", arr}};
 }

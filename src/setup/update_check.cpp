@@ -57,26 +57,32 @@ UpdateInfo check_update(const config::UpdateConfig& cfg,
     out.url = "https://github.com/" + repo_of(cfg) + "/releases/tag/" +
               update_channel(cfg, current);
     if (!fetch) {
-        out.error = SAY("没法发请求");
+        out.error = SAY("无法发送请求");
         return out;
     }
     const std::string where = version_json_url(cfg, current);
     const std::string body = fetch(where);
     if (body.empty()) {
-        out.error = SAYF("取不到版本信息（%1）", where);
+        out.error = SAYF("无法获取版本信息（%1）", where);
         return out;
     }
     const auto js = nlohmann::json::parse(body, nullptr, /*allow_exceptions=*/false);
     if (js.is_discarded() || !js.is_object()) {
         // **不把原文贴出来。** 取到的多半是一张 404 页面，几十 KB 的 HTML
         // 摆进界面没人读得下去。
-        out.error = SAY("那头回的不是版本信息");
+        out.error = SAY("服务器返回的不是版本信息");
         return out;
     }
-    out.latest = text::strip_ws(js.value("version", std::string()));
-    out.built_at = js.value("built_at", std::string());
+    // 只认字串：`"built_at": null` 这种原来 value() 抛 type_error，/api/update 每次都 500，
+    // 而不是照实填 error。
+    const auto str_of = [&js](const char* k) {
+        const auto it = js.find(k);
+        return it != js.end() && it->is_string() ? it->get<std::string>() : std::string();
+    };
+    out.latest = text::strip_ws(str_of("version"));
+    out.built_at = str_of("built_at");
     if (out.latest.empty()) {
-        out.error = SAY("版本信息里没有 version 这一栏");
+        out.error = SAY("版本信息中缺少 version 字段");
         return out;
     }
     out.newer = is_different_version(out.current, out.latest);
@@ -95,7 +101,7 @@ UpdateInfo cached_update(UpdateCache& c, const config::UpdateConfig& cfg,
                 UpdateInfo out;
                 out.current = current;
                 if (c.has) out = c.last;
-                out.error = c.has ? out.error : SAY("自动检查关着");
+                out.error = c.has ? out.error : SAY("自动检查已关闭");
                 return out;
             }
             if (c.has) {

@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "util/paths.hpp"
+#include "util/say.hpp"
 #include "util/proc.hpp"
 
 #ifdef _WIN32
@@ -177,9 +178,9 @@ namespace {
 /// ——两种情况人要去查的地方不一样。
 std::string not_found_message(const std::string& exe) {
     if (exe.find('/') != std::string::npos || exe.find('\\') != std::string::npos) {
-        return "找不到 " + exe + "（没有这个文件）";
+        return SAYF("找不到 %1（没有这个文件）", exe);
     }
-    return "找不到 " + exe + "（PATH 里没有这个程序）";
+    return SAYF("找不到 %1（PATH 里没有这个程序）", exe);
 }
 
 /// 环境变量名是不是 `want`。Windows 上不分大小写（`Path` 就是 `PATH`）。
@@ -251,15 +252,10 @@ std::string system_message(DWORD code) {
                           w.back() == L'.' || w.back() == static_cast<wchar_t>(0x3002))) {
         w.pop_back();
     }
-    if (w.empty()) return "错误码 " + std::to_string(code);
+    if (w.empty()) return SAYF("错误码 %1", std::to_string(code));
     return paths::to_utf8(fs::path(w));
 }
 
-bool is_batch(const fs::path& p) {
-    std::wstring ext = p.extension().wstring();
-    for (auto& c : ext) c = static_cast<wchar_t>(::towlower(c));
-    return ext == L".cmd" || ext == L".bat";
-}
 
 /// `\\server\share\…`（连 `\\?\…` 一起算）。
 bool is_unc(const fs::path& p) {
@@ -268,65 +264,6 @@ bool is_unc(const fs::path& p) {
     return w.size() >= 2 && slash(w[0]) && slash(w[1]);
 }
 
-/// 经 cmd.exe 起批处理时给一个参数加引号。
-///
-/// **跟 `proc::quote_arg` 不是一套规矩。** 批处理一定过 cmd.exe，而 cmd 有
-/// 两件 CommandLineToArgvW 没有的事：
-///   · 引号是开关，`\"` 在它眼里是"反斜杠 + 开关一下"——引号里的 `&` 跟着
-///     漏到引号外面，后半截就成了另一条命令。所以引号写成 `""`（开关两下，
-///     状态不变）；
-///   · `%VAR%` 在引号里照样展开，而命令行模式下 `%%` 不是转义。借的是 Rust
-///     标准库修 BatBadBut（CVE-2024-24576）时的办法：每个 `%` 前面垫一个
-///     `%cd:~,%`（取 cd 的空子串，展开成空），让 cmd 配不成一对。
-/// 除了字母数字和少数几个安全的符号，ASCII 里别的都引上；非 ASCII 不用引。
-///
-/// 带引号的参数到了那头拆成什么，看批处理最后把 `%*` 交给谁：2026-09-24 实测
-/// 经 .cmd 交给 node（npx.cmd 就是这样），带引号、`&`、`%CD%`、`!`、`^` 的
-/// 十几种参数全部原样到达；交给按 CommandLineToArgvW 拆的程序，带引号的那个
-/// 会拆歪（`""` 在它那儿会顺带结束引号）。但两种情况下 `&` 都漏不出去——
-/// 拆歪只是参数不对，漏出去是多跑一条命令。
-std::string cmd_quote(const std::string& s, bool force) {
-    bool need = force || s.empty() || s.back() == '\\';
-    constexpr std::string_view kSafe = "#$*+-./:?@\\_";
-    for (const char ch : s) {
-        const auto c = static_cast<unsigned char>(ch);
-        if (c >= 0x80) continue;
-        if ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) continue;
-        if (kSafe.find(ch) != std::string_view::npos) continue;
-        need = true;
-    }
-    std::string out;
-    if (need) out += '"';
-    std::size_t slashes = 0;
-    for (const char c : s) {
-        if (c == '\\') {
-            ++slashes;
-            out += c;
-            continue;
-        }
-        if (c == '"') {
-            out.append(slashes, '\\');  // 紧挨引号的反斜杠翻倍，再补一个引号成 `""`
-            out += '"';
-        } else if (c == '%') {
-            out += "%%cd:~,";
-        }
-        slashes = 0;
-        out += c;
-    }
-    if (need) {
-        out.append(slashes, '\\');  // 结尾的反斜杠翻倍，否则吃掉收尾的引号
-        out += '"';
-    }
-    return out;
-}
-
-std::wstring cmd_exe_path() {
-    // 不读 COMSPEC：那是用户环境里的一个变量，改过的话起的就不是 cmd 了。
-    wchar_t buf[MAX_PATH];
-    const UINT n = ::GetSystemDirectoryW(buf, MAX_PATH);
-    if (n == 0 || n >= MAX_PATH) return L"C:\\Windows\\System32\\cmd.exe";
-    return std::wstring(buf, n) + L"\\cmd.exe";
-}
 
 /// 环境块：这个进程的环境叠上 `overrides`，按名字**不分大小写**排好序。
 ///
@@ -431,7 +368,7 @@ bool launch(Child::Impl& im, const Child::Options& opts, const std::string& reso
             std::string* err) {
     const std::string& name = opts.exe;
     auto fail = [&](DWORD code) {
-        *err = name + " 起不来：" + system_message(code);
+        *err = SAYF("%1 起不来：%2", name, system_message(code));
         return false;
     };
     fs::path exe_path = paths::from_utf8(resolved);
@@ -440,25 +377,19 @@ bool launch(Child::Impl& im, const Child::Options& opts, const std::string& reso
     // ---- 命令行 ----
     std::wstring app;
     std::wstring cmdline;
-    if (is_batch(exe_path)) {
+    if (is_batch_file(paths::to_utf8(exe_path))) {
         // `npx` 在 Windows 上是 `npx.cmd`。CreateProcessW 不认批处理，要 cmd.exe
         // 来跑。/s /c "…"：cmd 去掉最外面那一对引号，里面原样当一行命令；
         // /d 不跑 AutoRun（注册表里谁挂了什么都别掺进来）；/e:ON 给 `%cd:~,%`
         // 那个垫子用；/v:OFF 让 `!` 不当延迟展开。
         for (const auto& a : opts.args) {
             if (a.find_first_of(std::string("\r\n\0", 3)) != std::string::npos) {
-                *err = name + " 起不来：参数里有换行，经 cmd.exe 转不过去（" + name +
-                       " 是个批处理）";
+                *err = SAYF("%1 起不来：参数里有换行，经 cmd.exe 转不过去（%1 是个批处理）",
+                            name);
                 return false;
             }
         }
-        std::string line = "cmd.exe /e:ON /v:OFF /d /s /c \"";
-        line += cmd_quote(paths::to_utf8(exe_path), true);
-        for (const auto& a : opts.args) {
-            line += ' ';
-            line += cmd_quote(a, false);
-        }
-        line += '"';
+        const std::string line = *batch_command_line(paths::to_utf8(exe_path), opts.args);
         app = cmd_exe_path();
         cmdline = paths::from_utf8(line).wstring();
     } else {
@@ -1110,7 +1041,7 @@ std::unique_ptr<Child> Child::start(const Options& opts, std::string* error) {
     // 批处理经 cmd.exe 跑，而 cmd 不认网络路径当当前目录：它不报错，悄悄换到
     // Windows 目录里接着跑——扩展读写的就全是别处的文件。在这儿先说清楚。
     // 放在"目录在不在"前面：不为一个注定跑不了的目录去网络上问一圈。
-    if (!opts.cwd.empty() && is_unc(opts.cwd) && is_batch(paths::from_utf8(*resolved))) {
+    if (!opts.cwd.empty() && is_unc(opts.cwd) && is_batch_file(*resolved)) {
         *err = "批处理不能在网络路径 " + paths::to_utf8(opts.cwd) + " 里跑（" + opts.exe +
                " 要经 cmd.exe 起，cmd 不认这种目录，会悄悄换到 Windows 目录里去跑）";
         return nullptr;

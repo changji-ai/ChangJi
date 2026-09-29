@@ -131,7 +131,7 @@ TEST_CASE("模型配置能从 toml 读出来") {
             << "image = \"Qwen-Image-Edit-Q4_K_M.gguf\"\n";
     }
 
-    const config::Settings s = config::load_settings(tmp);
+    const config::Settings s = config::load_settings_file(tmp / "changji.toml");
     REQUIRE(s.models.dir.has_value());
     CHECK(*s.models.dir == abs_utf8("模型库"));
     CHECK(s.models.llm == "Qwen3-14B-Q4_K_M.gguf");
@@ -161,7 +161,7 @@ TEST_CASE("模型配置能从 toml 读出来") {
             std::ofstream out(cfg2, std::ios::binary);
             out << "[models]\nllm = \"only-this.gguf\"\n";
         }
-        const config::Settings s2 = config::load_settings(tmp);
+        const config::Settings s2 = config::load_settings_file(tmp / "changji.toml");
         CHECK(s2.models.llm == "only-this.gguf");
         // 猜默认文件名只会让人以为配好了，然后在加载模型时才炸
         CHECK(s2.models.video.empty());
@@ -248,7 +248,7 @@ TEST_CASE("flash attention 默认开，配置里能关") {
         std::ofstream f(tmp / "changji.toml", std::ios::binary);
         f << "[models]\ndiffusion_flash_attn = false\n";
     }
-    CHECK_FALSE(config::load_settings(tmp).models.diffusion_flash_attn);
+    CHECK_FALSE(config::load_settings_file(tmp / "changji.toml").models.diffusion_flash_attn);
     fs::remove_all(tmp, ec);
 }
 
@@ -393,7 +393,7 @@ TEST_CASE("模板自己解析得动，而且解析出来就是默认值") {
         std::ofstream f(dir / "changji.toml", std::ios::binary);
         f << config::default_config_template();
     }
-    const auto s2 = config::load_settings(dir);
+    const auto s2 = config::load_settings_file(dir / "changji.toml");
     const config::Settings def;
     CHECK(s2.tts.backend == def.tts.backend);
     CHECK(s2.llm.model == def.llm.model);
@@ -413,7 +413,7 @@ TEST_CASE("[models].weights：默认 smart，认 auto，别的拒") {
         std::ofstream f(tmp / "changji.toml", std::ios::binary);
         f << "[models]\nweights = \"auto\"\n";
     }
-    CHECK(config::load_settings(tmp).models.weights == "auto");
+    CHECK(config::load_settings_file(tmp / "changji.toml").models.weights == "auto");
 
     // 第三种取值：sd.cpp 的组件规格，原样传下去。
     // **给"差一点就装得下"的卡用的**：5090 上 fp8 图像模型用 auto 会连
@@ -423,7 +423,7 @@ TEST_CASE("[models].weights：默认 smart，认 auto，别的拒") {
         std::ofstream f(tmp / "changji.toml", std::ios::binary);
         f << "[models]\nweights = \"te=cpu,vae=cpu\"\n";
     }
-    CHECK(config::load_settings(tmp).models.weights == "te=cpu,vae=cpu");
+    CHECK(config::load_settings_file(tmp / "changji.toml").models.weights == "te=cpu,vae=cpu");
 
     config::Settings s;
     s.models.weights = "";      // 空的才拒——别的都可能是合法规格
@@ -612,7 +612,7 @@ TEST_CASE("[models]：双专家视频模型的两项") {
              "video_high_noise = \"high.gguf\"\n"
              "video_moe_boundary = 0.9\n";
     }
-    const auto s = config::load_settings(tmp);
+    const auto s = config::load_settings_file(tmp / "changji.toml");
     CHECK(s.models.video_high_noise == "high.gguf");
     CHECK(s.models.video_moe_boundary == doctest::Approx(0.9));
 
@@ -647,7 +647,7 @@ TEST_CASE("[models]：双专家视频模型的两项") {
             f << "[models]\nvideo_lora = \"loras/turbo.safetensors\"\n"
                  "video_lora_strength = 0.8\n";
         }
-        const auto got = config::load_settings(tmp);
+        const auto got = config::load_settings_file(tmp / "changji.toml");
         CHECK(got.models.video_lora == "loras/turbo.safetensors");
         CHECK(got.models.video_lora_strength == doctest::Approx(0.8));
 
@@ -673,7 +673,7 @@ TEST_CASE("[models]：双专家视频模型的两项") {
             std::ofstream f(tmp / "changji.toml", std::ios::binary);
             f << "[models]\nvideo_rng = \"cpu\"\n";
         }
-        CHECK(config::load_settings(tmp).models.video_rng == "cpu");
+        CHECK(config::load_settings_file(tmp / "changji.toml").models.video_rng == "cpu");
 
         config::Settings bad;
         bad.models.video_rng = "gpu";   // 没有这个取值，是 cuda
@@ -1154,6 +1154,20 @@ TEST_CASE("这一轮真正会用的规格：出片跟 Turbo，首帧不跟") {
         // **这一条是关键**：Turbo 只挂在视频模型上，出图那一步没有它。
         CHECK(e.frame_steps == 28);
 
+        // **成片档不挂它，就不压步数。** video_lora_tiers = "draft"（模板里推荐的
+        // 那种）原来照样压到 6 步：成片档裸模型跑 6 步，一镜全糊。
+        config::Settings draft_only = s;
+        draft_only.models.video_lora_tiers = "draft";
+        const auto d = config::effective_spec(draft_only, 28);
+        CHECK_FALSE(d.turbo);
+        CHECK(d.final_steps == 28);
+        CHECK(config::steps_on_node(draft_only, 28, false, true) == 28);   // 派来的成片档
+        CHECK(config::steps_on_node(draft_only, 20, false, false) == 6);   // 派来的草稿档
+        config::Settings final_only = s;
+        final_only.models.video_lora_tiers = "final";
+        CHECK(config::effective_spec(final_only, 28).final_steps == 6);
+        CHECK(config::steps_on_node(final_only, 20, false, false) == 20);  // 草稿档不挂
+
         // 配了但文件不在 = 没挂上
         config::Settings missing = s;
         missing.models.video_lora = "loras/不存在.safetensors";
@@ -1560,7 +1574,7 @@ TEST_CASE("cfg / rng 的默认按出片模型家族给，别再默认 Wan 的 6.
             std::ofstream f(tmp / "changji.toml", std::ios::binary);
             f << "[models]\nvideo = \"minimax_h3_fl2va-Q4_K_M.gguf\"\n";
         }
-        const config::Settings s = config::load_settings(tmp);
+        const config::Settings s = config::load_settings_file(tmp / "changji.toml");
         CHECK(s.models.video_cfg == doctest::Approx(1.0));
         CHECK(s.models.video_rng == "cpu");
         fs::remove_all(tmp, ec);
@@ -1578,17 +1592,17 @@ TEST_CASE("干活那台按自己有没有 Turbo 定步数，人钉死的不动")
     node.models.video_lora = "loras/turbo.safetensors";
 
     // 这台有 Turbo：派来 20 压成 6；派来 6 还是 6（幂等）
-    CHECK(config::steps_on_node(node, 20, false) == 6);
-    CHECK(config::steps_on_node(node, 6, false) == 6);
+    CHECK(config::steps_on_node(node, 20, false, true) == 6);
+    CHECK(config::steps_on_node(node, 6, false, true) == 6);
     // 人钉死的一律不动
-    CHECK(config::steps_on_node(node, 28, true) == 28);
+    CHECK(config::steps_on_node(node, 28, true, true) == 28);
     // 这台自己的 final_steps 不算数——派来的活听派活那部电影的
     node.tiers.final_steps = 12;
-    CHECK(config::steps_on_node(node, 20, false) == 6);
+    CHECK(config::steps_on_node(node, 20, false, true) == 6);
     // 这台没 Turbo：照派来的跑
     config::Settings bare;
     bare.models.video_lora = "";
-    CHECK(config::steps_on_node(bare, 20, false) == 20);
+    CHECK(config::steps_on_node(bare, 20, false, true) == 20);
     std::filesystem::remove_all(dir);
 }
 

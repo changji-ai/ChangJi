@@ -20,6 +20,7 @@
 #include <string>
 
 #include "util/say.hpp"
+#include "util/text.hpp"
 
 namespace changji::util {
 
@@ -38,7 +39,11 @@ inline std::string chapter_word(const std::string& id,
     std::size_t j = i;
     while (j < id.size() && std::isdigit(static_cast<unsigned char>(id[j]))) j++;
     if (j != id.size()) return id;             // 数字后面还挂着别的，认不准
-    return SAYF_TO(to, "第 %1 章", std::to_string(std::stoi(id.substr(i))));
+    // 不用 stoi：「ch99999999999」过得了前面几道（全是数字），stoi 当场
+    // out_of_range（见 text.hpp 的 parse_int_or）。装不下就原样回。
+    const int n = text::parse_int_or(id.substr(i), -1);
+    if (n < 0) return id;
+    return SAYF_TO(to, "第 %1 章", std::to_string(n));
 }
 
 /// 这串字是不是一个章的键（`ep01` / `ch12`）。

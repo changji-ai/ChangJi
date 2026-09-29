@@ -1,6 +1,7 @@
 #include "setup/autostart.hpp"
 
 #include <fstream>
+#include <string_view>
 #include <system_error>
 
 #include "util/paths.hpp"
@@ -48,6 +49,51 @@ std::string quoted(const fs::path& p) {
 
 fs::path autostart_file_path() { return autostart_dir() / file_name(); }
 
+namespace {
+
+/// plist 里的一段字：`&`、`<`、`>` 要转义。路径里有一个 `&`（「Tom & Jerry」那种
+/// 用户名、目录名）整份 plist 就不合法，launchd 不认，开机起不来而且没人看得见。
+[[maybe_unused]] std::string xml_text(const std::string& s) {
+    std::string out;
+    for (const char c : s) {
+        if (c == '&') out += "&amp;";
+        else if (c == '<') out += "&lt;";
+        else if (c == '>') out += "&gt;";
+        else out += c;
+    }
+    return out;
+}
+
+/// `.desktop` 里 `Exec=` 的一个参数（freedesktop Desktop Entry 规范）：带空格等保留
+/// 字符的要加双引号，引号里 `"` `` ` `` `$` `\` 前面垫反斜杠；而整行本身又是一个
+/// 字符串值，反斜杠还要再翻一倍；`%` 是字段码，写成 `%%`。原来原样拼：路径里一个
+/// 空格（`/home/x/My Apps/changji`），Exec 就被切成两截，开机起不来。
+[[maybe_unused]] std::string desktop_exec_arg(const std::string& s) {
+    bool need = s.empty();
+    for (const char c : s) {
+        if (std::string_view(" \t\n\"'\\><~|&;$*?#()`").find(c) != std::string_view::npos) need = true;
+    }
+    std::string inner;
+    for (const char c : s) {
+        if (c == '%') {
+            inner += "%%";
+            continue;
+        }
+        if (need && (c == '"' || c == '`' || c == '$' || c == '\\')) inner += '\\';
+        inner += c;
+    }
+    if (need) inner = "\"" + inner + "\"";
+    // 字符串值那一层：反斜杠翻倍。
+    std::string out;
+    for (const char c : inner) {
+        if (c == '\\') out += "\\\\";
+        else out += c;
+    }
+    return out;
+}
+
+}  // namespace
+
 std::string autostart_file_body(const fs::path& exe, int port) {
     const std::string p = std::to_string(port);
 #if defined(_WIN32)
@@ -72,7 +118,7 @@ std::string autostart_file_body(const fs::path& exe, int port) {
         "  <key>Label</key><string>com.changji.server</string>\n"
         "  <key>ProgramArguments</key>\n"
         "  <array>\n"
-        "    <string>" + paths::to_utf8(exe) + "</string>\n"
+        "    <string>" + xml_text(paths::to_utf8(exe)) + "</string>\n"
         "    <string>--port</string>\n"
         "    <string>" + p + "</string>\n"
         "  </array>\n"
@@ -93,7 +139,7 @@ std::string autostart_file_body(const fs::path& exe, int port) {
         "Name=changji\n"
         "Comment=" + std::string(SAY_NEVER("场记")) + " · " +
         SAY("AI 电影制作平台") + "\n"
-        "Exec=" + paths::to_utf8(exe) + " --port " + p + "\n"
+        "Exec=" + desktop_exec_arg(paths::to_utf8(exe)) + " --port " + p + "\n"
         // 没有图形界面的机器上也照起：这本来就是个服务。
         "Terminal=false\n"
         "X-GNOME-Autostart-enabled=true\n";
@@ -118,7 +164,7 @@ AutostartResult set_autostart(bool on, int port) {
     AutostartResult r;
     r.state = autostart_status(port);
     if (!r.state.supported) {
-        r.error = SAY("取不到这个程序自己的路径，写不出开机要跑的命令");
+        r.error = SAY("无法获取本程序的路径，无法生成开机启动命令");
         return r;
     }
     const fs::path f = autostart_file_path();
@@ -126,26 +172,26 @@ AutostartResult set_autostart(bool on, int port) {
     if (!on) {
         fs::remove(f, ec);
         if (ec) {
-            r.error = SAYF("删不掉 %1：%2", paths::to_utf8(f), ec.message());
+            r.error = SAYF("无法删除 %1：%2", paths::to_utf8(f), ec.message());
         }
         r.state = autostart_status(port);
         return r;
     }
     fs::create_directories(f.parent_path(), ec);
     if (ec) {
-        r.error = SAYF("建不了 %1：%2", paths::to_utf8(f.parent_path()),
+        r.error = SAYF("无法创建 %1：%2", paths::to_utf8(f.parent_path()),
                        ec.message());
         return r;
     }
     std::ofstream out(f, std::ios::binary | std::ios::trunc);
     if (!out) {
-        r.error = SAYF("写不了 %1", paths::to_utf8(f));
+        r.error = SAYF("无法写入 %1", paths::to_utf8(f));
         return r;
     }
     out << autostart_file_body(paths::self_exe(), port);
     out.close();
     if (!out) {
-        r.error = SAYF("写 %1 的时候出错了", paths::to_utf8(f));
+        r.error = SAYF("写入 %1 时出错", paths::to_utf8(f));
         return r;
     }
     r.state = autostart_status(port);

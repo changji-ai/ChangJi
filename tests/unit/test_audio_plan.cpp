@@ -253,6 +253,35 @@ TEST_CASE("拆镜头：逐个案例和 Python 对上") {
     }
 }
 
+TEST_CASE("配音之后拆出来的新镜：音频是现成的，直接当配好了，时长按自己那几句锁") {
+    // 原来一律标 PLANNED：整章出片接下来的首帧只挑配好音的、出片也不认 PLANNED，
+    // 拆出来的几镜这一轮没首帧没片子，成片里那几句台词整个没了。
+    models::Shot s;
+    s.shot_id = "sh001";
+    s.status = models::ShotStatus::AUDIO_DONE;
+    s.duration_locked = true;
+    s.duration_s = 15.0;   // 配音按全部台词锁的
+    for (int i = 0; i < 3; ++i) {
+        models::DialogueLine l;
+        l.text = "第" + std::to_string(i) + "句";
+        l.actual_duration_s = 4.5;
+        l.audio_path = "audio/sh001_0" + std::to_string(i) + ".wav";
+        l.char_id = "c_lin";
+        s.dialogue.push_back(l);
+    }
+    const auto out = stages::split_overlong_shots({s}, stages::max_line_seconds(24));
+    REQUIRE(out.size() >= 2);
+    for (const auto& o : out) {
+        CAPTURE(o.shot_id);
+        CHECK(o.status == models::ShotStatus::AUDIO_DONE);
+        CHECK(o.duration_locked);
+        double speech = 0.0;
+        for (const auto& l : o.dialogue) speech += *l.actual_duration_s;
+        CHECK(o.duration_s >= speech);
+        CHECK(o.duration_s < 15.0);   // 不再占着整镜所有台词的长度
+    }
+}
+
 TEST_CASE("拆出来的新镜不继承产物") {
     // 继承的话，新镜带着原镜的 frame_path 和 video_path，
     // 流水线看到"已经有产物"就跳过它——成片里那一段是重复的画面。

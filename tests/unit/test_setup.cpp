@@ -665,6 +665,16 @@ TEST_CASE("下全了没改名的 .part 启动时收编") {
         CHECK_FALSE(fs::exists(part));
         CHECK(fs::file_size(dest) == pick->bytes);
     }
+    SUBCASE("字节数对上、aria2 的控制文件还在：没下全，不碰") {
+        // aria2 八路并着写、不预分配：管末尾那一段的连接先下完，文件就已经是全长，
+        // 中间还是洞。它下完会删掉控制文件——还在就是被停、被杀在半路。
+        { std::ofstream(part, std::ios::binary).put('x'); }
+        fs::resize_file(part, pick->bytes);
+        { std::ofstream(fs::path(part) += ".aria2") << "ctrl"; }
+        CHECK(setup::adopt_finished_parts(dir) == 0);
+        CHECK(fs::exists(part));
+        CHECK_FALSE(fs::exists(dest));
+    }
     SUBCASE("少了一个字节：不碰，留给续传") {
         { std::ofstream(part, std::ios::binary).put('x'); }
         fs::resize_file(part, pick->bytes - 1);
@@ -746,6 +756,22 @@ TEST_CASE("开机自启：写出去的那个文件按平台是对的形状") {
     CHECK(path.find(".config/autostart") != std::string::npos);
     CHECK(body.find("[Desktop Entry]") != std::string::npos);
     CHECK(body.find("Type=Application") != std::string::npos);
+#endif
+}
+
+TEST_CASE("开机自启：路径里有空格、&、% 也写得对") {
+#if defined(_WIN32)
+    WARN("Windows 那份按 cmd 的引号写，上一条用例管着");
+#elif defined(__APPLE__)
+    const std::string body = setup::autostart_file_body("/Users/Tom & Jerry/changji", 8080);
+    CHECK(body.find("<string>/Users/Tom &amp; Jerry/changji</string>") != std::string::npos);
+#else
+    // freedesktop 规范：带空格的参数加双引号，引号里 $ ` " \ 垫反斜杠，% 写成 %%；
+    // 整行又是一个字符串值，反斜杠再翻一倍。原来原样拼，一个空格就切成两截。
+    const std::string body = setup::autostart_file_body("/home/x/My Apps/chang$ji%", 8080);
+    CHECK(body.find("Exec=\"/home/x/My Apps/chang\\\\$ji%%\" --port 8080\n") != std::string::npos);
+    const std::string plain = setup::autostart_file_body("/opt/changji/changji", 8080);
+    CHECK(plain.find("Exec=/opt/changji/changji --port 8080\n") != std::string::npos);
 #endif
 }
 
@@ -857,6 +883,17 @@ TEST_CASE("更新检查：取不到、回的不是 JSON、缺字段，三种都�
         cfg, "v1.0.0", [](const std::string&) { return R"({"channel":"release"})"; });
     CHECK_FALSE(nover.newer);
     CHECK_FALSE(nover.error.empty());
+
+    // 某一栏是 null / 数字：原来 value() 抛 type_error，/api/update 每次都 500。
+    const auto nulls = setup::check_update(cfg, "v1.0.0", [](const std::string&) {
+        return R"({"version":"v1.1.0","built_at":null})";
+    });
+    CHECK(nulls.latest == "v1.1.0");
+    CHECK(nulls.built_at.empty());
+    const auto numver = setup::check_update(
+        cfg, "v1.0.0", [](const std::string&) { return R"({"version":110})"; });
+    CHECK_FALSE(numver.newer);
+    CHECK_FALSE(numver.error.empty());
 
     const auto ok = setup::check_update(cfg, "v1.0.0", [](const std::string&) {
         return R"({"version":"v1.1.0","built_at":"2026-09-17T10:00:00Z"})";
@@ -1181,7 +1218,7 @@ TEST_CASE("索引接口：认得的、大小不对的、不认得的，各说各
 
     SUBCASE("目录还不存在：不报错，回一份空的") {
         config::Settings none;
-        none.models.dir = paths::to_utf8(tmp / "没有这个目录");
+        none.models.dir = paths::to_utf8(tmp / paths::from_utf8("没有这个目录"));
         const auto e = http::get_setup_index(none);
         CHECK(e.status == 200);
         CHECK(e.body["exists"] == false);
@@ -1238,6 +1275,49 @@ TEST_CASE("下载器：老位置上已经有的不重下，下了一半的挪到
     CHECK(snap.items[1].state == setup::ItemState::Present);
     CHECK(fs::file_size(tmp / "video" / "half.gguf") == 12);
     CHECK_FALSE(fs::exists(tmp / "half.gguf.part"));
+
+    config::forget_model_index();
+    fs::remove_all(tmp, ec);
+}
+
+TEST_CASE("下载器：全长的 .part 带着 aria2 控制文件，不当成下完了") {
+    if (setup::pick_tool().empty()) {
+        WARN("这台机器上没有 aria2c / curl，下载器起不来，跳过");
+        return;
+    }
+    const fs::path tmp = fs::temp_directory_path() / "changji_dl_holes";
+    std::error_code ec;
+    fs::remove_all(tmp, ec);
+    put_file(tmp / "video" / "holes.gguf.part", 12);
+    { std::ofstream(tmp / "video" / "holes.gguf.part.aria2") << "ctrl"; }
+    // 正式名字上还躺着一份大小不对、不是我们下了一半的：挪到 .old 留着，不接着续。
+    put_file(tmp / "video" / "other.gguf", 7);
+    config::forget_model_index();
+
+    setup::FileSpec f;
+    f.name = "holes.gguf";
+    f.bytes = 12;
+    setup::FileSpec g;
+    g.name = "other.gguf";
+    g.bytes = 12;
+    std::vector<setup::Item> items;
+    items.push_back({"video", "x", f, "video/holes.gguf", "http://127.0.0.1:9/never"});
+    items.push_back({"video", "x", g, "video/other.gguf", "http://127.0.0.1:9/never"});
+    auto& d = setup::Downloader::instance();
+    REQUIRE(d.start(items, tmp, "modelscope", {}));
+    for (int i = 0; i < 600 && d.running(); ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    REQUIRE_FALSE(d.running());
+    // 地址连不上：真去下了，下不成——**不许**把带洞的那份改成正式名字报「有了」。
+    CHECK_FALSE(fs::exists(tmp / "video" / "holes.gguf"));
+    const auto snap = d.snapshot();
+    REQUIRE(snap.items.size() == 2);
+    CHECK(snap.items[0].state != setup::ItemState::Present);
+    CHECK(snap.items[0].state != setup::ItemState::Done);
+    // 人手上那份没被接上别的尾巴、也没被删：原样挪到 .old。
+    CHECK(fs::exists(tmp / "video" / "other.gguf.old"));
+    CHECK(fs::file_size(tmp / "video" / "other.gguf.old") == 7);
 
     config::forget_model_index();
     fs::remove_all(tmp, ec);
@@ -1301,7 +1381,7 @@ TEST_CASE("搬之前数一遍：模型和下到一半的算，日志、点目录
 
     // 同一个目录、不存在的目录：什么都不搬。
     CHECK(setup::plan_move(from, from).files.empty());
-    CHECK(setup::plan_move(from / "没有", from / "new").files.empty());
+    CHECK(setup::plan_move(from / paths::from_utf8("没有"), from / "new").files.empty());
     fs::remove_all(from, ec);
 }
 
@@ -1360,6 +1440,28 @@ TEST_CASE("搬一个文件：改名、复制、叫停、撞名") {
         CHECK_FALSE(fs::exists(tmp / "a" / "w.gguf"));
         CHECK(fs::file_size(tmp / "b" / "w.gguf") == 64);
     }
+    SUBCASE("新目录里一样大、内容不一样（没拷完、先占满了大小的）：两份都不动") {
+        put_file(tmp / "a" / "u.gguf", 64);
+        fs::create_directories(tmp / "b");
+        { std::ofstream(tmp / "b" / "u.gguf", std::ios::binary) << std::string(64, '\0'); }
+        CHECK_FALSE(
+            setup::move_one(tmp / "a" / "u.gguf", tmp / "b" / "u.gguf", {}, nullptr).empty());
+        CHECK(fs::exists(tmp / "a" / "u.gguf"));
+    }
+#ifndef _WIN32
+    SUBCASE("两头是同一个文件（硬链接 / 换了个写法）：什么都不做，不删唯一那一份") {
+        put_file(tmp / "a" / "t.gguf", 64);
+        fs::create_directories(tmp / "b");
+        fs::create_hard_link(tmp / "a" / "t.gguf", tmp / "b" / "t.gguf");
+        CHECK(setup::move_one(tmp / "a" / "t.gguf", tmp / "b" / "t.gguf", {}, nullptr).empty());
+        CHECK(fs::exists(tmp / "b" / "t.gguf"));
+        CHECK(fs::exists(tmp / "a" / "t.gguf"));
+        // 同一个 inode：比的是它，不是字面。再绕一个软链进来也一样。
+        fs::create_directory_symlink(tmp / "a", tmp / "alias");
+        CHECK(setup::move_one(tmp / "a" / "t.gguf", tmp / "alias" / "t.gguf", {}, nullptr).empty());
+        CHECK(fs::exists(tmp / "a" / "t.gguf"));
+    }
+#endif
     SUBCASE("新目录里有同名、大小不一样的：两份都不动，照实说") {
         put_file(tmp / "a" / "v.gguf", 64);
         put_file(tmp / "b" / "v.gguf", 65);

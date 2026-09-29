@@ -563,23 +563,26 @@ TEST_CASE("显存不够时，每个槽要给出各自的出路") {
         for (const Slot s : {Slot::Image, Slot::Video}) {
             const std::string m = out_of_vram_message(s);
             CHECK(m.find("weights") != std::string::npos);
-            CHECK(m.find("清晰度") != std::string::npos);
+            CHECK(m.find("[video].quality") != std::string::npos);
+            // 别叫它「清晰度」：设置 ▸ 出片 ▸ 装配里叫「清晰度」的那一行是 CRF，跟显存无关，
+            // 照着名字去找会调错那一行（2026-09-28）。
+            CHECK(m.find("清晰度") == std::string::npos);
             // 这两个槽没有外部服务可换，别给假出路
             CHECK(m.find("base_url") == std::string::npos);
-            // **清晰度不在设置页了**（2026-09-10 搬到项目页上）。指错地方
+            // **清晰度不在设置页**（2026-09-10 搬到项目页上；项目页 2026-09-26 又删了，
+            // 界面上已经没有改它的地方）。只剩这部片子自己的 changji.toml，指错地方
             // 的话用户会在设置页翻半天，而这句话是他此刻唯一的线索。
-            // 那儿也不叫「画面」卡——项目页上是一行，标题写着「这部电影」。
-            CHECK(m.find("项目页") != std::string::npos);
+            CHECK(m.find("changji.toml") != std::string::npos);
             CHECK(m.find("设置页") == std::string::npos);
-            // **档位名要和下拉框里写的一样。** 界面上是「标准 544×928 · 快」；
-            // 尺寸还跟着画幅翻（竖屏短边×长边，横屏反过来），所以消息里那
-            // 三个数统一按竖屏写、另说一句横屏反过来。
-            // 取值虽然还叫 "720p"（老项目的配置文件里存的就是它），但那个
-            // 字符串不该出现在给人看的话里——2026-09-10 画幅改成 544×928
-            // 之后，叫 720p 就是假的，用户会在那张卡上找一个不存在的选项。
-            CHECK(m.find("标准") != std::string::npos);
-            CHECK(m.find("544") != std::string::npos);
-            CHECK(m.find("720p") == std::string::npos);
+            // **指到配置文件上，就写文件里认的取值。** 原来指的是下拉框，写的是档位名
+            //（「标准」「高清」），那时候 "720p" 不该出现在给人看的话里；下拉框 2026-09-26
+            // 跟项目页一起没了，现在只能改 changji.toml，而 settings.cpp 只认
+            // "720p" / "hd" / "2k"——照着「标准」去填会读不进去。每个取值后面跟着
+            // 真尺寸（竖屏短边×长边，另说一句横屏反过来），"720p" 就不会被读成 720 行。
+            CHECK(m.find("\"720p\"（544×928）") != std::string::npos);
+            CHECK(m.find("\"hd\"（704×1280）") != std::string::npos);
+            CHECK(m.find("\"2k\"（1440×2560）") != std::string::npos);
+            CHECK(m.find("标准") == std::string::npos);
         }
     }
     SUBCASE("每一条都得先说清是哪个槽") {
@@ -1605,4 +1608,67 @@ TEST_CASE("多语言 · 槽名：键不动，话跟着换") {
         CHECK(m.find(slot_label(s)) != std::string::npos);
         CHECK(m.find(key_zh) == std::string::npos);
     }
+}
+
+// ---- 闲多久就卸（2026-09-27，用户问「本地模型显存什么时候释放」） ----
+//
+// 原来本地编剧模型装上就一直占着显存：写完一章、对话换成云端那一家，它还在卡上。
+// 现在按 `SlotSpec::keep_alive` 闲卸：N 秒 / 0（还回来就卸）/ 空（一直留着）。
+
+TEST_CASE("闲卸：闲满 keep_alive 才卸，正借着的不卸，空的一直留着") {
+    using namespace std::chrono_literals;
+    Scheduler s;
+    FakeModel llm;
+    SlotSpec spec = spec_for(Slot::LLM, llm, 4 * GB, 0);
+    std::optional<std::chrono::seconds> ka = 300s;
+    spec.keep_alive = [&ka] { return ka; };
+    s.register_slot(spec);
+
+    const auto t0 = std::chrono::steady_clock::now();
+    {
+        auto lease = s.acquire(Slot::LLM);
+        // 正在用：到点了也不卸，也不报倒计时
+        CHECK(s.reap_idle(t0 + 3600s) == 0);
+        CHECK(s.loaded(Slot::LLM));
+        CHECK_FALSE(s.slot_state(Slot::LLM).release_in_s.has_value());
+    }
+    const auto back = std::chrono::steady_clock::now();
+    // 还回来了：倒计时从还回来那一刻算
+    const auto st = s.slot_state(Slot::LLM, back + 60s);
+    CHECK(st.loaded);
+    REQUIRE(st.release_in_s.has_value());
+    CHECK(*st.release_in_s <= 240.5);
+    CHECK(*st.release_in_s >= 239.0);
+    CHECK(s.reap_idle(back + 299s) == 0);
+    CHECK(s.loaded(Slot::LLM));
+    CHECK(s.reap_idle(back + 301s) == 1);
+    CHECK_FALSE(s.loaded(Slot::LLM));
+    CHECK(llm.unloads == 1);
+
+    // 空 = 一直留着（原来的样子）
+    ka = std::nullopt;
+    { auto lease = s.acquire(Slot::LLM); }
+    CHECK(s.reap_idle(std::chrono::steady_clock::now() + 100000s) == 0);
+    CHECK(s.loaded(Slot::LLM));
+    CHECK_FALSE(s.slot_state(Slot::LLM).release_in_s.has_value());
+
+    // 0 = 最后一个借用还回来就卸
+    ka = 0s;
+    {
+        auto a = s.acquire(Slot::LLM);
+        auto b = s.acquire(Slot::LLM);
+        a.release();
+        CHECK(s.loaded(Slot::LLM));   // 还有一个在用
+    }
+    CHECK_FALSE(s.loaded(Slot::LLM));
+}
+
+TEST_CASE("闲卸：没设 keep_alive 的槽（出图出片）照旧只在腾地方时才卸") {
+    using namespace std::chrono_literals;
+    Scheduler s;
+    FakeModel img;
+    s.register_slot(spec_for(Slot::Image, img, 4 * GB, 5));
+    { auto lease = s.acquire(Slot::Image); }
+    CHECK(s.reap_idle(std::chrono::steady_clock::now() + 100000s) == 0);
+    CHECK(s.loaded(Slot::Image));
 }

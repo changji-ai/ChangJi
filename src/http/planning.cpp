@@ -1,4 +1,6 @@
 #include "http/planning.hpp"
+#include "http/run.hpp"
+#include "http/episodes.hpp"
 #include "config/runtime.hpp"
 
 #include <algorithm>
@@ -14,6 +16,7 @@
 #include "pipeline/activity.hpp"
 #include "pipeline/storyboard_run.hpp"
 #include "stages/bible.hpp"
+#include "stages/story_analyze.hpp"
 #include "stages/storyboard.hpp"
 #include "util/paths.hpp"
 #include "util/say.hpp"
@@ -28,7 +31,7 @@ namespace {
 using namespace changji::models;
 
 void forbid_extra(const json& body, const std::set<std::string>& allowed) {
-    if (!body.is_object()) throw ApiError(400, SAY("请求体要是一个对象"));
+    if (!body.is_object()) throw ApiError(400, SAY("请求体须为 JSON 对象"));
     for (const auto& kv : body.items()) {
         // **`stream` 一律放行。** 它是传输层的信封字段，不是业务字段：
         // 路由那一层（script_route / batch_route）拿它决定这件活挪不挪到
@@ -368,12 +371,36 @@ ApiResult post_assets_dedupe(const json& body) {
 
     const int before_l = static_cast<int>(assets.locations.size());
     const int before_c = static_cast<int>(assets.characters.size());
+
+    // **故事那份地方名单也收成一份**（2026-09-27）：大纲一份、理解一份，同一个地方
+    // 两个叫法（「城西人才市场」/「人才市场大厅」）的并成一条、章节里的引用跟着改；
+    // 资产里叫别名的场景改回名单上的名字，下面按名字去重就把它们收拢了。没有故事
+    //（只有剧本的项目）就只收资产那半。同样**不叫模型**。
+    int story_merged = 0;
+    int renamed = 0;
+    {
+        std::vector<std::string> canon;
+        try {
+            Story story = store.load_story();
+            const std::size_t before = story.locations.size();
+            stages::unify_story_locations(story);
+            story_merged = static_cast<int>(before - story.locations.size());
+            if (story_merged > 0) store.save_story(story);
+            for (const auto& l : story.locations) canon.push_back(l.name);
+        } catch (const std::exception&) {
+            // 没有 story.json：照旧只收资产。
+        }
+        if (!canon.empty()) renamed = stages::canonicalize_location_names(assets, canon);
+    }
+
     const std::set<std::string> in_use = ids_in_use(project);
     IdRemap remap = dedupe_locations(assets, in_use);
     for (const auto& kv : dedupe_characters(assets, in_use)) remap.insert(kv);
     if (remap.empty()) {
+        if (renamed > 0) store.save_assets(assets);
         return {200, {{"merged", 0}, {"remapped_shots", 0},
-                      {"characters", before_c}, {"locations", before_l}}};
+                      {"characters", before_c}, {"locations", before_l},
+                      {"story_merged", story_merged}, {"renamed", renamed}}};
     }
     store.save_assets(assets);
     const int remapped = remap_shots(project, remap);
@@ -388,6 +415,9 @@ ApiResult post_assets_dedupe(const json& body) {
         {"locations", static_cast<int>(assets.locations.size())},
         // 谁并进了谁。界面上不显示，但排障时"那个 id 去哪了"就靠它
         {"dropped", dropped},
+        // 故事那份名单收掉几条、资产名改回几条（见上面那段）
+        {"story_merged", story_merged},
+        {"renamed", renamed},
     }};
 }
 
@@ -413,7 +443,7 @@ ApiResult post_bible(const json& body, llm::Client& client,
     // 另一头的活会挂在「显存不够加载 LLM」上却查不到挡路的是谁。
     // 见 pipeline/activity.hpp 开头那段。放在这儿盖住下面两条分支。
     pipeline::Activity act{"bible", paths::to_utf8(store.root()), episode_id,
-                           SAY("正在定角色和场景")};
+                           SAY("正在确定角色和场景")};
     const pipeline::CancelLink stop_here{tok, act};
 
     // 名单从哪来。默认看项目里有没有故事——有就从故事出，那份名单是全片
@@ -470,18 +500,31 @@ ApiResult post_plan(const json& body, llm::Client& client,
     // 注意这里**没有** forbid_extra。Python 的 PlanRequest 没写
     // model_config = {"extra": "forbid"}，pydantic 默认是忽略多余字段。
     // 加上校验就会拒掉 Python 能接受的请求。
-    const bool peek = body.is_object() && body.value("peek", false);
+    const bool peek = field_bool(body, "peek", false);
     const std::string pasted =
-        body.is_object() ? body.value("paste", std::string()) : std::string();
+        field_str(body, "paste");
     const std::string script = text::strip_ws(need_str(body, "script"));
     if (script.empty()) throw ApiError(400, SAY("剧本是空的"));
 
     const std::string episode_id = opt_str(body, "episode_id", "ep01");
+    // 没有这一章时下面会照这个号**新建**一章，而章号会拼进出图出片的文件名
+    //（2026-09-25 审出来：`../../../tmp/x` 能一路写到项目目录外面）。
+    if (!is_valid_episode_id(episode_id)) {
+        throw ApiError(400, SAY("章节 id 只能用小写字母、数字和下划线"));
+    }
     const double duration_s = opt_num(body, "duration_s", 60.0);
     const bool regenerate = opt_bool(body, "regenerate_bible", false);
     int placed_lines = 0;
 
     ProjectStore store = open_project(body);
+    // 新建的那一章（没有这一章时下面照这个号建）还不许长成 `<别的id>_NN`，见
+    // is_new_episode_id_ok。**拆镜头之前判**：那一趟要一到几分钟。
+    if (store.load_project().episode_by_id(episode_id) == nullptr &&
+        !is_new_episode_id_ok(episode_id)) {
+        throw ApiError(400, SAY("章节 id 不能以「下划线加两位数字」结尾（会和成片的文件名撞上）"));
+    }
+    // 这一章正在出片就别拆（出片那一轮会把新表冲回旧的），见 refuse_replan_while_rendering。
+    refuse_replan_while_rendering(paths::to_utf8(store.root()), episode_id);
     Project project = load_or_400(store);
     AssetLibrary assets = load_assets_or_400(store);
 
@@ -489,24 +532,30 @@ ApiResult post_plan(const json& body, llm::Client& client,
     // 出分镜这一次点击底下可能要跑两趟模型（先补圣经再拆镜头），
     // 对用户那是一件事，中途只换那句话。
     pipeline::Activity act{"plan", paths::to_utf8(store.root()), episode_id,
-                           SAY("正在拆镜头")};
+                           SAY("正在拆分镜头")};
     const pipeline::CancelLink stop_here{tok, act};
 
     // 角色设定。已有就不重做，避免覆盖用户改过的设定。
     if (regenerate || assets.characters.empty()) {
-        act.set_message(SAY("正在定角色和场景"));
+        act.set_message(SAY("正在确定角色和场景"));
         // 有故事就从故事出——名单是全片完整的，不是从这一章里找出来的。
         const Story story = load_story_or_400(store);
         // 比例由画幅派生，理由同 post_bible 里那一段。
         const std::string ratio =
             config::load_settings(store.root()).video.aspect_ratio();
-        assets = story.chapters.empty()
-                     ? generate_bible(script, project.style_line, ratio, client,
-                                      tok)
-                     : generate_bible_from_story(story, project.style_line,
-                                                 ratio, client, tok);
-        store.save_assets(assets);
-        act.set_message(SAY("正在拆镜头"));
+        const AssetLibrary fresh =
+            story.chapters.empty()
+                ? generate_bible(script, project.style_line, ratio, client, tok)
+                : generate_bible_from_story(story, project.style_line, ratio,
+                                            client, tok);
+        // **合并进去，不是整份盖掉。** 这里原来是 `store.save_assets(fresh)`，
+        // 不加锁、拿大模型跑之前的那一刻当底——而出一次圣经要一分钟往上，这一
+        // 分钟里抽屉改的外观、传的参考图、配的音色全落在 assets.json 上，存
+        // 下去一声不响全没了；新 id 还把已有的镜头指空（2026-09-25 审出来）。
+        // post_bible 那条路早就走 merge_bible：锁里现读、同名留旧 id。
+        merge_bible(store, fresh, /*overwrite=*/regenerate, "script");
+        assets = load_assets_or_400(store);
+        act.set_message(SAY("正在拆分镜头"));
     }
 
     // 单镜的时长档位是这部电影的属性（[video].max_shot_s），按项目那份设置
@@ -523,6 +572,7 @@ ApiResult post_plan(const json& body, llm::Client& client,
     sb.on_thinking = thinking_sink();
     sb.on_progress = [&act](const std::string& m) { act.set_message(m); };
     sb.peek = peek;
+    sb.parts_file = pipeline::storyboard_parts_path(store.root(), episode_id);   // 拆好的场先留底，断了接着拆
     if (!pasted.empty()) {
         sb.pasted = split_by_scene(pasted);
         // **数量对不上就当场说，别硬跑。** 少一段的话后面几场整体错位

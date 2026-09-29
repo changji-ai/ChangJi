@@ -1,6 +1,10 @@
 #include "llm/local_client.hpp"
 
 #include <atomic>
+#include <map>
+#include <cctype>
+#include <chrono>
+#include <thread>
 #include <cstdio>
 #include <filesystem>
 #include <mutex>
@@ -20,6 +24,7 @@
 #include "util/paths.hpp"
 #include "util/say.hpp"
 #include "util/text.hpp"
+#include "setup/catalog.hpp"
 
 namespace changji::llm {
 
@@ -27,6 +32,62 @@ namespace {
 
 std::mutex g_mu;
 std::shared_ptr<infer::LlamaChat> g_chat;
+/// 装着的是哪一份。**一条对话可以单独挑一份**（`LLMConfig::local_weights`），
+/// 借槽之前比一下，不是同一份就先换。
+std::filesystem::path g_loaded;
+
+/// 这条线程借槽时要哪一份。调度器是在借槽的那条线程上调 `load` 的
+/// （`Scheduler::acquire`），所以挂在线程上就能精确地交给它，不会被别的
+/// 对话同时借槽时改掉。空 = 配置里 `[models].llm` 那一份。
+thread_local std::filesystem::path t_want;
+
+std::filesystem::path configured_weights(const config::Settings& s) {
+    return s.models.resolve(s.models.llm, s.workspace_path());
+}
+
+/// 这一次要装哪一份：对话挑的，没挑就是配置里那一份。
+std::filesystem::path wanted_weights(const config::LLMConfig& cfg,
+                                     const config::Settings& s) {
+    return cfg.local_weights.empty() ? configured_weights(s)
+                                     : paths::from_utf8(cfg.local_weights);
+}
+
+std::filesystem::path loaded_weights() {
+    std::lock_guard lg(g_mu);
+    return g_chat ? g_loaded : std::filesystem::path();
+}
+
+/// 借到的槽上装着的是 `want` 那一份。
+///
+/// **两条对话挑了两份不同的权重**时：装着的是别的那份、而且那边还在用，就等它
+/// 用完（驱逐不动正在借着的槽）；没人用就卸掉、按这边要的重装。借到之后再核
+/// 一遍——卸掉到借到之间另一条对话可能抢先装了它那份。
+infer::Lease lease_weights(const std::filesystem::path& want,
+                                      const infer::Scheduler::AcquireOptions& opt,
+                                      pipeline::CancelToken& tok) {
+    using namespace std::chrono_literals;
+    const auto deadline = std::chrono::steady_clock::now() + infer::kAcquireWait;
+    for (;;) {
+        if (tok.cancelled()) throw LlmError(util::kCancelled);
+        const auto have = loaded_weights();
+        if (!have.empty() && have != want) infer::scheduler().evict(infer::Slot::LLM);
+        struct Want {
+            explicit Want(const std::filesystem::path& p) { t_want = p; }
+            ~Want() { t_want.clear(); }
+        };
+        auto lease = [&] {
+            const Want w{want};
+            return infer::scheduler().acquire(infer::Slot::LLM, opt);
+        }();
+        if (loaded_weights() == want) return lease;
+        lease.release();
+        if (std::chrono::steady_clock::now() > deadline) {
+            throw LlmError(SAY("另一条对话正拿着另一份本地模型在写，等了五分钟还没轮到。"
+                               "等它写完再试，或者这条对话换成同一份"));
+        }
+        std::this_thread::sleep_for(500ms);
+    }
+}
 
 std::shared_ptr<infer::LlamaChat> current() {
     std::lock_guard lg(g_mu);
@@ -35,21 +96,20 @@ std::shared_ptr<infer::LlamaChat> current() {
 
 /// 开一份记录器，构造失败就当作没开日志往下走。理由同 client.cpp 里那个
 /// 同名函数（「构造这一下抛了，也不许把这一次生成带走」）。
-std::optional<CallLog> open_call_log(const Request& req, const config::LLMConfig& cfg) {
+std::optional<CallLog> open_call_log(const Request& req, const config::LLMConfig& cfg,
+                                     const char* kind = "complete_stream") {
     try {
-        return std::optional<CallLog>(std::in_place, "local", "complete_stream", req,
+        return std::optional<CallLog>(std::in_place, "local", kind, req,
                                       call_log_options(cfg));
     } catch (...) {
         CallLogOptions off;
         off.enabled = false;
-        return std::optional<CallLog>(std::in_place, "local", "complete_stream", req,
-                                      off);
+        return std::optional<CallLog>(std::in_place, "local", kind, req, off);
     }
 }
 
 /// 权重文件名（不含目录），日志的 endpoint / model 两栏记它。
-std::string model_label(const config::Settings& s) {
-    const auto p = s.models.resolve(s.models.llm, s.workspace_path());
+std::string model_label(const std::filesystem::path& p) {
     // 这个名字进的是提示词日志的 endpoint / model 两栏，**是账不是话**：
     // 翻了之后同一台机器上前后两段日志对不上。不包 `SAY()`。
     return p.empty() ? std::string(SAY_NEVER("（没填 [models].llm）"))
@@ -87,7 +147,9 @@ std::string LocalClient::complete(const Request& req, pipeline::CancelToken& tok
         // 账上那几栏**先填**，再去借槽：权重载不起来时异常是从借槽那一步
         // 抛出来的，填在后面的话那一行就是一条 endpoint 空、model 空的孤行，
         // 2026-09-19 第一次冒烟就是这么记出来一行 ok=true 的失败。
-        const std::string label = model_label(config::runtime().snapshot());
+        const config::Settings settings = config::runtime().snapshot();
+        const std::filesystem::path want = wanted_weights(cfg, settings);
+        const std::string label = model_label(want);
         const double temperature =
             req.temperature.value_or(cfg.temperature_for(req.schema_name));
         log.set_endpoint("local:" + label);
@@ -106,7 +168,9 @@ std::string LocalClient::complete(const Request& req, pipeline::CancelToken& tok
         infer::Scheduler::AcquireOptions opt;
         opt.wait = infer::kAcquireWait;
         opt.on_queued = pipeline::note_queued;
-        auto lease = infer::scheduler().acquire(infer::Slot::LLM, opt);
+        // 全局配的是远端、这条对话单独挑了本地的时候，槽还没挂上。
+        ensure_llm_slot();
+        auto lease = lease_weights(want, opt, tok);
         auto chat = current();
         if (!chat) throw LlmError(SAY("大模型没准备好（槽借到了但上下文是空的）"));
 
@@ -174,14 +238,116 @@ std::string LocalClient::complete(const Request& req, pipeline::CancelToken& tok
     }
 }
 
+ChatReply LocalClient::chat(const std::vector<Message>& messages,
+                            const nlohmann::ordered_json& tools, const Request& opts,
+                            pipeline::CancelToken& tok) {
+    const config::LLMConfig cfg = cfg_();
+    auto log_box = open_call_log(opts, cfg, "chat_stream");
+    CallLog& log = *log_box;
+    try {
+        if (tok.cancelled()) throw LlmError(util::kCancelled);
+        const config::Settings settings = config::runtime().snapshot();
+        const std::filesystem::path want = wanted_weights(cfg, settings);
+        const std::string label = model_label(want);
+        const double temperature =
+            opts.temperature.value_or(cfg.temperature_for(opts.schema_name));
+        const std::string effort =
+            opts.reasoning_effort.empty() ? cfg.effort_for(opts.schema_name) : opts.reasoning_effort;
+        log.set_endpoint("local:" + label);
+        log.set_model(label, temperature, effort);
+        log.set_tools(tools);
+
+        // ---- 换成 LlamaChat 认的形状 ----
+        //
+        // tool 那一条要带工具名（有的模板按名字写回话）：从前面那条 assistant 的
+        // tool_calls 里按 id 找回来。
+        std::vector<infer::ChatMsg> msgs;
+        std::map<std::string, std::string> name_of;
+        std::string shown;   // 记账用：整段来回拼成一段字
+        for (const auto& m : messages) {
+            infer::ChatMsg cm;
+            cm.role = m.role;
+            cm.content = m.content;
+            cm.tool_call_id = m.tool_call_id;
+            for (const auto& c : m.tool_calls) {
+                cm.calls.push_back({c.id, c.name, c.arguments});
+                name_of[c.id] = c.name;
+            }
+            if (m.role == "tool") {
+                const auto it = name_of.find(m.tool_call_id);
+                if (it != name_of.end()) cm.tool_name = it->second;
+            }
+            shown += "[" + m.role + "] " + m.content + '\n';
+            msgs.push_back(std::move(cm));
+        }
+        log.set_prompt(shown);
+        std::vector<infer::ChatTool> defs;
+        if (tools.is_array()) {
+            for (const auto& t : tools) {
+                const auto& f = t.contains("function") ? t.at("function") : t;
+                if (!f.is_object() || !f.contains("name")) continue;
+                defs.push_back({f.value("name", std::string()),
+                                f.value("description", std::string()),
+                                f.contains("parameters") ? f.at("parameters").dump()
+                                                         : std::string("{}")});
+            }
+        }
+
+        ensure_llm_slot();
+        infer::Scheduler::AcquireOptions opt;
+        opt.wait = infer::kAcquireWait;
+        opt.on_queued = pipeline::note_queued;
+        auto lease = lease_weights(want, opt, tok);
+        auto chat = current();
+        if (!chat) throw LlmError(SAY("大模型没准备好（槽借到了但上下文是空的）"));
+
+        infer::ChatRun run;
+        run.temperature = temperature;
+        // 「不要想」那一档在本地就是关思考（模板认 enable_thinking 的话）。
+        run.thinking = cfg.thinking && effort != "off";
+        run.on_thinking = [&](const std::string& piece) {
+            log.append_thinking(piece);
+            if (opts.on_thinking) opts.on_thinking(piece);
+        };
+        run.on_piece = [&](const std::string& piece) {
+            log.mark_first_token();
+            if (opts.on_token) opts.on_token(piece);
+        };
+
+        infer::ChatAnswer ans;
+        std::string why;
+        bool truncated = false;
+        if (!chat->converse(msgs, defs, run, tok, ans, why, truncated)) {
+            throw LlmError(SAYF("进程内大模型失败：%1", why));
+        }
+        if (tok.cancelled()) throw LlmError(util::kCancelled);
+
+        ChatReply reply;
+        reply.content = text::sanitize_utf8(ans.content);
+        for (const auto& c : ans.calls) reply.tool_calls.push_back({c.id, c.name, c.arguments});
+        reply.finish_reason = !reply.tool_calls.empty() ? "tool_calls"
+                              : truncated               ? "length"
+                                                        : "stop";
+        log.set_finish_reason(reply.finish_reason);
+        log.set_reply(reply.content);
+        return reply;
+    } catch (const LlmError& e) {
+        log.fail(e.what(), e.status());
+        throw;
+    } catch (const std::exception& e) {
+        log.fail(e.what(), 0);
+        throw LlmError(SAYF("进程内大模型：%1", e.what()));
+    }
+}
+
 std::shared_ptr<Client> make_local_client(ConfigProvider cfg) {
     if (!infer::llama_chat_available()) return nullptr;
     return std::make_shared<LocalClient>(std::move(cfg));
 }
 
 void register_llm_slot(std::function<config::Settings()> provider,
-                       const models::HardwareProfile& profile) {
-    if (provider().llm.backend != "local") return;
+                       const models::HardwareProfile& profile, bool even_if_remote) {
+    if (!even_if_remote && provider().llm.backend != "local") return;
     if (!infer::llama_chat_available()) return;   // 装不上的槽不注册，理由见头文件
     // **一个进程只注册一次。** 起服务时注册一次，之后在模型窗里切来切去
     // 会再叫到这儿（config_api / server 那两处）；权重换了也不用重注册——
@@ -208,7 +374,7 @@ void register_llm_slot(std::function<config::Settings()> provider,
     spec.live_vram = [provider]() -> std::size_t {
         const config::Settings s = provider();
         std::error_code ec;
-        const auto p = s.models.resolve(s.models.llm, s.workspace_path());
+        const auto p = t_want.empty() ? configured_weights(s) : t_want;
         const auto bytes = p.empty() ? 0 : std::filesystem::file_size(p, ec);
         const double model_gb = (!ec && bytes > 0)
                                     ? static_cast<double>(bytes) / (1024.0 * 1024 * 1024)
@@ -219,9 +385,15 @@ void register_llm_slot(std::function<config::Settings()> provider,
     // **优先级最低，腾地方时先卸它。** 写一章只跑一次，
     // 出图出片每镜都要——重装大模型的代价摊在一章上，比每镜重装小得多。
     spec.evict_priority = 1;
+    // **闲多久就卸**：每次现问（人在设置里改了分钟数，下一拍就按新的算）。
+    spec.keep_alive = [provider]() -> std::optional<std::chrono::seconds> {
+        const double m = provider().llm.keep_alive_minutes;
+        if (m < 0) return std::nullopt;
+        return std::chrono::seconds(static_cast<long long>(m * 60));
+    };
     spec.load = [provider] {
         const config::Settings s = provider();
-        const auto path = s.models.resolve(s.models.llm, s.workspace_path());
+        const auto path = t_want.empty() ? configured_weights(s) : t_want;
         // **装之前先记一眼显存。** 装完再记一次，差值就是这份权重实际
         // 占了多少——比"总量减空闲"准得多，那个会把别的槽的账也算进来。
         //
@@ -274,12 +446,49 @@ void register_llm_slot(std::function<config::Settings()> provider,
         }
         std::lock_guard lg(g_mu);
         g_chat = std::move(chat);
+        g_loaded = path;
     };
     spec.unload = [] {
         std::lock_guard lg(g_mu);
         g_chat.reset();
+        g_loaded.clear();
     };
     infer::scheduler().register_slot(std::move(spec));
+}
+
+std::string loaded_llm_file() {
+    std::lock_guard lg(g_mu);
+    return g_chat ? paths::to_utf8(g_loaded) : std::string();
+}
+
+void ensure_llm_slot() {
+    if (!infer::llama_chat_available()) return;
+    register_llm_slot([] { return config::runtime().snapshot(); }, config::runtime().profile(),
+                      /*even_if_remote=*/true);
+}
+
+bool is_llm_weights(const std::string& rel, std::uint64_t bytes) {
+    const std::filesystem::path p = paths::from_utf8(rel);
+    std::string ext = paths::to_utf8(p.extension());
+    for (auto& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    if (ext != ".gguf") return false;
+    const std::string name = paths::to_utf8(p.filename());
+    std::string lower = name;
+    for (auto& c : lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    if (lower.find("mmproj") != std::string::npos) return false;
+    // 清单里编剧那一组的文件：**大小要对上**，下到一半的不算。
+    for (const auto& g : setup::catalog()) {
+        if (g.key != "llm") continue;
+        for (const auto& o : g.options) {
+            for (const auto& f : o.files) {
+                if (paths::to_utf8(paths::from_utf8(f.name).filename()) != name) continue;
+                return f.bytes == 0 || bytes == f.bytes;
+            }
+        }
+    }
+    // 人自己放进 `llm/` 的：认。别的目录里的 gguf 多半是出片、出图那几组的编码器
+    // （Qwen2.5-VL、umt5 那些），挑进来当编剧会写出一堆乱码。
+    return rel.rfind("llm/", 0) == 0;
 }
 
 }  // namespace changji::llm

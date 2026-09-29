@@ -38,6 +38,39 @@ std::uint64_t file_size_or_zero(const fs::path& p) {
     return ec ? 0 : static_cast<std::uint64_t>(n);
 }
 
+/// aria2 的控制文件（`<文件>.aria2`）。它在，那个文件就还没下完。
+fs::path aria2_ctrl(const fs::path& p) {
+    fs::path c = p;
+    c += ".aria2";
+    return c;
+}
+
+bool has_aria2_ctrl(const fs::path& p) {
+    std::error_code ec;
+    return fs::exists(aria2_ctrl(p), ec);
+}
+
+/// 一个 `.part` 是不是**真下全了**。字节数对上还不够：aria2 八路并着写、不预分配，
+/// 管文件末尾那一段的连接先下完，文件就已经是全长——中间还是一个个没写的洞（读出来
+/// 是零）。它下完会自己删掉控制文件，所以**控制文件还在就是没下全**。原来只比字节
+/// 数：半截被停、被杀（装新版时安装包会关掉它）、重试用完的那一份，下一次启动就被
+/// 改成正式名字、当成品用，加载时报的是「权重读不对」。
+bool part_complete(const fs::path& part, std::uint64_t want) {
+    return want > 0 && file_size_or_zero(part) == want && !has_aria2_ctrl(part);
+}
+
+/// 正式名字上躺着一个**大小不对**、又没有证据是我们自己下了一半的文件（没有 aria2
+/// 控制文件）：挪到 `<名字>.old`，不接着续。原来当它是我们的半截，挪去 `.part` 接着
+/// 续——目录换了一版（大小变了）的话，人手上那份旧版本要么被接上新版的后半截（拼出
+/// 来的文件大小正好对，校验照过），要么比新版大、在还没下到替换品之前就被删了。
+void set_aside(const fs::path& file) {
+    fs::path old = file;
+    old += ".old";
+    std::error_code ec;
+    fs::remove(old, ec);
+    fs::rename(file, old, ec);
+}
+
 /// 读文件末尾的一段。日志会长到几 MB，每次全读一遍太浪费。
 std::string tail_of(const fs::path& p, std::size_t bytes) {
     std::ifstream in(p, std::ios::binary);
@@ -262,7 +295,7 @@ std::size_t adopt_finished_parts(const fs::path& models_dir) {
                     const fs::path dest = models_dir / paths::from_utf8(rel);
                     const fs::path part =
                         dest.parent_path() / (paths::to_utf8(dest.filename()) + ".part");
-                    if (file_size_or_zero(part) != f.bytes) continue;
+                    if (!part_complete(part, f.bytes)) continue;
                     if (file_size_or_zero(dest) == f.bytes) {
                         // 正式的那份也全：`.part` 是多余的，扔掉
                         std::error_code rm;
@@ -342,16 +375,16 @@ void Downloader::run(std::vector<Item> items, fs::path dir,
         // **说清楚装什么，而不是"没有下载器"。** 这台机器上一个都没有是
         // 罕见情况，碰上的人多半也不知道该装哪个。
         fatal =
-            SAY("这台机器上没找到下载器。装一个就行：\n"
-                "  Windows：winget install aria2.aria2（或者用系统自带的 curl，"
-                "重开一个终端让 PATH 生效）\n"
+            SAY("本机未找到下载工具，请安装：\n"
+                "  Windows：winget install aria2.aria2（或使用系统自带的 curl，"
+                "重新打开终端使 PATH 生效）\n"
                 "  Debian/Ubuntu：apt-get install -y aria2\n"
                 "  macOS：brew install aria2");
     } else {
         std::error_code ec;
         fs::create_directories(dir, ec);
         if (ec) {
-            fatal = SAYF("建不了模型目录 %1：%2", paths::to_utf8(dir),
+            fatal = SAYF("无法创建模型目录 %1：%2", paths::to_utf8(dir),
                          ec.message());
         }
     }
@@ -416,8 +449,7 @@ void Downloader::run(std::vector<Item> items, fs::path dir,
                         [](const ItemProgress& p) { return p.state == ItemState::Failed; });
         snap_.state = any_failed ? RunState::Failed : RunState::Done;
         if (any_failed) {
-            snap_.error = SAY("有文件没下下来，看下面每一项的说明。"
-                              "重来一次会从断点接着下。");
+            snap_.error = SAY("部分文件下载失败，详见下方各项说明。重新下载将从断点继续。");
         }
     }
     snap_.speed_bps = 0.0;
@@ -495,8 +527,9 @@ bool Downloader::fetch_one(const Item& item, const fs::path& dir, const fs::path
             fs::path from;
             if (file_size_or_zero(old_part) > 0) {
                 from = old_part;
-            } else if (const auto n = file_size_or_zero(old); n > 0 && n < want) {
-                // 更老的版本连 `.part` 都没有，半截就躺在正式名字上。
+            } else if (const auto n = file_size_or_zero(old); n > 0 && n < want && has_aria2_ctrl(old)) {
+                // 更老的版本连 `.part` 都没有，半截就躺在正式名字上。**有控制文件
+                // 才算是我们的半截**（见 set_aside）；没有的不碰，下面按大小不对处理。
                 from = old;
             }
             if (!from.empty()) {
@@ -518,7 +551,7 @@ bool Downloader::fetch_one(const Item& item, const fs::path& dir, const fs::path
 
     // `.part` 已经下全了、只差改名（上一轮父进程被杀，见
     // adopt_finished_parts）：改个名就是了，一个字节都不用再下。
-    if (want > 0 && file_size_or_zero(part) == want) {
+    if (part_complete(part, want)) {
         std::error_code mv;
         fs::rename(part, dest, mv);
         if (!mv) {
@@ -536,7 +569,7 @@ bool Downloader::fetch_one(const Item& item, const fs::path& dir, const fs::path
     if (ec) {
         set([&](ItemProgress& p) {
             p.state = ItemState::Failed;
-            p.error = SAYF("建不了目录 %1：%2",
+            p.error = SAYF("无法创建目录 %1：%2",
                            paths::to_utf8(dest.parent_path()), ec.message());
         });
         return false;
@@ -565,9 +598,22 @@ bool Downloader::fetch_one(const Item& item, const fs::path& dir, const fs::path
         // 旧版本（或这一版修好之前）留下的半截文件就躺在正式名字上。
         // 挪到 `.part` 去：续传接得上，而那个会骗人的 `exists` 当场消失。
         if (const auto here = file_size_or_zero(dest); here > 0 && here != want) {
-            std::error_code mv;
-            fs::rename(dest, part, mv);
-            if (mv) fs::remove(dest, mv);
+            if (has_aria2_ctrl(dest) && file_size_or_zero(part) == 0) {
+                // 我们自己下了一半的（控制文件跟着挪，aria2 才认得出续传）。
+                std::error_code mv;
+                fs::rename(dest, part, mv);
+                if (!mv) fs::rename(aria2_ctrl(dest), aria2_ctrl(part), mv);
+            } else {
+                set_aside(dest);
+            }
+        }
+
+        // aria2 下了一半的 `.part` 只有 aria2 接得上：curl 的 `-C -` 从文件长度往后
+        // 接，而那份文件可能已经是全长、中间是洞——接上去什么都不下，洞一直在。
+        if (tool != "aria2c" && has_aria2_ctrl(part)) {
+            std::error_code rm;
+            fs::remove(part, rm);
+            fs::remove(aria2_ctrl(part), rm);
         }
 
         // **比应有的还大就只能重下。**
@@ -587,9 +633,8 @@ bool Downloader::fetch_one(const Item& item, const fs::path& dir, const fs::path
                 fs::remove(part, rm);
                 set([](ItemProgress& p) {
                     p.downloaded = 0;
-                    p.error = SAY("盘上那份比应有的还大（多半是上一轮有两个"
-                                  "下载同时写它），续传接不回来，这一次"
-                                  "从头下。");
+                    p.error = SAY("磁盘上的文件大于应有大小（可能是上次有两个下载同时写入），"
+                                  "无法续传，将重新下载。");
                 });
             }
         }
@@ -613,7 +658,7 @@ bool Downloader::fetch_one(const Item& item, const fs::path& dir, const fs::path
         if (h == 0) {
             set([&](ItemProgress& p) {
                 p.state = ItemState::Failed;
-                p.error = SAYF("起不来 %1。检查它在不在 PATH 上。", tool);
+                p.error = SAYF("无法启动 %1，请检查它是否在 PATH 中。", tool);
             });
             return false;
         }
@@ -702,7 +747,8 @@ bool Downloader::fetch_one(const Item& item, const fs::path& dir, const fs::path
         // **字节数对不上就算没下完。** 下载器退出码为 0 也可能留下截断的
         // 文件（连接被中间设备掐断、镜像返回了一个错误页）。
         // 而截断的权重加载时报的是"读不对"，指向完全错误的方向。
-        if (want == 0 || got == want) {
+        // 对上了也要看 aria2 的控制文件不在了（见 part_complete）。
+        if (want == 0 ? !has_aria2_ctrl(part) : part_complete(part, want)) {
             // 字节数对上了才把它摆到正式名字上——**在这之前，任何人问
             // "这台有没有这个模型"，答案都必须是没有。**
             std::error_code mv;
@@ -711,7 +757,7 @@ bool Downloader::fetch_one(const Item& item, const fs::path& dir, const fs::path
                 set([&](ItemProgress& p) {
                     p.state = ItemState::Failed;
                     p.speed_bps = 0.0;
-                    p.error = SAYF("下全了，但改名失败：%1", mv.message());
+                    p.error = SAYF("下载完成，但重命名失败：%1", mv.message());
                 });
                 return false;
             }
@@ -735,20 +781,21 @@ bool Downloader::fetch_one(const Item& item, const fs::path& dir, const fs::path
                 // 同时写），那时候人该做的是删掉重下，不是去查网络。
                 const bool over = got > want;
                 p.error =
-                    SAYN("下了 %n 字节，应该是 %1。", static_cast<long long>(got),
+                    SAYN("已下载 %n 字节，应为 %1。", static_cast<long long>(got),
                          std::to_string(want)) +
-                    (over ? SAYN("比应有的多 %n 字节——这一份坏了，删掉 .part "
-                                 "重下。",
+                    (over ? SAYN("比应有大小多 %n 字节，文件已损坏，请删除 .part 后重新下载。",
                                  static_cast<long long>(got - want))
-                          : SAYF("试了 %1 次都没下全。",
+                          : SAYF("已尝试 %1 次，仍未下载完整。",
                                  std::to_string(kMaxAttempts))) +
                     (detail.empty() ? std::string{}
-                                    : SAYF("\n下载器最后说：\n%1", detail));
+                                    : SAYF("\n"
+                                           "下载工具的最后输出：\n"
+                                           "%1", detail));
             });
             return false;
         }
         set([&](ItemProgress& p) {
-            p.error = SAYF("第 %1 次没下全，接着续传。",
+            p.error = SAYF("第 %1 次未下载完整，继续续传。",
                            std::to_string(attempt));
         });
     }

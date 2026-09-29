@@ -135,8 +135,18 @@ std::vector<SceneBlock> split_scenes(const std::string& script,
 /// 分隔符认 ·、/、，、、；认不出类别的那一截当地点。
 void parse_scene_body(const std::string& body, SceneBlock& out);
 
-/// 地点名接到资产库：先按名字全等，再按互相包含（「天台」⊂「夜晚天台」），
-/// 多个命中取名字最长的那个。接不上返回空。
+/// 一个地名接到一份名单上：全等 → 互相包含（「天台」⊂「夜晚天台」）→ 名单上的
+/// 名字按顺序落在地名里（「城南酒吧」→「城南深巷小酒吧」）→ 一头接一头
+/// （「城西人才市场」对「人才市场大厅」）。多个命中取最具体的；两个接得一样长就
+/// 不猜。回的是名单上那个名字（去过首尾空白），接不上回空。
+///
+/// **地方名单只有一份，接的判据也只有一份**：场次头接资产库（下面那条）、读故事
+/// 时把模型报的地名归到已有名单上（story_analyze）、去重时把资产名改回名单上的
+/// 名字，走的都是它。
+std::optional<std::string> match_place_name(const std::string& place,
+                                            const std::vector<std::string>& names);
+
+/// 地点名接到资产库：判据同 match_place_name，回的是 location_id。接不上返回空。
 std::optional<std::string> resolve_scene_location(
     const std::string& place, const models::AssetLibrary& assets);
 

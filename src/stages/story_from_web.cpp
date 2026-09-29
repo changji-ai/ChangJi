@@ -17,6 +17,18 @@ using models::StyleLine;
 
 namespace {
 
+/// 取字符串，缺了、是 null、不是字符串都回空串（同 bible.cpp 那一个）。
+///
+/// ⚠️ 原来是 `data.value("source", std::string())`：键**在**而值是 null 时
+/// 它抛 type_error——schema 里 source 是可选的，模型写 `"source": null` 很常见，
+/// 于是几轮上网查资料加整章正文一起作废，报成这一章写砸了（2026-09-25 审出来）。
+std::string get_str(const nlohmann::json& obj, const char* key) {
+    if (!obj.is_object()) return {};
+    const auto it = obj.find(key);
+    if (it == obj.end() || !it->is_string()) return {};
+    return it->get<std::string>();
+}
+
 /// 最后 n 个字（按 UTF-8 字符数），切在字符边界上；截过的前面加省略号。
 std::string tail_chars(const std::string& s, std::size_t n) {
     std::size_t count = 0;
@@ -98,9 +110,9 @@ WebChapter parse_web_chapter(const std::string& raw) {
     }
     if (!data.is_object()) throw StoryError("大模型没有返回对象");
     WebChapter out;
-    out.title = text::clean_field(data.value("title", std::string()));
-    out.source = text::clean_field(data.value("source", std::string()));
-    out.text = text::strip_ws(data.value(kWebChapterBodyField, std::string()));
+    out.title = text::clean_field(get_str(data, "title"));
+    out.source = text::clean_field(get_str(data, "source"));
+    out.text = text::strip_ws(get_str(data, kWebChapterBodyField));
     if (out.text.empty()) throw StoryError("正文是空的");
     return out;
 }
@@ -115,9 +127,9 @@ std::string step_label(const llm::ToolCall& c) {
     }
     if (!args.is_object()) args = nlohmann::json::object();
     if (c.name == "hot_topics") return "在看热搜";
-    if (c.name == "web_search") return "在搜「" + args.value("query", std::string()) + "」";
+    if (c.name == "web_search") return "在搜「" + get_str(args, "query") + "」";
     if (c.name == "fetch_page") {
-        return "在读 " + text::truncate_utf8(args.value("url", std::string()), 60);
+        return "在读 " + text::truncate_utf8(get_str(args, "url"), 60);
     }
     return "在用 " + c.name;
 }

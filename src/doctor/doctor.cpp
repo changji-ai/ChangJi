@@ -15,6 +15,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <optional>
 #include <sstream>
 #include <utility>
@@ -121,11 +122,11 @@ Check check_ffmpeg(const config::Settings& s) {
     auto found = proc::which(s.assembly.ffmpeg_path);
     if (found) return {"FFmpeg", Level::OK, *found, ""};
     return {"FFmpeg", Level::FAIL, SAY("未找到"),
-            SAY("装配环节的硬依赖。\n"
+            SAY("装配环节必需。\n"
                 "Windows: winget install Gyan.FFmpeg\n"
                 "macOS:   brew install ffmpeg\n"
                 "Debian:  sudo apt install ffmpeg\n"
-                "装好后仍找不到就在配置里填 assembly.ffmpeg_path")};
+                "安装后仍无法找到时，请在配置中填写 assembly.ffmpeg_path")};
 }
 
 Check check_fonts(const config::Settings& s) {
@@ -145,8 +146,9 @@ Check check_fonts(const config::Settings& s) {
             return {SAY("中文字体"), Level::OK, SAY("已安装"), ""};
         }
     }
-    return {SAY("中文字体"), Level::WARN, SAY("没找到") + " " + s.assembly.subtitle_font,
-            SAY("中文字幕会渲染成方框。\nDebian: sudo apt install fonts-noto-cjk")};
+    return {SAY("中文字体"), Level::WARN, SAY("未找到") + " " + s.assembly.subtitle_font,
+            SAY("中文字幕将显示为方框。\n"
+                "Debian: sudo apt install fonts-noto-cjk")};
 #endif
 }
 
@@ -154,24 +156,28 @@ Check check_tts(const config::Settings& s) {
     if (s.tts.backend == "http") {
         if (!s.tts.base_url || s.tts.base_url->empty()) {
             // **两条路都说。** 这段话既给 `changji --doctor`（那儿只能改
-            // 配置），也给网页上的体检——而网页那一页往下翻两节就是「配音」
-            // 的「服务地址」输入框。只说"去配置里填"的人正对着那个框。
-            return {SAY("配音"), Level::FAIL, SAY("配了 http 后端但没填地址"),
-                    SAY("界面上：设置页「配音」那一节填「服务地址」。\n"
+            // 配置），也给设置里的环境检测——而界面上有「服务地址」那个输入框，
+            // 只说"去配置里填"的人明明有框可填。
+            //
+            // **路径写全**（2026-09-28 设置页重排起）：环境检测在「通用」里，配音那张
+            // 卡并进了「出片」，两者不在同一页了。原来那句「设置页「配音」那一节」
+            // 指的是已经没有的「配音」类，照着找会扑空。
+            return {SAY("配音"), Level::FAIL, SAY("已选择 HTTP 服务，但未填写服务地址"),
+                    SAY("界面上：在「设置 ▸ 出片」的「配音」中填写「服务地址」。\n"
                         "命令行：配置里填 tts.base_url。")};
         }
-        return {SAY("配音"), Level::OK, SAYF("独立服务 %1", *s.tts.base_url), ""};
+        return {SAY("配音"), Level::OK, SAYF("HTTP 服务 %1", *s.tts.base_url), ""};
     }
-    // 细节由「进程内配音」那一项报（模型在不在、编没编进来），
+    // 细节由「内置配音」那一项报（模型在不在、编没编进来），
     // 这里只说清这条路归谁管。
     if (s.tts.backend == "local") {
-        return {SAY("配音"), Level::OK, SAY("走进程内（详见「进程内配音」那一项）"), ""};
+        return {SAY("配音"), Level::OK, SAY("内置（详见「内置配音」一项）"), ""};
     }
     // 走到这里就只剩 http 那条，而它上面已经答过了。
     // **ComfyUI 那条 2026-09-10 拆了**，原来这里会去问它的节点清单，
     // 判断装没装 TTS 节点包。
-    return {SAY("配音"), Level::WARN, SAYF("配音后端认不出：%1", s.tts.backend),
-            SAY("只能是 local（进程内）或 http（外部服务）")};
+    return {SAY("配音"), Level::WARN, SAYF("无法识别的配音方式：%1", s.tts.backend),
+            SAY("仅支持 local（内置）或 http（外部服务）")};
 }
 
 Check check_llm(const config::Settings& s) {
@@ -183,9 +189,9 @@ Check check_llm(const config::Settings& s) {
     if (s.llm.backend == "local") {
         if (!infer::llama_chat_available()) {
             return {SAY("大模型"), Level::FAIL,
-                    SAY("配的是进程内跑，但这个二进制没编进来"),
-                    SAY("构建时要 CHANGJI_LLAMA=ON；或者去项目页「模型」那一行点一下"
-                        "编剧模型的名字，把「跑在哪」改成打接口。")};
+                    SAY("已配置为本地运行，但当前程序未包含本地大模型"),
+                    SAY("需要以 CHANGJI_LLAMA=ON 构建；或在「设置 ▸ 大模型」"
+                        "中将默认模型改为某个 API 服务的模型。")};
         }
         // **没填权重就不是 OK。** 报绿的后果是用户点了「写正文」才撞上一个
         // 运行期错误，而他刚看过一份全绿的体检报告。
@@ -193,8 +199,8 @@ Check check_llm(const config::Settings& s) {
         // 是 WARN 不是 FAIL：出片那条路不用大模型，分镜表也可以手写。
         // FAIL 会把制作页的开工按钮一起锁掉。`group` 给界面那颗「去挑模型」。
         if (s.models.llm.empty()) {
-            Check c{SAY("大模型"), Level::WARN, SAY("进程内跑，但还没挑编剧模型"),
-                    SAY("去项目页「模型」那一行点一下编剧模型的名字，挑一档下载。")};
+            Check c{SAY("大模型"), Level::WARN, SAY("本地运行，但尚未选择编剧模型"),
+                    SAY("请在「设置 ▸ 大模型」的「本地模型」中选择一个版本下载。")};
             c.group = "llm";
             return c;
         }
@@ -202,12 +208,12 @@ Check check_llm(const config::Settings& s) {
         const auto p = s.models.resolve(s.models.llm, s.workspace_path());
         if (!std::filesystem::is_regular_file(p, ec)) {
             Check c{SAY("大模型"), Level::WARN,
-                    SAYF("进程内跑，但权重文件不在：%1", s.models.llm),
-                    SAY("去项目页「模型」那一行点一下编剧模型的名字，把它下完。")};
+                    SAYF("本地运行，但权重文件不存在：%1", s.models.llm),
+                    SAY("请在「设置 ▸ 大模型」的「本地模型」中重新下载。")};
             c.group = "llm";
             return c;
         }
-        return {SAY("大模型"), Level::OK, SAYF("进程内跑（%1）", s.models.llm), ""};
+        return {SAY("大模型"), Level::OK, SAYF("本地运行（%1）", s.models.llm), ""};
     }
 
     // **命令行那条不去连地址。** 它根本不打接口——照旧走下面那段的话，
@@ -216,24 +222,23 @@ Check check_llm(const config::Settings& s) {
     // 「https://open.bigmodel.cn … glm-5.3-flash」，而实际跑的是本机的 claude。
     if (s.llm.backend == "command") {
         if (s.llm.command.empty()) {
-            return {SAY("大模型"), Level::FAIL, SAY("配的是跑本机命令行，但没说跑哪个"),
-                    SAY("去项目页「模型」那一行点一下编剧模型的名字，把「程序」填上"
-                        "（比如 claude）。")};
+            return {SAY("大模型"), Level::FAIL, SAY("已配置为命令行方式，但未指定程序"),
+                    SAY("请在配置文件中填写 [llm].command（例如 claude）。")};
         }
         const auto found = proc::which(s.llm.command);
         if (!found) {
             return {SAY("大模型"), Level::FAIL,
-                    SAYF("找不到 %1：它不在 PATH 上", s.llm.command),
-                    SAY("装好它，或者把「程序」那一栏填成绝对路径。\n"
+                    SAYF("找不到 %1：不在 PATH 中", s.llm.command),
+                    SAY("请安装该程序，或将 [llm].command 设为绝对路径。\n"
                         "claude：npm i -g @anthropic-ai/claude-code\n"
-                        "装完先在终端里跑一次、按它说的登录——**这条路用的是那个"
-                        "命令行自己的登录，不是这儿的 API Key**。")};
+                        "安装后请先在终端中运行一次并按提示登录。"
+                        "此方式使用该命令行工具自身的登录，而非此处的 API Key。")};
         }
         // **不在体检里真跑一趟。** 跑一次就是一次真生成：要花订阅额度、
         // 要等几十秒，而体检是每次打开设置页都跑的。
         // 登录没登录只有真跑才知道，那句话留给第一次生成时它自己说
         // （llm::CommandClient 会把它原样带出来）。
-        return {SAY("大模型"), Level::OK, SAYF("跑本机的 %1", *found), ""};
+        return {SAY("大模型"), Level::OK, SAYF("使用本机命令行 %1", *found), ""};
     }
 
     const std::string& url = s.llm.base_url;
@@ -245,29 +250,30 @@ Check check_llm(const config::Settings& s) {
     // 外加一句"用 Docker 起 ollama"——三样东西全指错方向，而这正是
     // 上面那段注释说的"报告说错了比不说更糟"。
     if (s.llm.needs_api_key() && s.llm.api_key.empty()) {
-        return {SAY("大模型"), Level::WARN, SAYF("还没填 API Key（%1）", url),
-                SAY("去项目页「模型」那一行点一下编剧模型的名字，在弹出来的窗口里填。\n"
-                    "默认走智谱：去 bigmodel.cn 控制台领一把，默认挑的 glm-4.7-flash 本身不要钱。\n"
-                    "不想领密钥就把「跑在哪」改成进程内，挑一档编剧模型下载。")};
+        return {SAY("大模型"), Level::WARN, SAYF("未填写 API Key（%1）", url),
+                SAY("请在「设置 ▸ 大模型」中点击该服务的「修改」填写密钥。\n"
+                    "默认使用智谱：可在 bigmodel.cn 控制台申请密钥，"
+                    "默认模型 glm-4.7-flash 免费。\n"
+                    "如不想申请密钥，可在「设置 ▸ 大模型」的「本地模型」"
+                    "中下载编剧模型，在本机运行。")};
     }
 
     httplib::Headers h{{"Authorization", "Bearer " + s.llm.api_key}};
     auto body = get_json(url, "/models", 8, h);
     if (!body) {
         // 本机服务和云服务该做的事不一样，一句话糊过去会把人支错方向。
-        return {SAY("大模型"), Level::WARN, SAYF("连不上 %1", url),
-                SAY("剧本和分镜要用它。没有它也能手写分镜表。\n") +
+        return {SAY("大模型"), Level::WARN, SAYF("无法连接 %1", url),
+                SAY("编写剧本和分镜需要大模型；也可以手动编写分镜表。\n") +
                     (s.llm.needs_api_key()
                          // **不是设置页。** 大模型那一节 2026-09-14 从设置页
                          // 整个搬走了（地址、模型名、密钥、温度都在项目页
                          // 那个弹窗里），这句话还在把人往一个没有这些框的
                          // 页面送——而同一个检查上面那条分支（缺 api_key）
                          // 早就改成指项目页了，两条自相矛盾。
-                         ? SAY("地址和密钥在项目页「模型」那一行点一下"
-                               "编剧模型的名字，在弹出来的窗口里核一眼；"
-                               "国内直连不通的服务要自备网络。")
-                         : SAY("用 Docker: docker compose up -d ollama\n"
-                               "本机装了 Ollama 就确认它已启动"))};
+                         ? SAY("请在「设置 ▸ 大模型」中点击该服务的「修改」核对地址和密钥；"
+                               "在国内无法直接访问的服务需自行配置网络。")
+                         : SAY("使用 Docker：docker compose up -d ollama\n"
+                               "如本机已安装 Ollama，请确认其已启动"))};
     }
     std::vector<std::string> names;
     if (body->contains("data") && (*body)["data"].is_array()) {
@@ -288,7 +294,8 @@ Check check_llm(const config::Settings& s) {
     for (const auto& [id, note] : llm::known_models(url)) {
         if (id != model) continue;
         return {SAY("大模型"), Level::OK, url + "  " + model,
-                SAY("这家的 /models 没把它列出来（免费档常这样），但它是能用的。\n") + note};
+                SAY("该服务的 /models 未列出此模型（免费模型常见此情况），"
+                    "但可以正常使用。\n") + note};
     }
 
     if (!names.empty()) {
@@ -307,26 +314,26 @@ Check check_llm(const config::Settings& s) {
         if (names.size() > 5)
             list += SAYF(" 等 %1 个", std::to_string(names.size()));
         return {SAY("大模型"), Level::WARN,
-                SAYF("%1 不在 %2 的清单里", model, url),
-                SAY("有些平台的 /models 不列免费模型（智谱就是），那样的话这条可以"
-                    "不管——写剧本时真调得通就行。\n")
-                    + SAYF("清单上有的：%1\n", list)
-                    + SAYF("确实写错了的话：去项目页那个模型窗口里改，或者 "
-                           "export CHANGJI_LLM_MODEL=%1", names[0])};
+                SAYF("%1 不在 %2 的模型列表中", model, url),
+                SAY("部分平台的 /models 不列出免费模型（如智谱），此时可忽略本条，"
+                    "只要编写剧本时能正常调用即可。\n")
+                    + SAYF("列表中的模型：%1\n", list)
+                    + SAYF("如确实填写有误，请在「设置 ▸ 大模型」中点击该服务的「选择模型…」"
+                           "重新选择，或执行 export CHANGJI_LLM_MODEL=%1", names[0])};
     }
     // **云服务和本机服务该做的事不一样**，一句话糊过去会把人支错方向——
     // 上面「连不上」那条早就按 `needs_api_key()` 分了两支，这条漏了：
     // 对着智谱（或者任何一个 /models 回空清单的云服务）说一句
     // 「ollama pull glm-4.7-flash」，照着做只会得到一句找不到命令。
     if (s.llm.needs_api_key()) {
-        return {SAY("大模型"), Level::WARN, SAYF("%1 的模型清单是空的", url),
-                SAY("有些平台的 /models 本来就不列（智谱免费档就这样），那样的话\n"
-                    "这条可以不管——写剧本时真调得通就行。\n"
-                    "真连错了地址的话：项目页「模型」那一行点一下编剧模型的名字，\n"
-                    "在弹出来的窗口里核一眼。")};
+        return {SAY("大模型"), Level::WARN, SAYF("%1 的模型列表为空", url),
+                SAY("部分平台的 /models 本身不返回模型列表（如智谱免费版），此时\n"
+                    "可忽略本条，只要编写剧本时能正常调用即可。\n"
+                    "如地址确实有误，请在「设置 ▸ 大模型」中点击该服务的「修改」\n"
+                    "进行核对。")};
     }
-    return {SAY("大模型"), Level::WARN, SAYF("%1 一个模型都没有", url),
-            SAYF("拉取一个：ollama pull %1", model)};
+    return {SAY("大模型"), Level::WARN, SAYF("%1 中没有任何模型", url),
+            SAYF("请拉取一个模型：ollama pull %1", model)};
 }
 
 Check check_gpu(const config::Settings& s) {
@@ -357,16 +364,16 @@ Check check_gpu(const config::Settings& s) {
             char gb_buf[32];
             std::snprintf(gb_buf, sizeof(gb_buf), "%g",
                           static_cast<double>(gpu->unified_mb) / 1024.0);
-            os << SAYF("（整机 %1 GB，其余留给系统）", gb_buf);
+            os << SAYF("（整机 %1 GB，其余预留给系统）", gb_buf);
         }
         if (gpu->count > 1) {
-            os << SAYF("（共 %1 张，显存是单卡的）", std::to_string(gpu->count));
+            os << SAYF("（共 %1 张，显存按单卡计）", std::to_string(gpu->count));
         }
         return {SAY("显卡"), Level::OK, os.str(), ""};
     }
     if (s.vram_gb_override) {
         std::ostringstream os;
-        os << SAYF("按配置的 %1 GB 推导档位",
+        os << SAYF("按配置的 %1 GB 推算档位",
                    std::to_string(static_cast<int>(*s.vram_gb_override)));
         return {SAY("显卡"), Level::OK, os.str(), ""};
     }
@@ -381,16 +388,16 @@ Check check_gpu(const config::Settings& s) {
     // 对一台真没卡的机器无条件说「这是正常的」，等于把唯一一条会提醒
     // "你这台跑不动"的线索说成没事。所以按有没有配 endpoints 分开说。
     const bool offloaded = !s.workers.endpoints.empty();
-    return {SAY("显卡"), Level::WARN, SAY("本机未探测到，按 12 GB 估算"),
+    return {SAY("显卡"), Level::WARN, SAY("未检测到显卡，按 12 GB 估算"),
             offloaded
-                ? SAY("渲染交给 [workers].endpoints 上那几台了，本机没卡是正常的。\n"
-                      "为了让画质档位推导正确，在配置里填 vram_gb_override")
-                : SAY("出图和出片跑在这台机器上——没有外部推理服务那一层了。\n"
-                      "真没有显卡的话它会退回 CPU——一镜要几小时，不是慢一点。\n"
-                      "有卡却探不到：多半是驱动或者容器没透传进来。\n"
-                      "确实要在这台上跑，先把档位推导弄对：在配置里填 "
-                      "vram_gb_override。\n"
-                      "渲染放在别的机器上是另一条路：填 [workers].endpoints。")};
+                ? SAY("渲染已交给 [workers].endpoints 中的机器，本机无显卡属正常情况。\n"
+                      "为使画质档位推算正确，请在配置中填写 vram_gb_override")
+                : SAY("出图和出片将在本机运行。\n"
+                      "如确实没有显卡，将改用 CPU 运行，每镜需要数小时。\n"
+                      "如有显卡却未检测到，通常是驱动问题或容器未透传显卡。\n"
+                      "如需在本机运行，请先在配置中填写 vram_gb_override，"
+                      "使档位推算正确。\n"
+                      "也可以将渲染交给其他机器：填写 [workers].endpoints。")};
 }
 
 Check check_workspace(const config::Settings& s) {
@@ -423,16 +430,16 @@ Check check_workspace(const config::Settings& s) {
 /// 起得来，只有读写张量时慢慢踩坏内存。详见 infer/ggml_abi.hpp。
 Check check_ggml() {
     if (!infer::ggml_available()) {
-        return {"ggml ABI", Level::OK, SAY("没链 ggml（出图和配音都走外部服务）"), ""};
+        return {"ggml ABI", Level::OK, SAY("未链接 ggml（出图和配音均使用外部服务）"), ""};
     }
     const auto abi = infer::check_ggml_abi();
     if (abi.ok) return {"ggml ABI", Level::OK, abi.detail, ""};
     // FAIL 不是 WARN：结构体大小对不上之后，这个进程做的任何推理
     // 都不值得相信，继续跑只会把损坏推到更远的地方。
     return {"ggml ABI", Level::FAIL, abi.detail,
-            SAY("多半是构建脚本改动引起的。顶层要有 "
-                "add_compile_definitions(GGML_MAX_NAME=160)，"
-                "而且 ggml 的头和库必须来自同一份源码树。")};
+            SAY("通常由构建脚本的改动引起。"
+                "顶层需要 add_compile_definitions(GGML_MAX_NAME=160)，"
+                "且 ggml 的头文件和库必须来自同一份源码树。")};
 }
 
 /// 进程内配音编进来了没有。
@@ -463,9 +470,9 @@ bool dispatchable_elsewhere(const config::Settings& s, infer::Capability cap) {
 
 Check check_local_tts(const config::Settings& settings) {
     const auto probe = infer::probe_llama_tts();
-    if (!probe.ok) return {SAY("进程内配音"), Level::WARN, probe.detail, ""};
+    if (!probe.ok) return {SAY("内置配音"), Level::WARN, probe.detail, ""};
     if (!infer::llama_tts_available()) {
-        return {SAY("进程内配音"), Level::OK, probe.detail, ""};
+        return {SAY("内置配音"), Level::OK, probe.detail, ""};
     }
 
     // 编进来了，接着查配置。**只有 backend 真选了 local 才判警告**——
@@ -483,10 +490,10 @@ Check check_local_tts(const config::Settings& settings) {
         !decoder.empty() && std::filesystem::is_regular_file(decoder, ec);
 
     if (has_b && has_d) {
-        return {SAY("进程内配音"), Level::OK,
+        return {SAY("内置配音"), Level::OK,
                 probe.detail + (selected
-                    ? SAY("；两份模型都在，[tts].backend = local")
-                    : SAY("；两份模型都在（当前没选它）")),
+                    ? SAY("；两份模型均已就绪，[tts].backend = local")
+                    : SAY("；两份模型均已就绪（当前未使用）")),
                 ""};
     }
     // 缺哪一份要分别点名：只填一个是最常见的配错法。
@@ -517,30 +524,38 @@ Check check_local_tts(const config::Settings& settings) {
     // 而他要知道的只有两件事：坏了什么、怎么办。
     //
     // 好的那一条（两份都在）照旧把 probe.detail 放前面——那时候它就是答案。
+    // 「机器表」不再是界面上的名字（2026-09-28 起那一类叫「互联」），括号里跟着界面叫，
+    // 人才找得到是哪几台在替他干。
     if (elsewhere) {
-        return {SAY("进程内配音"), Level::WARN,
-                SAYF("本机缺模型：%1。这一步会派给别的机器（机器表里有能配音的）。",
+        return {SAY("内置配音"), Level::WARN,
+                SAYF("本机缺少模型：%1。此步骤将分派给其他机器（「互联」"
+                     "中有可配音的机器）。",
                      missing) + probe.detail,
-                SAY("本机也想跑的话，填 [models].tts 和 [models].tts_decoder；"
-                    "只靠别的机器就不用管这条。"),
+                SAY("如需在本机运行，请填写 [models].tts 和 [models].tts_decoder；"
+                    "仅使用其他机器时可忽略本条。"),
                 "tts"};
     }
     // group = tts：设置页据此摆一颗直接跳到配音模型那个窗的按钮。
     // 不摆的话 `fix` 里写的是「填 [models].tts」——叫人去手改配置文件，
     // 而挑模型下模型那套界面本来就有。
-    return {SAY("进程内配音"), selected ? Level::FAIL : Level::OK,
-            (selected ? SAYF("缺模型：%1，配音会出静音。", missing)
-                      : SAYF("缺模型：%1（当前没选它）。", missing)) +
+    return {SAY("内置配音"), selected ? Level::FAIL : Level::OK,
+            (selected ? SAYF("缺少模型：%1，配音将为静音。", missing)
+                      : SAYF("缺少模型：%1（当前未使用）。", missing)) +
                 probe.detail,
             // **两条路都要说。** 只说"下模型"的话，小卡上的用户下完才
             // 发现配音和出片挤不进同一张卡——而外接一个配音服务不用改
             // 一行代码、也不占本机显存，那多半才是他要的那条。
-            selected ? SAY("两条路挑一条：\n"
-                           "  本机跑：填 [models].tts（Qwen3-TTS 的 talker）和 "
-                           "[models].tts_decoder（tokenizer/解码器），两份都是 "
-                           "GGUF。\n"
-                           "  外接：把上面的「后端」改成「独立 HTTP 服务」并填"
-                           "服务地址，本机就不用装配音模型、也不占显存。")
+            //
+            // 外接那一句**报全路径、照界面上的字写**：原来写的是「把上面的「后端」
+            // 改成「独立 HTTP 服务」」——那是体检还摆在配音那一页底下时的说法。
+            // 2026-09-28 起环境检测在「通用」里、配音那张卡在「出片」里，「上面」
+            // 什么都没有；那一行也不叫「后端」了，叫「配音」，选项是「HTTP 服务」。
+            selected ? SAY("可任选以下一种方式：\n"
+                           "  本机运行：填写 [models].tts（Qwen3-TTS 的 talker）"
+                           "和 [models].tts_decoder（tokenizer/解码器），"
+                           "两者均为 GGUF 文件。\n"
+                           "  外部服务：在「设置 ▸ 出片」的「配音」中选择「HTTP 服务」"
+                           "并填写「服务地址」，本机无需安装配音模型，也不占用显存。")
                      : std::string(),
             selected ? "tts" : ""};
 }
@@ -564,21 +579,21 @@ Check check_sd(const config::Settings& settings) {
             Level::WARN;
         if (elsewhere) {
             return {SAY("出图后端"), Level::WARN,
-                    SAY("本机没编进来（构建时 CHANGJI_SD=OFF）。出图出片会派给"
-                        "别的机器（机器表里有能干的）"),
-                    SAY("本机也想跑的话，换一份编了 sd.cpp 的二进制；"
-                        "只靠别的机器就不用管这条。")};
+                    SAY("本机程序未包含出图组件（构建时 CHANGJI_SD=OFF）。"
+                        "出图和出片将分派给其他机器（「互联」中有可用的机器）"),
+                    SAY("如需在本机运行，请改用包含 sd.cpp 的程序版本；"
+                        "仅使用其他机器时可忽略本条。")};
         }
         // **拆掉 ComfyUI 之后这就不再是 OK 了。** 原来的话是"出图走推理
         // 服务"——那个服务没了，没编进 sd.cpp 就是一张图都出不来。
-        return {SAY("出图后端"), Level::FAIL, SAY("没编进来，出图出片都跑不了"),
-                SAY("这份二进制构建时 CHANGJI_SD=OFF。换一份编了的，"
-                    "或者自己编时打开 CHANGJI_SD，再按显卡挑一个 GPU 后端："
-                    "N 卡 CHANGJI_SD_CUDA、A 卡 CHANGJI_SD_HIP、"
-                    "Intel CHANGJI_SD_SYCL，三家都能用的 CHANGJI_SD_VULKAN。"
-                    "一个都不开就只能用 CPU 跑，一镜要几小时。"
-                    "\n渲染放在别的机器上是另一条路：在设置页把那台加进机器表，"
-                    "本机就只管编排和装配。")};
+        return {SAY("出图后端"), Level::FAIL, SAY("程序未包含出图组件，无法出图和出片"),
+                SAY("此程序构建时 CHANGJI_SD=OFF。请改用包含该组件的版本，"
+                    "或在自行构建时开启 CHANGJI_SD，并按显卡选择 GPU 后端："
+                    "NVIDIA 使用 CHANGJI_SD_CUDA，AMD 使用 CHANGJI_SD_HIP，"
+                    "Intel 使用 CHANGJI_SD_SYCL，三者通用的是 CHANGJI_SD_VULKAN。"
+                    "均未开启时只能使用 CPU 运行，每镜需要数小时。\n"
+                    "也可以将渲染交给其他机器：在「设置 ▸ 互联」中添加该机器，"
+                    "本机只负责编排和装配。")};
     }
     // 系统信息里带着编进去的后端和 CPU 特性（AVX2、CUDA 之类）。
     // 这一行是出画质问题时第一个要看的东西：同一份模型在 AVX2 和
@@ -604,24 +619,24 @@ Check check_image_base(const config::Settings& s) {
     if (m.image.empty()) {
         // 首帧那一份都没配，由「本地模型」那条去说，这儿不重复。
         return {SAY("定妆和空景"), Level::OK,
-                SAY("首帧模型还没配，这一项先不论"), ""};
+                SAY("尚未配置首帧模型，暂不检查此项"), ""};
     }
     if (!m.image_base.empty()) {
         return {SAY("定妆和空景"), Level::OK,
-                SAYF("走基础模型 %1（文生图）", m.image_base), ""};
+                SAYF("使用基础模型 %1（文生图）", m.image_base), ""};
     }
     if (!config::ModelsConfig::accepts_reference_images(m.image)) {
         // 首帧那一份本来就是基础权重，两件事用同一个是对的。
         return {SAY("定妆和空景"), Level::OK,
-                SAYF("和首帧共用 %1（它本来就是基础权重）", m.image), ""};
+                SAYF("与首帧共用 %1（该模型本身即为基础权重）", m.image), ""};
     }
     return {SAY("定妆和空景"), Level::WARN,
-            SAYF("没配 [models].image_base，这一步会拿首帧那份图像编辑模型"
-                 "（%1）做文生图", m.image),
-            SAY("三视图和空景图没有参考图可编辑——那是文生图，要基础权重。"
-                "用编辑权重做这件事出来的图不报错，只是不能看，"
-                "而它们又是后面每一镜的参考图。\n"
-                "去项目页「模型」那一行点「定妆和空景模型（文生图）」挑一档下下来。")};
+            SAYF("未配置 [models].image_base，此步骤将使用首帧的图像编辑模型（%1）"
+                 "进行文生图", m.image),
+            SAY("三视图和空景图没有可供编辑的参考图，属于文生图，需要基础权重。"
+                "使用编辑权重生成时不会报错，但效果无法使用，"
+                "而这些图又是后续每一镜的参考图。\n"
+                "请在「设置 ▸ 模型文件」中下载「定妆和空景模型（文生图）」。")};
 }
 
 /// 本地模型文件。
@@ -658,10 +673,10 @@ Check check_models(const config::Settings& s) {
     if (configured.empty()) {
         // 是 WARN 不是 FAIL：装好程序还没下模型是常态，那时候用户仍然
         // 要能进界面、能写剧本分镜。FAIL 会把开工按钮一起锁掉。
-        return {SAY("本地模型"), Level::WARN, SAY("一个都没配，出图出片跑不了"),
-                SAY("至少要 [models].image（首帧）和 [models].video + "
-                    "video_vae（视频）。\n"
-                    "相对路径是相对 dir 解析的，dir 留空时是项目库下的 models/。\n")
+        return {SAY("本地模型"), Level::WARN, SAY("尚未配置任何模型，无法出图和出片"),
+                SAY("至少需要 [models].image（首帧）"
+                    "以及 [models].video 和 video_vae（视频）。\n"
+                    "相对路径以 dir 为基准解析；dir 为空时为项目库下的 models/。\n")
                     + SAYF("当前 dir：%1", paths::to_utf8(m.dir_path(ws))),
                 // 一个都没配时先指向出图那一组：它是第一个非它不可的
                 //（没有首帧就没有画面），下完它界面会接着指下一个。
@@ -669,19 +684,19 @@ Check check_models(const config::Settings& s) {
     }
 
     if (!missing.empty()) {
-        std::string detail = SAYF("配了 %1 项，其中 %2 项的文件不存在：",
+        std::string detail = SAYF("已配置 %1 项，其中 %2 项的文件不存在：",
                                   std::to_string(configured.size()),
                                   std::to_string(missing.size()));
         for (const auto& x : missing) detail += "\n  " + x;
         return {SAY("本地模型"), Level::WARN, detail,
-                SAY("检查 [models] 里的文件名，以及 dir 指的目录对不对。\n"
-                    "相对路径是相对 dir 解析的，dir 留空时是项目库下的 models/。\n")
+                SAY("请检查 [models] 中的文件名以及 dir 所指的目录是否正确。\n"
+                    "相对路径以 dir 为基准解析；dir 为空时为项目库下的 models/。\n")
                     + SAYF("当前 dir：%1", paths::to_utf8(m.dir_path(ws))),
                 "image"};
     }
 
     return {SAY("本地模型"), Level::OK,
-            SAYF("%1 个模型文件都在（%2）", std::to_string(configured.size()),
+            SAYF("%1 个模型文件均已就绪（%2）", std::to_string(configured.size()),
                  paths::to_utf8(m.dir_path(ws))),
             ""};
 }
@@ -702,8 +717,8 @@ Check check_weights(const config::Settings& s) {
     const double card = profile.gpu.has_value() ? profile.gpu->vram_gb()
                                                 : profile.vram_gb;
     if (card <= 0) {
-        return {SAY("权重放哪"), Level::OK,
-                SAY("没探到显卡，这一项无从比起"), ""};
+        return {SAY("权重位置"), Level::OK,
+                SAY("未检测到显卡，无法检查此项"), ""};
     }
     const auto ws = s.workspace_path();
     const auto size_gb = [&](const std::string& rel) {
@@ -721,8 +736,7 @@ Check check_weights(const config::Settings& s) {
         // smart 和 auto 本来就是"让程序/sd.cpp 自己定"，没有对不上这回事。
         if (set == "smart" || set == "auto") return;
         if (set == want) return;
-        off.push_back(SAYF("%1：配置写的是 \"%2\"，按这张卡和这个模型算出来"
-                           "该是 \"%3\"", label, set, want));
+        off.push_back(SAYF("%1：配置值为 \"%2\"，按当前显卡和模型推算应为 \"%3\"", label, set, want));
     };
     // unified 要传下去，不然这一项在苹果机器上会一直报"对不上"——
     // 它算的是独显那套，而引擎跑的是统一内存那套。
@@ -734,23 +748,23 @@ Check check_weights(const config::Settings& s) {
     const double canvas_px = static_cast<double>(cw) * ch;
     one(SAY("出片"), s.models.weights,
         s.models.weights_for(card, size_gb(s.models.video), unified, canvas_px));
-    one(SAY("出首帧"), s.models.image_weights,
+    one(SAY("首帧"), s.models.image_weights,
         s.models.image_weights_for(card, size_gb(s.models.image), unified));
 
     if (off.empty()) {
-        return {SAY("权重放哪"), Level::OK,
-                SAY("配置和这台机器算出来的一致"), ""};
+        return {SAY("权重位置"), Level::OK,
+                SAY("配置与本机推算结果一致"), ""};
     }
     std::string msg;
     for (std::size_t i = 0; i < off.size(); ++i) {
         if (i) msg += SAY("；");
         msg += off[i];
     }
-    return {SAY("权重放哪"), Level::WARN, msg,
-            SAY("多半是配置从别的机器带过来的。写死的值不会跟着卡变——\n"
-                "换成 \"smart\"（程序按卡和模型大小算）或者 \"auto\"\n"
-                "（装载时让 sd.cpp 按实际显存自己塞）就不用管了。\n"
-                "确实想按现在这样固定的话，这条忽略即可。")};
+    return {SAY("权重位置"), Level::WARN, msg,
+            SAY("通常是配置从其他机器带过来所致。固定值不会随显卡变化，\n"
+                "改为 \"smart\"（程序按显卡和模型大小推算）或 \"auto\"\n"
+                "（加载时由 sd.cpp 按实际显存自动分配）即可。\n"
+                "如确需固定为当前值，可忽略本条。")};
 }
 
 }  // namespace
@@ -783,10 +797,10 @@ Check check_produces(const config::Settings& settings) {
         if (!missing.empty()) missing += "\n";
         missing += SAYF("%1：%2", infer::label_of(r.cap), r.why);
     }
-    if (missing.empty()) return {SAY("能产什么"), Level::OK, line};
+    if (missing.empty()) return {SAY("可用功能"), Level::OK, line};
     // **不是 FAIL。** 一台只写文不出片的机器是完全正当的用法
     // （build-coord 那份就是），这一项只负责把话说清楚。
-    return {SAY("能产什么"), Level::WARN, line, missing};
+    return {SAY("可用功能"), Level::WARN, line, missing};
 }
 
 template <typename F>
@@ -794,12 +808,12 @@ Check guarded(const char* name, F&& fn) {
     try {
         return fn();
     } catch (const std::exception& e) {
-        return {SAY(name), Level::WARN, SAYF("这一项检查自己出错了：%1", e.what()),
-                SAY("这是 changji 的问题不是你的环境问题，请把这条报上来。\n"
+        return {SAY(name), Level::WARN, SAYF("此项检查自身出错：%1", e.what()),
+                SAY("这是 changji 自身的问题，而非环境问题，请反馈此条信息。\n"
                     "其余检查不受影响。")};
     } catch (...) {
-        return {SAY(name), Level::WARN, SAY("这一项检查自己抛了未知异常"),
-                SAY("这是 changji 的问题不是你的环境问题，请把这条报上来。")};
+        return {SAY(name), Level::WARN, SAY("此项检查抛出未知异常"),
+                SAY("这是 changji 自身的问题，而非环境问题，请反馈此条信息。")};
     }
 }
 
@@ -824,7 +838,7 @@ Check check_canvas(const config::Settings& s) {
 
     if (limits.max_pixels <= 0) {
         return {SAY("出片画布"), Level::OK,
-                SAYF("%1（这个模型没给画布上限）", got), ""};
+                SAYF("%1（此模型未规定画布上限）", got), ""};
     }
     if (px <= limits.max_pixels) {
         return {SAY("出片画布"), Level::OK, got, ""};
@@ -861,21 +875,21 @@ Check check_canvas(const config::Settings& s) {
         std::to_string(k2_w) + "x" + std::to_string(k2_h);
 
     return {SAY("出片画布"), Level::WARN,
-            SAYF("%1 超出这个模型的画布上限 %2 像素（%3 倍）", got,
+            SAYF("%1 超出此模型的画布上限 %2 像素（%3 倍）", got,
                  std::to_string(limits.max_pixels), ratio),
             // **建议要能照着做。** 上一版只说"出完再跑 changji --upscale"，
             // 可这条命令还要一个 ESRGAN 权重，而那个文件**不在首次运行
             // 的下载清单里**（setup/catalog.cpp 一个超分条目都没有）——
             // 照着做的人会卡在"--upscale 还要 --upscale-model"这句上，
             // 而它没说该去下哪个文件。
-            SAYF("模型在训练分布之外跑，出来多半是伪影，不是糊一点。\n"
-                 "把 [video].quality 调回 hd（%1）。要 2K 就先出标准档，"
+            SAYF("模型超出训练分布运行，结果多为伪影，而不仅是略微模糊。\n"
+                 "请将 [video].quality 改回 hd（%1）。如需 2K，请先以标准档出片，"
                  "再单独超分：\n"
-                 "  changji --upscale 成片.mp4 出来的.mp4 \\\n"
+                 "  changji --upscale 成片.mp4 输出.mp4 \\\n"
                  "    --upscale-model <RealESRGAN_x4plus.pth 的路径> \\\n"
                  "    --upscale-size %2\n"
-                 "那个权重要自己下（Real-ESRGAN 的 v0.1.0 release，67 MB），"
-                 "清单里没有。逐帧超分没有帧间一致性，做完要看成片。",
+                 "该权重需自行下载（Real-ESRGAN 的 v0.1.0 release，67 MB），"
+                 "模型清单中未提供。逐帧超分不保证帧间一致，完成后请检查成片。",
                  hd_size, k2_arg)};
 }
 
@@ -888,6 +902,16 @@ Check check_canvas(const config::Settings& s) {
 /// 的 `name` 字段，`--doctor` 那一栏原样打出来；查过了，网页那一套和桌面端
 /// 都不按名字认，golden 里也没钉着。
 Report run_checks(const config::Settings& settings) {
+    // **只有「大模型」那一项真发网络请求**（连 + 读各 8 秒），先在另一条
+    // 线程上起跑，其余照旧串行，收尾时按原位置插回去——报告的顺序不变，
+    // 最坏情况从"它加上其余全部"压到"它和其余全部取大的那个"。
+    //
+    // 别把别的项也挪过去：`check_canvas` 读的 `stages::video_limits()` 是
+    // 挂在**线程上**的（`ScopedVideoLimits`），换一条线程就读成全局那份。
+    // check_llm 只读传进来的 settings，不碰线程上的东西。
+    auto llm = std::async(std::launch::async, [&settings] {
+        return guarded(SAY_NOOP("大模型"), [&] { return check_llm(settings); });
+    });
     Report r;
     r.checks.push_back(guarded(SAY_NOOP("运行时"), [&] { return check_runtime(); }));
     r.checks.push_back(guarded("FFmpeg", [&] { return check_ffmpeg(settings); }));
@@ -896,18 +920,19 @@ Report run_checks(const config::Settings& settings) {
     // 「推理服务」那一项 2026-09-10 随 ComfyUI 一起去掉了：出图出片都在
     // 进程内，没有外部服务要连。出图那条由「出图后端」和「本地模型」两项管。
     r.checks.push_back(guarded(SAY_NOOP("配音"), [&] { return check_tts(settings); }));
-    r.checks.push_back(guarded(SAY_NOOP("大模型"), [&] { return check_llm(settings); }));
+    const std::size_t llm_at = r.checks.size();
     r.checks.push_back(guarded("ggml ABI", [&] { return check_ggml(); }));
-    r.checks.push_back(guarded(SAY_NOOP("进程内配音"), [&] { return check_local_tts(settings); }));
+    r.checks.push_back(guarded(SAY_NOOP("内置配音"), [&] { return check_local_tts(settings); }));
     r.checks.push_back(guarded(SAY_NOOP("出图后端"), [&] { return check_sd(settings); }));
     r.checks.push_back(guarded(SAY_NOOP("本地模型"), [&] { return check_models(settings); }));
     r.checks.push_back(
         guarded(SAY_NOOP("定妆和空景"), [&] { return check_image_base(settings); }));
     r.checks.push_back(guarded(SAY_NOOP("显卡"), [&] { return check_gpu(settings); }));
-    r.checks.push_back(guarded(SAY_NOOP("权重放哪"), [&] { return check_weights(settings); }));
+    r.checks.push_back(guarded(SAY_NOOP("权重位置"), [&] { return check_weights(settings); }));
     r.checks.push_back(guarded(SAY_NOOP("出片画布"), [&] { return check_canvas(settings); }));
     r.checks.push_back(guarded(SAY_NOOP("项目目录"), [&] { return check_workspace(settings); }));
-    r.checks.push_back(guarded(SAY_NOOP("能产什么"), [&] { return check_produces(settings); }));
+    r.checks.push_back(guarded(SAY_NOOP("可用功能"), [&] { return check_produces(settings); }));
+    r.checks.insert(r.checks.begin() + static_cast<std::ptrdiff_t>(llm_at), llm.get());
     return r;
 }
 

@@ -1,9 +1,16 @@
 #include "util/paths.hpp"
 
+#include <optional>
+
 #include <algorithm>
 #include <cstdlib>
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
+#endif
+
+#ifndef _WIN32
+#include <fcntl.h>
+#include <unistd.h>
 #endif
 
 #ifdef _WIN32
@@ -16,23 +23,36 @@
 
 namespace changji::paths {
 
+namespace {
+
+/// 规范化一个目录，**尾巴上的分隔符去掉**。`weakly_canonical` 对存在的目录会顺手
+/// 去掉它，对**不存在**的原样留着——删掉了的、还没建出来的片子，`/x/片子/` 和
+/// `/x/片子` 成了两个键（会话、推送、置顶都按它记）。根目录（`/`、`C:\`）不动。
+std::optional<std::filesystem::path> canonical_dir(const std::string& dir) {
+    std::error_code ec;
+    std::filesystem::path p = std::filesystem::weakly_canonical(from_utf8(dir), ec);
+    if (ec) return std::nullopt;
+    if (!p.has_filename() && p.has_relative_path()) p = p.parent_path();
+    return p;
+}
+
+}  // namespace
+
 bool same_dir(const std::string& a, const std::string& b) {
     if (a == b) return true;
     if (a.empty() || b.empty()) return false;
-    std::error_code ec;
-    const std::filesystem::path pa = std::filesystem::weakly_canonical(from_utf8(a), ec);
-    if (ec) return false;
-    const std::filesystem::path pb = std::filesystem::weakly_canonical(from_utf8(b), ec);
-    if (ec) return false;
-    return pa == pb;
+    const auto pa = canonical_dir(a);
+    if (!pa) return false;
+    const auto pb = canonical_dir(b);
+    if (!pb) return false;
+    return *pa == *pb;
 }
 
 std::string dir_key(const std::string& dir) {
     if (dir.empty()) return {};
-    std::error_code ec;
-    const std::filesystem::path p = std::filesystem::weakly_canonical(from_utf8(dir), ec);
-    if (ec) return dir;
-    return to_utf8(p);
+    const auto p = canonical_dir(dir);
+    if (!p) return dir;
+    return to_utf8(*p);
 }
 
 namespace fs = std::filesystem;
@@ -148,6 +168,27 @@ std::string env(const char* name) {
 #else
     const char* v = std::getenv(name);
     return v ? std::string(v) : std::string();
+#endif
+}
+
+void sync_to_disk(const fs::path& p, bool dir) {
+#ifndef _WIN32
+    const int fd = ::open(p.c_str(), dir ? O_RDONLY | O_DIRECTORY : O_RDONLY);
+    if (fd < 0) return;
+#if defined(__APPLE__) && defined(F_FULLFSYNC)
+    if (::fcntl(fd, F_FULLFSYNC) != 0) ::fsync(fd);
+#else
+    ::fsync(fd);
+#endif
+    ::close(fd);
+#else
+    if (dir) return;
+    const HANDLE h = ::CreateFileW(p.wstring().c_str(), GENERIC_WRITE,
+                                   FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                                   OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return;
+    ::FlushFileBuffers(h);
+    ::CloseHandle(h);
 #endif
 }
 

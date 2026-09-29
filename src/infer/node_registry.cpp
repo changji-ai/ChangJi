@@ -272,7 +272,26 @@ void NodeRegistry::refresh(const config::Settings& s) {
         pool.reserve(peers.size());
         for (std::size_t i = 0; i < peers.size(); ++i) {
             pool.emplace_back([&s, &peers, &got, i] {
-                got[i] = probe_peer(s, peers[i]);
+                // ⚠️ **整段包在 try 里。** 这是一条裸线程，异常逃出去就是
+                // std::terminate——整个引擎死。httplib 的 Client 构造遇到不认的
+                // 协议会抛 invalid_argument：没编 SSL 的那份（CHANGJI_SSL=OFF）
+                // 机器表里填一台 https:// 的就是这样，而加机器那一步是收 https
+                // 的（2026-09-25 审出来）。探不了就照实报离线。
+                try {
+                    got[i] = probe_peer(s, peers[i]);
+                } catch (const std::exception& e) {
+                    NodeState n;
+                    n.url = n.name = peers[i].url;
+                    n.online = false;
+                    n.error = SAYF("连不上：%1", e.what());
+                    got[i] = std::move(n);
+                } catch (...) {
+                    NodeState n;
+                    n.url = n.name = peers[i].url;
+                    n.online = false;
+                    n.error = SAY("连不上");
+                    got[i] = std::move(n);
+                }
             });
         }
         for (auto& t : pool) t.join();

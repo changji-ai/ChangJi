@@ -16,6 +16,7 @@
 #include "config/settings.hpp"
 #include "llm/call_log.hpp"
 #include "llm/client.hpp"
+#include "llm/schema_validate.hpp"
 #include "pipeline/jobs.hpp"
 #include "util/proc.hpp"
 #include "util/say.hpp"
@@ -172,7 +173,7 @@ std::string CommandClient::complete(const Request& req, pipeline::CancelToken& t
     CallLog& log = *log_box;
     try {
         if (cfg.command.empty()) {
-            throw LlmError(SAY("没填 llm.command：要跑哪个程序（比如 claude 或 codex）"));
+            throw LlmError(SAY("未填写 llm.command：请指定要运行的程序（例如 claude 或 codex）"));
         }
         // 开跑前先看一眼有没有被取消。**命令行这条路中途打不断**——和远端那条
         // 一样，能查的只有请求前后两个点（见 Client::complete 那段注释）。
@@ -212,28 +213,34 @@ std::string CommandClient::complete(const Request& req, pipeline::CancelToken& t
         log.set_prompt(prompt);
 
         const int timeout_ms = static_cast<int>(cfg.command_timeout_s * 1000.0);
-        const auto r = proc::run(cfg.command, args, timeout_ms, prompt);
+        // **stdout 才是回话，stderr 单独收。** 原来两股并在一起当回话：`codex exec`
+        // 把横幅和进度日志写 stderr，拼在模型的 JSON 前面一起交给下游解析
+        // （2026-09-25 审出来）。stderr 留着给报错和记录用。
+        const auto r = proc::run(cfg.command, args, timeout_ms, prompt, /*split_stderr=*/true);
+        const std::string both = r.err.empty() ? r.out
+                                 : r.out.empty() ? r.err
+                                                 : r.out + "\n" + r.err;
         // 这条路没有 HTTP 状态码，恒 0。
         //
         // proc::Result 把 stdout 和 stderr 并在 out 里，所以失败时那句
         //「Failed to authenticate: OAuth session expired」会进 error.txt 的
         // 第二段——**那正是要留的**。这份 body 里抽不出 usage，记录器会静静地
         // 不记，不抛。
-        log.note_response(0, r.out);
+        log.note_response(0, both);
 
         // **「没装这个程序」和「装了但报错」要分开说。** 这是 proc::Result
         // 特意留 launched 这个标志的原因（media/ffmpeg.cpp 也是这么用的）：
         // 两句话把人指向完全不同的方向——一个是去装、一个是去看它说了什么。
         if (!r.launched) {
             throw LlmError(SAYF(
-                "找不到 %1：它不在 PATH 上。装好之后在设置页里把路径填全，"
-                "或者把 [llm].command 写成绝对路径", cfg.command));
+                "找不到 %1：不在 PATH 中。请先安装该程序，"
+                "或将 [llm].command 设为绝对路径", cfg.command));
         }
         if (r.timed_out) {
             throw LlmError(SAYF(
-                "%1 跑了 %2 秒还没写完，被掐断了。要么这一步太大，"
-                "要么它在等什么（比如要登录）。把 llm.command_timeout_s 调大，"
-                "或者先在终端里手敲一次看看它说什么",
+                "%1 运行 %2 秒仍未完成，已被终止。可能是此步骤过大，"
+                "或程序正在等待输入（例如需要登录）。"
+                "请调大 llm.command_timeout_s，或先在终端中手动运行一次查看输出",
                 cfg.command,
                 std::to_string(static_cast<int>(cfg.command_timeout_s))));
         }
@@ -243,12 +250,12 @@ std::string CommandClient::complete(const Request& req, pipeline::CancelToken& t
             // 「Failed to authenticate: OAuth session expired」——那正是用户
             // 需要知道的，换成"命令行后端失败"等于把理由吃掉。
             // 它走的是 stdout（实测），而 proc::Result 把两股流并在 out 里。
-            std::string tail = r.out;
+            std::string tail = both;
             constexpr std::size_t kMax = 500;
             if (tail.size() > kMax) tail = tail.substr(0, kMax) + "…";
             throw LlmError(SAYF("%1 退出码 %2：%3", cfg.command,
                                 std::to_string(r.exit_code),
-                                tail.empty() ? SAY("什么都没说") : tail));
+                                tail.empty() ? SAY("无输出") : tail));
         }
 
         // 跑通了但一个字没吐。**不能当成空回答往下走**：下游按 schema 解析
@@ -256,11 +263,19 @@ std::string CommandClient::complete(const Request& req, pipeline::CancelToken& t
         std::string out = r.out;
         while (!out.empty() && (out.back() == '\n' || out.back() == '\r')) out.pop_back();
         if (out.empty()) {
-            throw LlmError(SAYF("%1 跑通了，但一个字都没印出来。"
-                                "先在终端里手敲一次同样的命令看看",
+            throw LlmError(SAYF("%1 已运行完成，但没有任何输出。"
+                                "请先在终端中手动运行相同的命令进行检查",
                                 cfg.command));
         }
         log.set_reply(out);
+        // 结构对不对，和远端、进程内两条同一份规矩（client.cpp 的 checked_output）：
+        // 原来这条不验，缺了必填栏的回话照样往下交，下游一声不响略过那一栏。
+        if (const auto err = validate_structured_output(out, req.schema)) {
+            throw LlmError(SAYF("大模型输出不符合 %1：%2",
+                                req.schema_name.empty() ? std::string("JSON Schema")
+                                                        : req.schema_name + " Schema",
+                                *err));
+        }
         return out;
     } catch (const LlmError& e) {
         // ⚠️ **裸 `throw;`，异常对象原样往外走。** 写成 `throw e;` 会切片成

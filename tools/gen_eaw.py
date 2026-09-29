@@ -46,7 +46,35 @@ OUT = CPP / "src" / "media" / "east_asian_width.inc.hpp"
 MAX_CP = 0x110000
 
 
+def _version(text: str) -> tuple[int, ...]:
+    return tuple(int(x) for x in text.split("."))
+
+
+def _committed_version() -> str | None:
+    """盘上那份表是按哪一版 Unicode 生成的（头一行注释里写着）。"""
+    try:
+        head = OUT.read_text(encoding="utf-8")[:400]
+    except OSError:
+        return None
+    for line in head.splitlines():
+        if line.startswith("// Unicode "):
+            return line[len("// Unicode "):].split("，")[0].strip()
+    return None
+
+
 def main() -> int:
+    # **Python 版本旧就别重写。** unicodedata 的表跟着 Python 走：3.11 是 Unicode 14，
+    # 3.12 起是 15。拿旧的跑一遍，这张表从 121 个区间变成 710 个（未分配的码点那几段
+    # 在旧表里是另一个答案），而字幕断行就悄悄换了一套——出入要逐帧比对成片才看得出来。
+    # 在 ubuntu-22.04（Python 3.10）上顺手一跑就是这样。要故意降级加 --force。
+    have = _committed_version()
+    if have and "--force" not in sys.argv[1:] and \
+            _version(unicodedata.unidata_version) < _version(have):
+        print(f"这台 Python 的 unicodedata 是 Unicode {unicodedata.unidata_version}，"
+              f"比盘上那份表（Unicode {have}）旧——没有重写。换一个新一点的 Python 再跑，"
+              f"真要降级加 --force。", file=sys.stderr)
+        return 1
+
     wide: list[tuple[int, int]] = []
     start = -1
     for cp in range(MAX_CP):

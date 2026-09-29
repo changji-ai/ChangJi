@@ -52,6 +52,8 @@ struct GateResult {
 /// 片头纯色多半是模型没起来，片尾纯色多半是帧数超了模型的上限，
 /// 两者的下一步完全不同。
 std::string position_name(int index, int total);
+/// 同上，**按这一张自己记的位置说**（`PixelStats::at`）；没记的退回按下标。
+std::string position_name(const media::PixelStats& s, int index, int total);
 
 /// 检查一个镜头的视频。草稿档和成片档用同一套检查，只是期望值不同。
 GateResult gate_video(const models::Shot& shot,

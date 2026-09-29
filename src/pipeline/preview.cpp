@@ -266,8 +266,14 @@ RunReport run_preview(const ProjectStore& store,
         // 原来是无条件加的，于是那种情况下屏幕上写着「整章还有 0 镜没做」
         // ——0 那个数要人自己反应一下才读懂"等于没有"，而这儿更糟：
         // 它还接着劝人再按一次「出片」，而根本没有可补的。
-        if (const std::size_t left = ep->shots.size() - aopts.only_shots.size();
-            left > 0) {
+        //
+        // **数不在这一段里的，别拿两个长度相减。** `only_shots` 是开跑时挑的，
+        // 跑的途中人删了几镜的话减出来是负数，size_t 一绕就是
+        // 「整章还有 18446744073709551614 镜没做」。
+        const std::size_t left = static_cast<std::size_t>(std::count_if(
+            ep->shots.begin(), ep->shots.end(),
+            [&](const Shot& s) { return aopts.only_shots.count(s.shot_id) == 0; }));
+        if (left > 0) {
             msg += SAYN("整章还有 %n 镜没做，接着按「出片」就是把这一章补完，"
                         "已经做好的不会重跑。",
                         static_cast<long long>(left));

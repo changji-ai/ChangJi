@@ -323,3 +323,46 @@ TEST_CASE("格式判断") {
     CHECK(http::ref_suffix_for("application/octet-stream").empty());
     CHECK(http::ref_suffix_for("").empty());
 }
+
+// ---------------------------------------------------------------------------
+// 对话附件（POST /api/chat/upload，2026-09-25）
+// ---------------------------------------------------------------------------
+//
+// 网页给不出引擎那台机器上的路径，只能把文件传上来，拿回路径再跟着那句话发。
+
+TEST_CASE("对话附件：传上来落在片子的 uploads/ 里，回的是能交给 /api/chat 的绝对路径") {
+    const fs::path root = fresh_copy("附件");
+    const auto r = http::post_chat_attachment(paths::to_utf8(root), "董平.png", "PNGDATA");
+    REQUIRE(r.status == 200);
+    const fs::path got = paths::from_utf8(r.body.at("path").get<std::string>());
+    CHECK(got.is_absolute());
+    CHECK(got.parent_path().filename() == "uploads");
+    CHECK(r.body.at("kind") == "image");
+    CHECK(r.body.at("name") == "董平.png");
+    std::ifstream in(got, std::ios::binary);
+    const std::string back((std::istreambuf_iterator<char>(in)), {});
+    CHECK(back == "PNGDATA");
+
+    SUBCASE("同名传两次不互相盖") {
+        const auto r2 = http::post_chat_attachment(paths::to_utf8(root), "董平.png", "OTHER");
+        CHECK(r2.body.at("path") != r.body.at("path"));
+    }
+    SUBCASE("读不懂的当场拒，空文件拒") {
+        CHECK_THROWS(http::post_chat_attachment(paths::to_utf8(root), "run.exe", "MZ"));
+        CHECK_THROWS(http::post_chat_attachment(paths::to_utf8(root), "a.png", ""));
+    }
+}
+
+TEST_CASE("对话附件：文件名只留最后一段，路径穿不出 uploads/") {
+    CHECK(http::clean_upload_name("C:\\fakepath\\稿子.docx") == "稿子.docx");
+    CHECK(http::clean_upload_name("../../etc/passwd.txt") == "passwd.txt");
+    CHECK(http::clean_upload_name("..") == "file");
+    CHECK(http::clean_upload_name(".hidden.md") == "hidden.md");
+    CHECK(http::clean_upload_name("a\nb\x01" "c.txt") == "abc.txt");
+    CHECK(http::clean_upload_name("") == "file");
+    // 太长的截掉，扩展名留着（读不读得懂按它判）
+    const std::string longname = std::string(200, 'x') + ".mp4";
+    const std::string cut = http::clean_upload_name(longname);
+    CHECK(cut.size() <= 80);
+    CHECK(cut.substr(cut.size() - 4) == ".mp4");
+}

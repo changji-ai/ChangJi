@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <iterator>
 #include <mutex>
 #include <string>
 #include <string_view>

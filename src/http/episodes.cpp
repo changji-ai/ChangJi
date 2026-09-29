@@ -1,4 +1,6 @@
 #include "http/episodes.hpp"
+#include "http/run.hpp"
+#include "media/assemble.hpp"
 #include "http/job_stream.hpp"
 #include "config/runtime.hpp"
 
@@ -71,14 +73,6 @@ std::string ep_fmt(int n) {
     char buf[16];
     std::snprintf(buf, sizeof(buf), "ep%02d", n);
     return std::string(buf);
-}
-
-/// 对应 re.fullmatch(r"[a-z0-9_]+", s)。
-bool is_valid_episode_id(const std::string& s) {
-    if (s.empty()) return false;
-    return std::all_of(s.begin(), s.end(), [](unsigned char c) {
-        return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_';
-    });
 }
 
 /// 把 shot_id / scene_id 里的旧章号换成新的，**只换第一处**。
@@ -277,6 +271,8 @@ ApiResult post_script(const json& body, llm::Client& client,
 
     json out = {{"saved", true}, {"regenerated", false}};
     if (regenerate) {
+        // 这一章正在出片就别重拆，见 refuse_replan_while_rendering。
+        refuse_replan_while_rendering(paths::to_utf8(store.root()), episode_id);
         const AssetLibrary assets = store.load_assets();
         // 单镜的时长档位是这部电影的属性（[video].max_shot_s），按项目那份设置
         // 算一遍再拆镜头——只挂在这条线程上（见 stages::ScopedVideoLimits）。
@@ -286,7 +282,7 @@ ApiResult post_script(const json& body, llm::Client& client,
         // 同步接口也要在顶栏露面，理由见 pipeline/activity.hpp 开头那段：
         // 它占着 LLM 槽，不露面的话别人挂在「显存不够」上而挡路的是谁查不到。
         pipeline::Activity act{"plan", paths::to_utf8(store.root()), episode_id,
-                               SAY("正在拆镜头")};
+                               SAY("正在拆分镜头")};
         const pipeline::CancelLink stop_here{tok, act};
         // 切场、拆镜、补台词、查覆盖、重编号、拉回时长都在 run_storyboard 里，
         // 和 post_plan 是同一份（按场拆镜在那儿分岔）。
@@ -297,6 +293,7 @@ ApiResult post_script(const json& body, llm::Client& client,
         sb.duration_s = ep->target_duration_s;
         sb.on_thinking = thinking_sink();
         sb.on_progress = [&act](const std::string& m) { act.set_message(m); };
+        sb.parts_file = pipeline::storyboard_parts_path(store.root(), episode_id);   // 拆好的场先留底，断了接着拆
         try {
             ep->shots = pipeline::run_storyboard(sb, client, tok).shots;
             // 照哪一版剧本拆的，见 Episode::shots_from。这一支拆的就是刚
@@ -342,6 +339,9 @@ ApiResult post_episode(const json& body) {
     if (ep_id.empty()) ep_id = next_episode_id(project);
     if (!is_valid_episode_id(ep_id)) {
         throw ApiError(400, SAY("章节 id 只能用小写字母、数字和下划线"));
+    }
+    if (!is_new_episode_id_ok(ep_id)) {
+        throw ApiError(400, SAY("章节 id 不能以「下划线加两位数字」结尾（会和成片的文件名撞上）"));
     }
     if (project.episode_by_id(ep_id) != nullptr) {
         throw ApiError(409, SAYF("章节 %1 已存在", ep_id));
@@ -456,6 +456,18 @@ ApiResult post_episode_action(const json& body) {
     throw ApiError(400, SAYF("不认识的操作 %1，可选：delete、duplicate、"
                              "rename",
                              action));
+}
+
+/// 对应 re.fullmatch(r"[a-z0-9_]+", s)。
+bool is_valid_episode_id(const std::string& s) {
+    if (s.empty()) return false;
+    return std::all_of(s.begin(), s.end(), [](unsigned char c) {
+        return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_';
+    });
+}
+
+bool is_new_episode_id_ok(const std::string& s) {
+    return is_valid_episode_id(s) && media::episode_of_output(s).value_or("") == s;
 }
 
 }  // namespace changji::http

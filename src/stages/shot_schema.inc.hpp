@@ -39,7 +39,7 @@ inline constexpr const char* kShotSchemaJson =
   },
   "CharacterInShot": {
    "additionalProperties": false,
-   "description": "角色在本镜头中的表现。\n\n只有可变项。外观描述属于角色资产，不在这里，也不允许大模型在这里写。",
+   "description": "角色在本镜头中的表现",
    "properties": {
     "char_id": {
      "description": "角色 id，必须是已注册角色之一",
@@ -87,7 +87,7 @@ inline constexpr const char* kShotSchemaJson =
   },
   "DialogueLine": {
    "additionalProperties": false,
-   "description": "一句台词。时长字段由配音阶段回填，分镜阶段不填。",
+   "description": "一句台词",
    "properties": {
     "char_id": {
      "anyOf": [
@@ -192,7 +192,7 @@ inline constexpr const char* kShotSchemaJson =
    "type": "string"
   },
   "ShotSize": {
-   "description": "景别。中景打头，其余由近到远。",
+   "description": "景别",
    "enum": [
     "MS",
     "ECU",
@@ -237,7 +237,6 @@ inline constexpr const char* kShotSchemaJson =
  "description": "一个镜头。",
  "properties": {
   "shot_id": {
-   "description": "全局唯一，如 ep01_s03_sh007",
    "pattern": "^[a-z0-9_]+$",
    "title": "Shot Id",
    "type": "string"
@@ -248,7 +247,6 @@ inline constexpr const char* kShotSchemaJson =
    "type": "string"
   },
   "order": {
-   "description": "章内顺序",
    "minimum": 0,
    "title": "Order",
    "type": "integer"

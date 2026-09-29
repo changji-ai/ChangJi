@@ -112,7 +112,12 @@ inline bool tool_is_read_only(std::string_view name) {
            name == "skill_read" ||
            // 看"被别的对话盖掉的那几块"（两份都摆出来）：只读。按人的决定写回
            // 的那个（overwrite_resolve）会动盘，不在这儿。
-           name == "overwrites_read";
+           name == "overwrites_read" ||
+           // 列接下来要做的几步：只在对话里（输入框上方那张卡），盘上一个字不动。
+           // 不算进来的话「只看」那一档连计划都列不了、「每步问我」列一次问一次。
+           name == "plan_set" ||
+           // 列循环：只读那张表。开、停会让引擎以后替人花钱/不再做，不在这儿。
+           name == "loop_list";
 }
 
 /// 这个工具**本来就没有可看的产出物**（不是"忘了分类"）。
@@ -136,7 +141,11 @@ inline bool tool_shows_nothing(std::string_view name) {
            name == "mcp_move" ||
            // 被盖掉的那几块：看、办的结果都在那一行回话上。写回的是哪一格要看
            // 参数里那一件（正文、剧本、分镜、大纲都有可能），按名字归不了格。
-           name == "overwrites_read" || name == "overwrite_resolve";
+           name == "overwrites_read" || name == "overwrite_resolve" ||
+           // 计划在输入框上方那张卡上，不在哪一格面板上。
+           name == "plan_set" ||
+           // 循环在侧栏那一块和输入框上方那一条上，不在哪一格面板上。
+           name == "loop_create" || name == "loop_list" || name == "loop_delete";
 }
 
 }  // namespace changji::util

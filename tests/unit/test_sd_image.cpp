@@ -493,3 +493,30 @@ TEST_CASE("等机器回来那一档：卡片上说清在等谁，名字来回不
     // 跨机时这一档要经过 JSON 再回来，认不出会被当成 sample
     CHECK(changji::infer::phase_from(changji::infer::phase_name(Phase::Wait)) == Phase::Wait);
 }
+
+TEST_CASE("替别的机器跑的活，预览带自己的前缀；本机的落点不收") {
+    // 每部片子都有 ep01_sh001。原来预览的 tag 就是 shot_id：这台一边出自己的片子、
+    // 一边替别人跑活时，别人那一镜的采样图画到自己镜头墙同名那一格上。
+    std::vector<std::string> local_seen, task_seen;
+    const infer::PreviewSinkHandle local([&](const std::string& t, int, std::string) {
+        if (infer::preview_tag_is_local(t)) local_seen.push_back(t);
+    });
+    std::string task_tag;
+    {
+        const infer::PreviewScope scope("task:42");
+        task_tag = infer::scoped_preview_tag("ep01_sh001");
+    }
+    const infer::PreviewSinkHandle task([&](const std::string& t, int, std::string) {
+        if (t == task_tag) task_seen.push_back(t);
+    });
+
+    infer::publish_preview("ep01_sh001", 1, "data:x");   // 本机自己的
+    {
+        const infer::PreviewScope scope("task:42");        // 替别人跑的那条线程
+        infer::publish_preview(infer::scoped_preview_tag("ep01_sh001"), 1, "data:y");
+    }
+    CHECK(local_seen == std::vector<std::string>{"ep01_sh001"});
+    CHECK(task_seen.size() == 1);
+    // 出了作用域就不带前缀了
+    CHECK(infer::scoped_preview_tag("ep01_sh001") == "ep01_sh001");
+}

@@ -34,25 +34,70 @@ constexpr double kMarginRatio = 0.030;
 
 int scaled(int v, double k) { return std::max(1, static_cast<int>(std::lround(v * k))); }
 
-}  // namespace
+/// 版式和大小：`stage_watermark` 和 `burned_watermark_rect` 共用这一份，
+/// 两处各算一遍的话抹的和烧的迟早对不上（CLAUDE.md 第八条）。
+struct Geometry {
+    bool ok = false;
+    bool portrait = false;
+    int width = 0;
+    int height = 0;
+    int margin = 0;
+};
 
-WatermarkPlan stage_watermark(const fs::path& image_path, int target_w,
-                              int target_h, int upscale) {
+Geometry geometry(int target_w, int target_h, int upscale) {
     const int up = std::max(1, upscale);
     // 放大过的画面：按**放大前**的短边算好，再乘回去。直接拿最终尺寸算的话
     // 补出来的比被一起放大的那个旧水印小（32px 下限不是按比例走的），
     // 旧的会从左上角露出来。
     const int shorter = std::min(target_w, target_h) / up;
     if (shorter <= 0) return {};
+    Geometry g;
+    g.ok = true;
+    g.portrait = target_h > target_w;
+    const int src_w = g.portrait ? bundled::kWatermarkPortraitW : bundled::kWatermarkLandscapeW;
+    const int src_h = g.portrait ? bundled::kWatermarkPortraitH : bundled::kWatermarkLandscapeH;
+    const int mark_h =
+        std::max(kMinMarkH, static_cast<int>(std::lround(shorter * kMarkRatio))) * up;
+    const double k = static_cast<double>(mark_h) / bundled::kWatermarkBaseMarkH;
+    g.width = scaled(src_w, k);
+    g.height = scaled(src_h, k);
+    g.margin = static_cast<int>(std::lround(shorter * kMarginRatio)) * up;
+    return g;
+}
 
-    const bool portrait = target_h > target_w;
+}  // namespace
+
+WatermarkRect burned_watermark_rect(int frame_w, int frame_h) {
+    const Geometry g = geometry(frame_w, frame_h, 1);
+    if (!g.ok) return {};
+    constexpr int kPad = 2;
+    WatermarkRect r;
+    r.x = std::max(1, frame_w - g.width - g.margin - kPad);
+    r.y = std::max(1, frame_h - g.height - g.margin - kPad);
+    const int right = std::min(frame_w - 1, frame_w - g.margin + kPad);
+    const int bottom = std::min(frame_h - 1, frame_h - g.margin + kPad);
+    r.w = right - r.x;
+    r.h = bottom - r.y;
+    if (r.w <= 0 || r.h <= 0) return {};
+    return r;
+}
+
+std::string delogo_filter(const WatermarkRect& r) {
+    if (r.empty()) return {};
+    return "delogo=x=" + std::to_string(r.x) + ":y=" + std::to_string(r.y) +
+           ":w=" + std::to_string(r.w) + ":h=" + std::to_string(r.h);
+}
+
+WatermarkPlan stage_watermark(const fs::path& image_path, int target_w,
+                              int target_h, int upscale) {
+    const Geometry g = geometry(target_w, target_h, upscale);
+    if (!g.ok) return {};
+
+    const bool portrait = g.portrait;
     const unsigned char* png =
         portrait ? bundled::kWatermarkPortraitPng : bundled::kWatermarkLandscapePng;
     const std::size_t size = portrait ? sizeof(bundled::kWatermarkPortraitPng)
                                       : sizeof(bundled::kWatermarkLandscapePng);
-    const int src_w = portrait ? bundled::kWatermarkPortraitW : bundled::kWatermarkLandscapeW;
-    const int src_h = portrait ? bundled::kWatermarkPortraitH : bundled::kWatermarkLandscapeH;
-
     const fs::path dest = image_path;
     {
         std::error_code ec;
@@ -69,15 +114,11 @@ WatermarkPlan stage_watermark(const fs::path& image_path, int target_w,
         }
     }
 
-    const int mark_h =
-        std::max(kMinMarkH, static_cast<int>(std::lround(shorter * kMarkRatio))) * up;
-    const double k = static_cast<double>(mark_h) / bundled::kWatermarkBaseMarkH;
-
     WatermarkPlan plan;
     plan.image = dest;
-    plan.width = scaled(src_w, k);
-    plan.height = scaled(src_h, k);
-    plan.margin = static_cast<int>(std::lround(shorter * kMarginRatio)) * up;
+    plan.width = g.width;
+    plan.height = g.height;
+    plan.margin = g.margin;
     return plan;
 }
 
@@ -88,7 +129,9 @@ std::string with_watermark(const std::string& chain, const WatermarkPlan& plan) 
     // split/blend 用的是 o / g / g2。撞名的话 ffmpeg 报的是「滤镜语法错误」，
     // 看不出是两处各自取的标签重了。
     const std::string m = std::to_string(plan.margin);
-    return chain + "[cjwm_base];movie='" + escape_filter_path(plan.image) +
+    // **键写明（filename=）**：路径里带 `=`（`/x/a=b/…`）时，不写键的第一个
+    // 参数被拆成「/x/a」=「b/…」，ffmpeg 报 Option not found——每一镜都出不来。
+    return chain + "[cjwm_base];movie=filename='" + escape_filter_path(plan.image) +
            "',scale=" + std::to_string(plan.width) + ":" +
            std::to_string(plan.height) + "[cjwm];[cjwm_base][cjwm]overlay=W-w-" +
            m + ":H-h-" + m;

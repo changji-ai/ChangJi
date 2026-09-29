@@ -19,6 +19,7 @@
 #include "stages/chapter_write.hpp"
 #include "stages/script.hpp"   // random_shape
 #include "stages/story_analyze.hpp"
+#include "stages/story_analyze.hpp"
 #include "stages/story_understand.hpp"
 #include "stages/bible.hpp"
 #include "http/planning.hpp"
@@ -52,7 +53,7 @@ using namespace changji::models;
 /// 校验请求体里没有多余字段。和 scripting.cpp 的同名函数一致：
 /// 对应 pydantic 的 extra="forbid"，**422 不是 400**。
 void forbid_extra(const json& body, const std::set<std::string>& allowed) {
-    if (!body.is_object()) throw ApiError(400, SAY("请求体要是一个对象"));
+    if (!body.is_object()) throw ApiError(400, SAY("请求体须为 JSON 对象"));
     for (const auto& kv : body.items()) {
         // **`stream` 一律放行。** 它是传输层的信封字段，不是业务字段：
         // 路由那一层（script_route / batch_route）拿它决定这件活挪不挪到
@@ -466,7 +467,7 @@ json write_outline(ProjectStore& store, const Project& project,
                    pipeline::CancelToken& tok, bool peek,
                    const std::string& pasted, int chapters) {
     pipeline::Activity act{"outline", paths::to_utf8(store.root()), "",
-                           SAY("正在出大纲")};
+                           SAY("正在生成大纲")};
     const pipeline::CancelLink stop_here{tok, act};
 
     // **账记在这儿，不记在 post_story_outline 的异步分支里。**
@@ -680,17 +681,14 @@ ApiResult post_story_outline(const json& body_in, llm::Client& client,
     // 其冲。（这里原来写着"见 post_story_chapter 里那段"，而那个函数里
     // 没有这样一段：它压根没有自己的异步分支，整件事交给 script_route。）
     //
-    // ⚠️ **真实服务走的不是这一条。** `/api/story/outline` 挂在
+    // ⚠️ **真实服务的页面走的不是这一条。** `/api/story/outline` 挂在
     // `script_route` 上，而它 `take_async(body)` 会把 `async` 这个键**删掉**
-    // 再把处理函数扔进 `start_async`——所以到这儿时 body 里只剩 stream，
-    // 下面这个 if 永远是假。走到这里的只有直接调用（用例就是这么测的，见
-    // test_story_outline.cpp 里那两条）。
+    // 再把处理函数扔进 `start_async`。走到这里的是进程里直接调的：对话代理
+    // 写大纲那个工具（`agent/tools.cpp`）和用例。
     //
-    // 这也是下面 `own` 那个令牌够不着的原因：`start_async` 会挂一个
-    // JobScope 把令牌按 stream_id 登记进表里，顶栏「停下」按的就是它；
-    // 这一条没有，所以这里的令牌谁也触发不了。**要是哪天让这条上生产
-    // （比如给它换一条不剥 async 的路由），得照 start_async 先挂
-    // `const JobScope scope{stream_id};`**，否则那个按钮会安静地失效。
+    // **令牌照 start_async 那样登上**（2026-09-26 补）：原来这儿是一个谁也够不着
+    // 的私有令牌——场记的 `task_cancel` 回「这条对话没有在跑的活」，顶栏「停下」
+    // 也按不停，大纲照样写完、把整份故事换掉。
     if (opt_bool(body, "async", false) && !stream_id.empty()) {
         const std::string project_path = paths::to_utf8(store.root());
         // **回 202 之前就先登记一笔**（write_outline 进去还会登记一次，
@@ -698,8 +696,17 @@ ApiResult post_story_outline(const json& body_in, llm::Client& client,
         // 还没跑到 write_outline。擦账和记错都在 write_outline 里，这儿不管。
         OutlineRegistry::instance().started(project_path, stream_id);
         const std::string lane = opt_str(body, "lane", "");
-        Offload::instance().post([project_path, premise, scale, keywords,
-                                  stream_id, variation, chapters, lane, &client] {
+        auto tok = std::make_shared<pipeline::CancelToken>();
+        auto pending = std::make_shared<JobPending>(stream_id, *tok);
+        Offload::instance().post([project_path, premise, scale, keywords, stream_id, variation,
+                                  chapters, lane, &client, tok, pending]() mutable {
+            const JobScope scope{stream_id, *tok};
+            pending.reset();
+            if (tok->cancelled()) {
+                OutlineRegistry::instance().finished(project_path, stream_id);
+                job_error(stream_id, util::kCancelled);
+                return;
+            }
             // 这份大纲记在派它的那一道名下（`util/writer.hpp`）：它落盘时整份
             // 故事换掉，换掉了别的对话写的东西要认得出来。
             const util::WriterScope writer{
@@ -708,10 +715,9 @@ ApiResult post_story_outline(const json& body_in, llm::Client& client,
                 ProjectStore st = open_project(project_path);
                 const Project pj = load_or_400(st);
                 const Story ex = load_story_or_400(st);
-                pipeline::CancelToken own;
                 job_done(stream_id, write_outline(st, pj, ex, premise, scale,
                                                   keywords, stream_id, variation,
-                                                  client, own, /*peek=*/false,
+                                                  client, *tok, /*peek=*/false,
                                                   /*pasted=*/std::string(),
                                                   chapters));
             } catch (const ApiError& e) {
@@ -854,16 +860,26 @@ ApiResult post_story_chapter_add(const json& body) {
     const Story existing = load_story_or_400(store);
     Story story = existing;
 
+    // 章号取最大那个加一。**大得离谱的不算**（`ch99999999999` 这种从
+    // /api/story、/api/story/adopt 都进得来）：原来是 `std::stoi`，一个坏 id
+    // 之后这部片子每一次加章都 500；`ch2147483647` 更糟，+1 溢出。
+    constexpr int kMaxChapterNo = 99999;
     int top = 0;
     for (const Chapter& c : story.chapters) {
         const std::string& id = c.chapter_id;
-        if (id.size() > 2 && id.rfind("ch", 0) == 0 &&
-            id.find_first_not_of("0123456789", 2) == std::string::npos) {
-            top = std::max(top, std::stoi(id.substr(2)));
+        if (id.size() > 2 && id.rfind("ch", 0) == 0) {
+            const int n = text::parse_int_or(id.substr(2), -1);
+            if (n >= 0 && n < kMaxChapterNo) top = std::max(top, n);
         }
     }
+    const auto taken = [&story](const std::string& want) {
+        return std::any_of(story.chapters.begin(), story.chapters.end(),
+                           [&want](const Chapter& c) { return c.chapter_id == want; });
+    };
     char id[16];
-    std::snprintf(id, sizeof(id), "ch%02d", top + 1);
+    do {
+        std::snprintf(id, sizeof(id), "ch%02d", ++top);
+    } while (taken(id) && top < kMaxChapterNo);
 
     Chapter c;
     c.chapter_id = id;
@@ -951,7 +967,7 @@ ApiResult post_story_analyze(const json& body_in, llm::Client& client,
     }
 
     pipeline::Activity act{"analyze", paths::to_utf8(store.root()), "",
-                           SAY("正在读这个故事")};
+                           SAY("正在阅读故事")};
     const pipeline::CancelLink stop_here{tok, act};
 
     llm::Request req;
@@ -1010,7 +1026,7 @@ ApiResult post_story_understand_once(const json& body_in, llm::Client& client,
     }
 
     pipeline::Activity act{"understand", paths::to_utf8(store.root()), "",
-                           SAY("正在理解这个故事")};
+                           SAY("正在分析故事")};
     const pipeline::CancelLink stop_here{tok, act};
 
     llm::Request req;
@@ -1048,6 +1064,14 @@ ApiResult post_story_understand_once(const json& body_in, llm::Client& client,
     try {
         read = stages::apply_analysis(fresh, last_raw, overwrite);
     } catch (const std::exception&) {
+    }
+    // 长相那半的地方也归到名单上的名字：结构那半刚把模型换的叫法接回去了
+    //（apply_analysis 里那段），资产库里再存一份「人才市场大厅」的话，剧本写
+    // 「城西人才市场」、拆分镜又接不上。判据同一份，接出来的名字也就同一个。
+    {
+        std::vector<std::string> canon;
+        for (const auto& l : read.locations) canon.push_back(l.name);
+        stages::canonicalize_location_names(looks, canon);
     }
     json out = commit_story(store, project, std::move(read), fresh);
     const ApiResult merged = merge_assets(store, looks, overwrite, "story");
@@ -1136,7 +1160,7 @@ json write_one_chapter(ProjectStore& store, const Project& project, Story story,
     // 「这一章」整页没东西。章是故事那一层的，本来就不属于某一条章节记录，留空。
     pipeline::Activity act{
         "write_one", paths::to_utf8(store.root()), "",
-        SAYF("正在写 %1", me->title.empty() ? chapter_id : me->title)};
+        SAYF("正在撰写 %1", me->title.empty() ? chapter_id : me->title)};
     const pipeline::CancelLink stop_here{tok, act};
 
     const llm::Request req = chapter_request(story, chapter_id, project.style_line);
@@ -1527,7 +1551,7 @@ ApiResult post_story_revise(const json& body, llm::Client& client,
     // 同 write_one：第三个参数是 episode_id，`span.chapter_id` 不是章号，
     // 塞进去会把前端的章号卡死在一个不存在的章上。
     pipeline::Activity act{"revise", paths::to_utf8(store.root()), "",
-                           SAY("正在改这一段")};
+                           SAY("正在修改此段落")};
     const pipeline::CancelLink stop_here{tok, act};
 
     llm::Request req;
@@ -1588,7 +1612,8 @@ ApiResult post_story_revise(const json& body, llm::Client& client,
 }
 
 ApiResult post_story_revise_apply(const json& body) {
-    forbid_extra(body, {"project", "chapter_id", "from_char", "to_char", "text", "before"});
+    forbid_extra(body,
+                 {"project", "chapter_id", "from_char", "to_char", "text", "before", "whole"});
     ProjectStore store = open_project(body);
     // 读→拼进这一段→存→对齐，一把锁（ProjectStore::lock）。手改稿子每 1.5 秒
     // 存一次，正好是最容易和别的对话写的那一章撞上的一条。
@@ -1596,7 +1621,30 @@ ApiResult post_story_revise_apply(const json& body) {
     load_or_400(store);
     const Story story = load_story_or_400(store);
 
-    const stages::Span span = need_span(body, story);
+    // **整章换（`whole`）：`before` 核的是整章，不是区间。** 编辑器自动存原来
+    // 发的是「[0, 我手上那份的长度) + 那一段原文」——别的对话在**末尾**续写了
+    // 的话，这一段一个字没变，下面那道核对照样过，存下去的就是「人手上那份 +
+    // 新正文的后半截」（2026-09-25 拿浏览器实测撞到：409 那道门只拦得住改中间
+    // 的，拦不住往后接的）。整章换就核整章、区间取这一章现在的全长。
+    const bool whole = opt_bool(body, "whole", false);
+    stages::Span span;
+    if (whole) {
+        const auto b = body.find("before");
+        if (b == body.end() || !b->is_string()) {
+            throw ApiError(400, SAY("整章换要带上 before（你手上那份存之前的原文）"));
+        }
+        span.chapter_id = need_str(body, "chapter_id");
+        const Chapter* c = story.chapter_by_id(span.chapter_id);
+        if (c == nullptr) throw ApiError(404, SAYF("没有这一章：%1", span.chapter_id));
+        if (c->text != b->get<std::string>()) {
+            throw ApiError(409, SAY("这一章在你改的时候已经变了（别的对话或另一个窗口写过它），"
+                                    "先重新读一遍再存"));
+        }
+        span.from_char = 0;
+        span.to_char = c->text_len();
+    } else {
+        span = need_span(body, story);
+    }
     const std::string text_in = text::strip_ws(need_str(body, "text"));
     if (text_in.empty()) throw ApiError(400, SAY("要写回去的那一段是空的"));
 
@@ -1605,7 +1653,7 @@ ApiResult post_story_revise_apply(const json& body) {
     // 合法（没超出末尾），于是只换掉开头那一截——存下去的是「人手上那份 + 新
     // 正文的后半截」，从半句话接上。带了 `before`（它改的是哪一段原文）就核一下，
     // 对不上回 409，让它先重新读一遍。不带的老客户端照旧。
-    if (const auto b = body.find("before"); b != body.end() && b->is_string()) {
+    if (const auto b = body.find("before"); !whole && b != body.end() && b->is_string()) {
         if (stages::span_text(story, span) != b->get<std::string>()) {
             throw ApiError(409, SAY("这一章在你改的时候已经变了（别的对话或另一个窗口写过它），"
                                     "先重新读一遍再存"));
@@ -1634,6 +1682,8 @@ ApiResult post_story_revise_apply(const json& body) {
 ApiResult post_story_from_episodes(const json& body) {
     forbid_extra(body, {"project", "overwrite"});
     ProjectStore store = open_project(body);
+    // 读→反推→存故事→对齐章节→接章，一把锁（CLAUDE.md 第十四条）。没有大模型。
+    const auto store_guard = store.lock();
     const Project project = load_or_400(store);
     const Story existing = load_story_or_400(store);
 
@@ -1660,7 +1710,11 @@ ApiResult post_story_from_episodes(const json& body) {
 
     // **顺手把章节记录和章接上。** 不接的话故事在这儿、章节记录在那儿，两边
     // 看着都齐全，只有写下一章时才发现它拿不到前情——而那时候没有任何报错。
-    Project linked = project;
+    //
+    // ⚠️ **现读，别拿进门那份。** 上面 sync 刚写过 project.json（章名、时长、
+    // 新建的章节记录）；拿进门时那份旧的盖回去，那些就全没了——commit_story
+    // 上写着同一件事（2026-09-25 审出来这里漏了）。
+    Project linked = load_or_400(store);
     for (const auto& p : story.plan) {
         Episode* ep = linked.episode_by_id(p.episode_id);
         if (ep != nullptr) ep->chapter_refs = {p.from_chapter};

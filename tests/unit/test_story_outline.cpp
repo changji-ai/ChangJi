@@ -768,6 +768,19 @@ TEST_CASE("POST /api/story/chapter/add：在最后加一章，编号接最大的
         CHECK(r2.body.at("chapter_id") == "ch05");
         CHECK(store.load_story().chapters.back().title == "第 4 章");
     }
+    SUBCASE("有一章编号大得离谱：照样加得上，不 500") {
+        // 原来是 std::stoi：`ch99999999999` 从 /api/story、/adopt 都进得来，
+        // 一进来这部片子每次加章都 out_of_range（2026-09-25）。
+        Story odd = store.load_story();
+        Chapter c;
+        c.chapter_id = "ch99999999999";
+        c.title = "怪编号";
+        odd.chapters.push_back(c);
+        store.save_story(odd);
+        const auto r2 = http::post_story_chapter_add(json{{"project", p_str(root)}});
+        CHECK(r2.status == 200);
+        CHECK(r2.body.at("chapter_id") == "ch05");
+    }
     SUBCASE("不认的栏拒收（正文不走这条路）") {
         CHECK_THROWS(http::post_story_chapter_add(
             json{{"project", p_str(root)}, {"text", "x"}}));
@@ -6046,6 +6059,48 @@ TEST_CASE("POST /api/story/chapters：写的当口人把那一章写上了，不
 }
 
 
+TEST_CASE("POST /api/story/revise/apply：整章换（whole）核整章——别的对话只在末尾续写也拦得住") {
+    // 上一条只拦得住「开头也变了」。别的对话**只往后接**的话，[0, 旧长度) 那一段
+    // 一个字没变，区间核对照样过，存下去就是「人手上那份 + 新正文的后半截」
+    // （2026-09-25 在浏览器里实测撞到）。编辑器自动存改发 whole，核整章。
+    const fs::path root = fresh_project("末尾续写");
+    ProjectStore store(root);
+    Story s = parse_outline(good_outline().dump(), "梗概", StoryScale::MEDIUM);
+    s.chapters[0].text = "他推门进来。";
+    store.save_story(s);
+    const std::string id = s.chapters[0].chapter_id;
+
+    s.chapters[0].text = "他推门进来。她坐在黑暗里，一动不动。";
+    store.save_story(s);
+
+    // 旧的发法：区间核对放过了，拼出来半截——这就是 whole 要堵的那一种。
+    const json by_span = {{"project", p_str(root)}, {"chapter_id", id},
+                          {"from_char", 0}, {"to_char", 6},
+                          {"text", "他推门进来，没敲门。"}, {"before", "他推门进来。"}};
+    json whole = by_span;
+    whole.erase("from_char");
+    whole.erase("to_char");
+    whole["whole"] = true;
+    const auto r = http::guard([&] { return http::post_story_revise_apply(whole); });
+    CHECK(r.status == 409);
+    CHECK(store.load_story().chapters[0].text == "他推门进来。她坐在黑暗里，一动不动。");
+
+    // 重读之后拿整章当 before：整章换成人手上那份，没有尾巴。
+    whole["before"] = "他推门进来。她坐在黑暗里，一动不动。";
+    const auto ok = http::guard([&] { return http::post_story_revise_apply(whole); });
+    CHECK(ok.status == 200);
+    CHECK(store.load_story().chapters[0].text == "他推门进来，没敲门。");
+
+    // whole 不带 before 不收：没有它就核不了。
+    json bare = whole;
+    bare.erase("before");
+    CHECK(http::guard([&] { return http::post_story_revise_apply(bare); }).status == 400);
+
+    std::error_code ec;
+    fs::remove_all(root, ec);
+}
+
+
 TEST_CASE("POST /api/story/revise/apply：带着 before 的，那一段对不上就 409，不拼") {
     // 编辑器自动存是「从 0 到我手上那份的长度」整段换。那一章在人打字的当口被别的
     // 对话改长了，这个范围照样合法（没超出末尾），原来就只换掉开头那一截——存下去的
@@ -6090,4 +6145,156 @@ TEST_CASE("POST /api/story/revise/apply：带着 before 的，那一段对不上
 
     std::error_code ec;
     fs::remove_all(root, ec);
+}
+
+// ---------------------------------------------------------------------------
+// 地方名单只有一份（2026-09-27）
+//
+// 「走路带风」：大纲写的「城西人才市场」「军营营区」，理解那一步读正文回来是
+// 「人才市场大厅」「营区门口」——按名字全等去重，同一个地方两条都留下；圣经照
+// 后一份定妆、剧本照前一份写场次头，拆分镜每一场都接不上。三道：读回来的名字
+// 先往名单上接；提示词把名单给它看；存量的两份收成一份、资产名改回去。
+// ---------------------------------------------------------------------------
+
+namespace {
+
+changji::models::Story unified_story() {
+    changji::models::Story s;
+    changji::models::StoryCharacter lin;
+    lin.name = "林知夏";
+    s.characters.push_back(lin);
+    changji::models::StoryLocation a;
+    a.name = "城西人才市场";
+    a.what = "老城区一栋办公楼一层";
+    s.locations.push_back(a);
+    changji::models::StoryLocation b;
+    b.name = "军营营区";
+    s.locations.push_back(b);
+    changji::models::Chapter c;
+    c.chapter_id = "ch01";
+    c.title = "第一章";
+    c.text = "林知夏在人才市场排队，中午去了小面馆。";
+    s.chapters.push_back(c);
+    return s;
+}
+
+nlohmann::json renamed_reading() {
+    return nlohmann::json{
+        {"logline", "读出来的一句话"},
+        {"characters", {{{"name", "林知夏"}, {"identity", "退伍女兵"}}}},
+        {"relations", nlohmann::json::array()},
+        {"locations",
+         {{{"name", "人才市场大厅"}, {"what", "一楼大厅，窗口一排"}, {"when", "工作日上午"}},
+          {{"name", "营区门口"}, {"what", "岗亭和白杨"}, {"when", "清晨"}},
+          {{"name", "小面馆"}, {"what", "六张桌子"}, {"when", "中午"}}}},
+        {"chapters",
+         {{{"chapter_id", "ch01"},
+           {"summary", "读出来的梗概"},
+           {"characters", {"林知夏"}},
+           {"locations", {"人才市场大厅", "小面馆"}},
+           {"hooks", nlohmann::json::array()}}}}};
+}
+
+std::vector<std::string> names_of(const std::vector<changji::models::StoryLocation>& v) {
+    std::vector<std::string> out;
+    for (const auto& l : v) out.push_back(l.name);
+    return out;
+}
+
+}  // namespace
+
+TEST_CASE("读故事：模型给地方换了叫法，归到已有名单上，名单只有一份") {
+    const changji::models::Story s = unified_story();
+    const nlohmann::json j = renamed_reading();
+
+    SUBCASE("只补不顶：名字留名单上的，说明空的补上，新地方接在后面") {
+        const auto got = changji::stages::apply_analysis(s, j.dump(), false);
+        CHECK(names_of(got.locations) ==
+              std::vector<std::string>{"城西人才市场", "军营营区", "小面馆"});
+        CHECK(got.locations[0].what == "老城区一栋办公楼一层");   // 填着的不动
+        CHECK(got.locations[0].when == "工作日上午");             // 空的补上
+        CHECK(got.locations[1].what == "岗亭和白杨");
+        // 章里引的也是名单上的名字
+        CHECK(got.chapters[0].locations ==
+              std::vector<std::string>{"城西人才市场", "小面馆"});
+    }
+    SUBCASE("全部重出：说明换成这一趟的，名字照旧是名单上的") {
+        const auto got = changji::stages::apply_analysis(s, j.dump(), true);
+        CHECK(names_of(got.locations) ==
+              std::vector<std::string>{"城西人才市场", "军营营区", "小面馆"});
+        CHECK(got.locations[0].what == "一楼大厅，窗口一排");
+        CHECK(got.chapters[0].locations ==
+              std::vector<std::string>{"城西人才市场", "小面馆"});
+    }
+}
+
+TEST_CASE("读故事的提示词带着已有的名单，粘贴导入的没名单就不带") {
+    const changji::models::Story s = unified_story();
+    const std::string a = changji::stages::build_analyze_prompt(
+        s, changji::models::StyleLine::REALISTIC);
+    CHECK(a.find("【已有的人物】") != std::string::npos);
+    CHECK(a.find("【已有的地方】") != std::string::npos);
+    CHECK(a.find("城西人才市场：老城区一栋办公楼一层。") != std::string::npos);
+    CHECK(a.find("【已有的地方】") < a.find("章节如下"));
+
+    const std::string u = changji::stages::build_understand_prompt(
+        s, changji::models::StyleLine::REALISTIC);
+    CHECK(u.find("【已有的地方】") != std::string::npos);
+    CHECK(u.find("【已有的地方】") < u.find("章节如下"));
+    // 理解那条路章节前面一条禁令都没有（上面那条用例钉着），名单这段也不许带「不要」。
+    CHECK(u.find("不要") > u.find("章节如下"));
+
+    changji::models::Story bare = s;
+    bare.locations.clear();
+    bare.characters.clear();
+    const std::string b = changji::stages::build_understand_prompt(
+        bare, changji::models::StyleLine::REALISTIC);
+    CHECK(b.find("【已有的") == std::string::npos);
+}
+
+TEST_CASE("存量故事两份名单收成一份，资产名跟着改回去") {
+    changji::models::Story s = unified_story();
+    changji::models::StoryLocation dup;
+    dup.name = "人才市场大厅";
+    dup.what = "一楼大厅";
+    dup.when = "工作日上午";
+    s.locations.push_back(dup);
+    changji::models::StoryLocation gate;
+    gate.name = "营区门口";
+    gate.what = "岗亭";
+    s.locations.push_back(gate);
+    changji::models::StoryLocation shop;
+    shop.name = "县城裁缝铺";
+    s.locations.push_back(shop);
+    s.chapters[0].locations = {"人才市场大厅", "城西人才市场", "县城裁缝铺"};
+
+    const auto alias = changji::stages::unify_story_locations(s);
+    CHECK(names_of(s.locations) ==
+          std::vector<std::string>{"城西人才市场", "军营营区", "县城裁缝铺"});
+    CHECK(s.locations[0].what == "老城区一栋办公楼一层");   // 先出现的那条说明留着
+    CHECK(s.locations[0].when == "工作日上午");             // 别名那条把空的补上
+    CHECK(s.locations[1].what == "岗亭");
+    CHECK(alias.at("人才市场大厅") == "城西人才市场");
+    CHECK(alias.at("营区门口") == "军营营区");
+    CHECK(s.chapters[0].locations ==
+          std::vector<std::string>{"城西人才市场", "县城裁缝铺"});
+
+    changji::models::AssetLibrary lib;
+    changji::models::Location hall;
+    hall.location_id = "loc_job_hall";
+    hall.name = "人才市场大厅";
+    lib.locations["loc_job_hall"] = hall;
+    changji::models::Location tailor;
+    tailor.location_id = "loc_tailor_shop";
+    tailor.name = "县城裁缝铺";
+    lib.locations["loc_tailor_shop"] = tailor;
+    changji::models::Location other;
+    other.location_id = "loc_other";
+    other.name = "酒店大厅";
+    lib.locations["loc_other"] = other;
+    const int n = changji::stages::canonicalize_location_names(lib, names_of(s.locations));
+    CHECK(n == 1);
+    CHECK(lib.locations["loc_job_hall"].name == "城西人才市场");
+    CHECK(lib.locations["loc_tailor_shop"].name == "县城裁缝铺");
+    CHECK(lib.locations["loc_other"].name == "酒店大厅");   // 接不上的不动
 }

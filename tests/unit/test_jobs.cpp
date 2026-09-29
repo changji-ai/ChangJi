@@ -26,6 +26,7 @@
 #include "util/say.hpp"
 
 #include "pipeline/jobs.hpp"
+#include "pipeline/task_board.hpp"
 
 using namespace changji::pipeline;
 using json = nlohmann::json;
@@ -173,6 +174,70 @@ TEST_CASE("取消") {
         release = true;
         t.wait_idle();
     }
+}
+
+TEST_CASE("start() 等上一条线程退的当口：停不丢、槽不让第三件挤进来") {
+    // start() 占了坑、解锁去 join 上一条线程时，有人按停：原来 running 被写回
+    // false，第三个 start() 看它空着挤进来，两个一起 join 同一条线程（未定义
+    // 行为，实际 terminate）；而那一下的停被 token.reset() 抹掉，第二件照跑。
+    JobTable t;
+    std::atomic<bool> release{false};
+    std::atomic<bool> a_running{false};
+    // 第一件：不认停，等放行才退——模拟收尾很慢的那种。
+    t.start(JobKind::Run, "ep_01", [&](JobProgress&) {
+        a_running = true;
+        while (!release.load()) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    });
+    while (!a_running.load()) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    CHECK(t.cancel(JobKind::Run));
+
+    // 第二件：会卡在 join 上。
+    std::atomic<int> b_saw_cancel{-1};
+    auto b = std::async(std::launch::async, [&] {
+        return t.start(JobKind::Run, "ep_02", [&](JobProgress& p) {
+            b_saw_cancel = p.cancelled() ? 1 : 0;
+        });
+    });
+    // 等它占上坑（running 立起来、正在 join）。
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!t.running(JobKind::Run) && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    REQUIRE(t.running(JobKind::Run));
+
+    // 这当口按停，然后第三件想挤进来。
+    CHECK(t.cancel(JobKind::Run));
+    CHECK_FALSE(t.start(JobKind::Run, "ep_03", noop()));
+
+    release = true;
+    CHECK(b.get());
+    t.wait_idle();
+    // 那一下的停没丢：第二件进门就看见自己被停了。
+    CHECK(b_saw_cancel.load() == 1);
+}
+
+TEST_CASE("批量写作砸了（set_error，不抛）：任务账上那一行记成「没成」，不是「做完了」") {
+    // 原来只记在任务表里，账本那一行照样按做完结账：tasks_read、派活回报都说
+    // 「刚做完」，场记当成了接着往下派。
+    JobTable t;
+    t.start(JobKind::Write, "", [](JobProgress& p) { p.set_error("正文是空的"); },
+            "", "/p/账本", "写正文 · 还缺的 1 章");
+    t.wait_idle();
+    // ⚠️ **槽先放、账后结**：工作线程先把槽标成空（`wait_idle` 就是等这个），账本那一行
+    // 要等它手里的 `act` 析构才挪进「做完的」。两下之间有一丝缝——整套一起跑、机器忙的时候
+    // 这儿偶尔先读到（2026-09-28 全量跑红过两回，单跑八次全绿）。等那一行落账，最多一秒。
+    bool seen = false;
+    for (int i = 0; i < 100 && !seen; ++i) {
+        const auto b = task_board("/p/账本");
+        for (const auto& r : b.at("done")) {
+            if (r.value("title", std::string()) != "写正文 · 还缺的 1 章") continue;
+            seen = true;
+            CHECK(r.value("state", std::string()) == "failed");
+            CHECK(r.value("error", std::string()) == "正文是空的");
+        }
+        if (!seen) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    CHECK(seen);
 }
 
 TEST_CASE("异常被兜住，不会崩掉整个服务") {

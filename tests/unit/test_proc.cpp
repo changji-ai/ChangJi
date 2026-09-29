@@ -20,6 +20,11 @@
 #include "util/paths.hpp"
 #include "util/proc.hpp"
 
+#ifndef _WIN32
+#include <unistd.h>
+#endif
+#include "util/text.hpp"
+
 using namespace changji;
 namespace fs = std::filesystem;
 
@@ -280,6 +285,74 @@ TEST_CASE("超时会把子进程杀掉，而不是把调用线程钉住") {
     CHECK_MESSAGE(elapsed < 4000, "实际等了 " << elapsed << " 毫秒");
 }
 
+#ifndef _WIN32
+TEST_CASE("超时杀的是整棵树：孙进程拿着管道也回得来") {
+    // `sh wrap.sh`、venv 的 python 启动器、批处理经 cmd.exe——直接起的那个只是
+    // 个壳，真干活的是它拉起的孙进程，**它也拿着 stdout 的写端**。原来超时只杀
+    // 壳，读线程等不到 EOF，run 永不返回。
+    const auto t0 = std::chrono::steady_clock::now();
+    const auto r = proc::run("sh", {"-c", "sleep 30 & sleep 30; wait"}, 500);
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                             std::chrono::steady_clock::now() - t0)
+                             .count();
+    CHECK(r.timed_out);
+    CHECK_MESSAGE(elapsed < 5000, "实际等了 " << elapsed << " 毫秒");
+}
+
+TEST_CASE("自己退了、留下的孙进程还拿着管道：最多再等一会儿就回来") {
+    // 没设超时的调用（出片那一步的编码）原来会跟着那个孙进程一直等下去。
+    const auto t0 = std::chrono::steady_clock::now();
+    const auto r = proc::run("sh", {"-c", "sleep 8 & echo changji_left_behind"});
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                             std::chrono::steady_clock::now() - t0)
+                             .count();
+    CHECK(r.exit_code == 0);
+    CHECK(r.out.find("changji_left_behind") != std::string::npos);
+    CHECK_MESSAGE(elapsed < 6000, "实际等了 " << elapsed << " 毫秒");
+}
+
+TEST_CASE("输出超过上限：照读不卡，留下的截在字的边界上") {
+    // 原来收满 1 MB 就不读了，子进程下一次写卡在满了的管道上：不设超时的永远不回来。
+    // 「想」三字节，一百万个是 3 MB，截口多半落在一个字中间。
+    const auto t0 = std::chrono::steady_clock::now();
+    const auto r = proc::run(
+        "sh", {"-c", "i=0; s=想想想想想想想想想想; while [ $i -lt 100000 ]; do printf %s $s; i=$((i+1)); done; echo done"});
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                             std::chrono::steady_clock::now() - t0)
+                             .count();
+    CHECK(r.exit_code == 0);
+    CHECK_FALSE(r.timed_out);
+    CHECK(r.out.size() < (1u << 20) + 100);
+    CHECK(r.out.find("输出过长") != std::string::npos);
+    CHECK(changji::text::is_valid_utf8(r.out));
+    CHECK_MESSAGE(elapsed < 20000, "实际等了 " << elapsed << " 毫秒");
+}
+#endif
+
+TEST_CASE("批处理的参数：引号、&、%VAR% 都漏不出 cmd.exe") {
+    // BatBadBut（CVE-2024-24576）：`\"` 在 cmd 眼里是引号开关，后面的 `&` 就成了
+    // 另一条命令。`{prompt}` 是故事梗概，人贴的、模型写的都有。
+    CHECK(proc::is_batch_file("C:\\tools\\musicgen.CMD"));
+    CHECK(proc::is_batch_file("x.bat"));
+    CHECK_FALSE(proc::is_batch_file("C:\\a.cmd\\ffmpeg.exe"));
+    CHECK_FALSE(proc::is_batch_file("/usr/bin/sh"));
+
+    CHECK(proc::cmd_quote_arg("plain") == "plain");
+    CHECK(proc::cmd_quote_arg("a\"b") == "\"a\"\"b\"");          // 引号写成 ""，不是 \"
+    CHECK(proc::cmd_quote_arg("x & del y") == "\"x & del y\"");  // & 关在引号里
+    CHECK(proc::cmd_quote_arg("%PATH%") == "\"%%cd:~,%PATH%%cd:~,%\"");
+    CHECK(proc::cmd_quote_arg("dir\\") == "\"dir\\\\\"");      // 结尾反斜杠翻倍
+
+    const auto line = proc::batch_command_line("C:\\t\\m.cmd", {"--prompt", "他说\" & calc & \""});
+    REQUIRE(line.has_value());
+    CHECK(line->rfind("cmd.exe /e:ON /v:OFF /d /s /c \"", 0) == 0);
+    // 引号个数是偶数：cmd 从头数到尾，引号开关一直落在「关」上的时候 & 才算数。
+    std::size_t quotes = 0;
+    for (const char c : *line) quotes += c == '"';
+    CHECK(quotes % 2 == 0);
+    CHECK_FALSE(proc::batch_command_line("m.cmd", {"一行\n两行"}).has_value());
+}
+
 // ---------------------------------------------------------------------------
 // 喂标准输入
 // ---------------------------------------------------------------------------
@@ -376,6 +449,25 @@ std::string slurp_file(const fs::path& p) {
 }
 
 }  // namespace
+
+#ifndef _WIN32
+TEST_CASE("spawn：收过尸的 id 不再认——活不活、杀不杀都只管自己起的") {
+    // 收了尸这个 pid 就还给系统了，随时发给别的进程。原来 alive 拿 kill(pid, 0)
+    // 问，问到的是那个不相干的进程；kill_spawned 照样发 SIGTERM / SIGKILL 过去
+    //（远端那台是 root 跑的）。
+    CHECK_FALSE(proc::alive(static_cast<proc::ProcHandle>(::getpid())));   // 不是我们起的
+
+    const auto h = proc::spawn("true", {}, {});
+    REQUIRE(h != 0);
+    const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (proc::alive(h) && std::chrono::steady_clock::now() < until) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    CHECK_FALSE(proc::alive(h));
+    proc::kill_spawned(h, 0);   // 早收过了：什么都不做，也不等
+    CHECK_FALSE(proc::alive(h));
+}
+#endif
 
 TEST_CASE("spawn：停下的时候，它拉起的子进程也一起停") {
 #ifdef _WIN32

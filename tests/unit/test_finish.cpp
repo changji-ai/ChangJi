@@ -769,6 +769,22 @@ TEST_CASE("配乐：文件放 output 下，描述是器乐无人声，没配命�
         CHECK_FALSE(r.ok);
         CHECK(has(r.error, "起不来"));
     }
+#ifndef _WIN32
+    SUBCASE("命令写了半截就失败：不留下半截文件，下一次不当成品沿用") {
+        // 原来命令直接写成品那个名字，而沿用只看大小不为零——报一次错之后，
+        // 往后每一次装配都一声不响地用这条坏配乐。
+        settings.sound.music_command = "sh -c 'printf RIFF > \"$1\"; exit 3' _ {out}";
+        const auto r = stages::ensure_music(settings, paths, ep, 60);
+        CHECK_FALSE(r.ok);
+        CHECK_FALSE(fs::exists(stages::music_path_for(paths, "ep01")));
+    }
+    SUBCASE("命令成了：换名成成品") {
+        settings.sound.music_command = "sh -c 'printf RIFF > \"$1\"' _ {out}";
+        const auto r = stages::ensure_music(settings, paths, ep, 60);
+        CHECK(r.ok);
+        CHECK(fs::file_size(stages::music_path_for(paths, "ep01")) == 4);
+    }
+#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -785,7 +801,8 @@ TEST_CASE("[look] [sound] [upscale] 从 toml 读出来，非法值拦住") {
              "[upscale]\ncommand = \"up.sh {in} {out}\"\nscale = 2\n"
              "[video]\nhero_takes = 3\nchain_frames = false\n";
     }
-    const auto s = config::load_settings(dir);
+    // 当全局那份读：配乐、放大那两条命令是机器的，片子里那份不认。
+    const auto s = config::load_settings_file(dir / "changji.toml");
     CHECK(s.look.preset == "clean");
     CHECK(s.look.grain == doctest::Approx(6.0));
     CHECK(s.look.soften == doctest::Approx(0.3));

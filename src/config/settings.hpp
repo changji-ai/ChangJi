@@ -183,6 +183,13 @@ struct LLMConfig {
     /// 三个值：`remote`（打 API）、`local`（进程内）、`command`（本机命令行）。
     std::string backend = "remote";
 
+    /// `backend = "local"` 时用哪份权重（绝对路径，UTF-8）。**空 = `[models].llm`。**
+    ///
+    /// **只在内存里、不落配置**：它是某一条对话挑的（`llm/chat_pick.hpp` 的
+    /// `with_pick`），整台机器那份永远是空的。进程内那条借槽时按它装
+    /// （`llm/local_client.cpp`），装着的和要的不是同一份就先换。
+    std::string local_weights;
+
     /// ---- `backend = "command"`：把本机装着的大模型命令行当后端 ----
     ///
     /// 用户 2026-09-18：「增加对 claudecode 和 codex 命令版的支持」。
@@ -385,6 +392,14 @@ struct LLMConfig {
     /// 会不够——那时候报的是"提示词太长"这句能读懂的话，不是静默截断，
     /// 用户照着把这个数调大就行。
     int context_tokens = 16384;
+
+    /// **本地模型闲多久就把显存还回去**（分钟，2026-09-27，用户问「本地模型显存什么时候
+    /// 释放」）。原来装上就一直占着，写完一章、对话换成了云端那一家，它还在卡上。
+    ///
+    /// 5 = 最后一次用完闲满五分钟就卸（和 Ollama 的 keep_alive 默认一样：接着写下一章
+    /// 不用每次重装，走开了也不白占着）；0 = 每次用完就卸；负数 = 一直留着，显存不够时才
+    /// 被出图出片挤掉（原来的样子）。出图出片要地方时照旧先卸它，和这一项无关。
+    double keep_alive_minutes = 5.0;
 
     /// 本地那条让不让模型先想再写。**默认开**——2026-09-14 定的方向是
     /// 「现在的模型都要思考」。只管 `backend = "local"`：远端各家关不掉，
@@ -1227,6 +1242,14 @@ struct PeerConfig {
 /// 上是三种做法（Windows 上根本不让覆盖正在运行的 exe），而检查在三处一样。
 /// 先把"手上这个是不是最新"答对，替换那一半留给装的那条路
 ///（`install.sh` / 重新下一个包）。
+/// 场记云（docs/账号与云服务方案.md）：登了场记账号之后用哪一朵云上的大模型和出片。
+///
+/// **机器那一份，片子里的不认**（`keep_film_settings_only`）：连谁是这台机器的事。
+/// 空 = 关掉云服务（登录页不摆账号那两颗按钮）；自己部署了一朵的人改成自己的地址。
+struct CloudConfig {
+    std::string url = "https://changji.xyz";
+};
+
 struct UpdateConfig {
     /// 起服务时和之后每隔一阵去问一次。**默认开**：不开的话这件事等于没有
     /// ——没人会想起来手动点检查。
@@ -1267,6 +1290,7 @@ struct Settings {
     WorkersConfig workers;
     PeerConfig peer;
     UpdateConfig update;
+    CloudConfig cloud;
 
     /// 显存覆盖。推理服务在别的机器上时本机探测不到，用它手动指定
     std::optional<double> vram_gb_override;
@@ -1341,7 +1365,15 @@ std::filesystem::path write_api_key_for(const std::string& base_url,
 ///
 /// 配置文件解析失败会抛 std::runtime_error，消息里带上是哪个文件——
 /// 「配置坏了」而不指出哪一份，用户只能挨个翻。
+///
+/// ⚠️ **项目那份只认这部电影的设置**（画幅、预告、装配编码和字幕、后期、声音、
+/// 闸门、挑哪一档模型和采样旋钮）。命令、程序路径、模型文件放哪、连谁——
+/// 片子里写了也不认：片子目录是会被拷来拷去的，那些得是这台机器自己的。
 Settings load_settings(const std::optional<std::filesystem::path>& project_dir = std::nullopt);
+
+/// 把**这一份文件**当全局配置读（每一节都认），再叠密钥和环境变量。
+/// 给用例和「读一份指定的配置」用；片子里那份走 `load_settings(片子目录)`。
+Settings load_settings_file(const std::filesystem::path& toml_file);
 
 /// 这一轮实际会用的规格：画幅、出片步数、首帧步数。
 ///
@@ -1357,7 +1389,8 @@ struct EffectiveSpec {
     int height = 0;
     int final_steps = 0;   ///< 出视频跑几步
     int frame_steps = 0;   ///< 出首帧跑几步。**和上面不是一个数**
-    bool turbo = false;    ///< 挂上 Turbo LoRA 了没有（文件真的在）
+    /// **成片档**挂着 Turbo LoRA 没有：文件真的在，而且 `video_lora_tiers` 里有成片档。
+    bool turbo = false;
     /// 步数是用户在 [tiers].final_steps 里写死的（那样 Turbo 不改它）
     bool steps_pinned = false;
 };
@@ -1374,7 +1407,17 @@ EffectiveSpec effective_spec(const Settings& s, int table_final_steps);
 /// LoRA 在干活那台——两台不一样时以干活那台为准：这台挂得上 Turbo 就压到
 /// 6 步，挂不上就照派来的跑。人钉死的（`steps_pinned`）一律不动。
 /// 同机、或两边都有 LoRA 时这一步是幂等的。
-int steps_on_node(const Settings& node, int dispatched_steps, bool steps_pinned);
+///
+/// `final_tier`：派来的是哪一档。LoRA 只挂在 `video_lora_tiers` 说的那几档上，
+/// 这一档不挂就照派来的跑。
+int steps_on_node(const Settings& node, int dispatched_steps, bool steps_pinned,
+                  bool final_tier);
+
+/// 出片 LoRA 挂不挂在这一档上（`[models].video_lora_tiers`：draft / final / both）。
+/// **只看配置，不看文件在不在**——那一半由调用方判。挂 LoRA（sd_video.cpp）和
+/// 压步数（effective_spec / steps_on_node）都问它：两处各写一份的话，就是「成片
+/// 档不挂 LoRA、步数却压到了 6」——裸模型跑 6 步，一镜全糊。
+bool video_lora_on_tier(const Settings& s, bool final_tier);
 
 /// 档位表标定出来的单镜耗时，乘上这个数就是**项目真正会跑的那一档**的耗时。
 ///

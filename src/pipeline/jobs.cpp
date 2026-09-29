@@ -1,5 +1,6 @@
 #include "pipeline/jobs.hpp"
 
+#include "llm/chat_pick.hpp"
 #include "pipeline/activity.hpp"
 #include "pipeline/task_board.hpp"
 #include "util/paths.hpp"
@@ -156,7 +157,7 @@ bool JobTable::start(JobKind kind, const std::string& episode_id, Body body,
                      const std::string& lane) {
     std::unique_lock lk(mu_);
     Slot& s = *find(kind, project, lane, /*make=*/true);
-    if (s.state.running) return false;
+    if (s.state.running || s.starting) return false;
 
     // 先占坑再干别的。下面 join 上一轮线程时要临时解锁，
     // 不先把 running 立起来的话，那个窗口里第二个 start() 会看到
@@ -179,12 +180,20 @@ bool JobTable::start(JobKind kind, const std::string& episode_id, Body body,
     // 刚按了停、还在收尾（命令行后端一收尾就是一次完整的生成），B 派活的那个
     // 请求线程就陪着干等。
     if (s.worker.joinable()) {
+        s.starting = true;
+        s.cancel_pending = false;
         lk.unlock();
         s.worker.join();
         lk.lock();
+        s.starting = false;
     }
 
     s.token.reset();
+    // join 那当口按的停不能丢（见 JobSlot::cancel_pending）。
+    if (s.cancel_pending) {
+        s.cancel_pending = false;
+        s.token.request();
+    }
     s.state = JobState{};
     s.state.running = true;
     s.state.job_id = new_job_id(kind);
@@ -203,8 +212,11 @@ bool JobTable::start(JobKind kind, const std::string& episode_id, Body body,
         : kind == JobKind::Run ? SAY("出片")
                                : SAY("批量写作");
     s.state.title = task_title;
+    // **这件活用哪个模型，派它的那条线程说了算**（`llm/chat_pick.hpp`）：对话里
+    // 挑了别的模型，它派出去写正文、拆分镜也照那一个来。页面按钮派的没挑，跟全局。
     s.worker = std::thread([this, kind, sp, job_id, project, lane, task_title, my_seq,
-                            body = std::move(body)]() {
+                            pick = llm::current_pick(), body = std::move(body)]() {
+        const llm::PickScope picked{pick};
         // **长跑任务也要进那本任务账。**
         //
         // 它原来只在自己这张表里（`running_jobs`），于是任务页面上一行都
@@ -243,6 +255,19 @@ bool JobTable::start(JobKind kind, const std::string& episode_id, Body body,
         } catch (...) {
             std::lock_guard lg(mu_);
             sp->state.error = SAY("未知异常");
+        }
+        // **任务账上那一行也要记成「没成」。** 批量写作这一族砸了是走
+        // `set_error` 记在任务表里的，不抛——原来账本这一行照样按「做完了」结账：
+        // 写正文一章没写出来，`tasks_read` 和派活回报都说「刚做完」，场记当成
+        // 成了接着往下派（2026-09-25 拿假模型跑出来的）。按停的不算：账本析构
+        // 时先认令牌，照旧记成「停下的」。
+        {
+            std::string err;
+            {
+                std::lock_guard lg(mu_);
+                if (sp->state.error.has_value()) err = *sp->state.error;
+            }
+            if (!err.empty()) act.task().fail(err);
         }
 
         json final_msg;
@@ -316,6 +341,8 @@ void JobTable::emit(const std::string& job_id, const json& msg) const {
 bool JobTable::cancel_locked(Slot& s) {
     if (!s.state.running) return false;
     s.token.request();
+    // 正在等上一条线程退：令牌马上要被 start() reset 掉，记一笔让它补上。
+    if (s.starting) s.cancel_pending = true;
 
     // running 立刻置 false，不等工作线程真的退出。
     //

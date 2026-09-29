@@ -34,7 +34,9 @@ I18N="$DESKTOP/i18n"
 # Qt 的 bin 不一定在 PATH 里（macOS 上 brew 装的那份就不在）。
 find_tool() {
     command -v "$1" 2>/dev/null && return 0
-    for p in /opt/homebrew/opt/qt/bin "$QT_ROOT_DIR/bin" "$(qmake6 -query QT_INSTALL_BINS 2>/dev/null || true)"; do
+    # `${QT_ROOT_DIR:-}`：脚本开着 set -u，没设这个变量时原来在这儿当场退出
+    #（「unbound variable」），后面 qmake6 那条退路根本走不到。
+    for p in /opt/homebrew/opt/qt/bin "${QT_ROOT_DIR:-}/bin" "$(qmake6 -query QT_INSTALL_BINS 2>/dev/null || true)"; do
         [ -x "$p/$1" ] && { echo "$p/$1"; return 0; }
     done
     return 1

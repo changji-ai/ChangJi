@@ -198,7 +198,7 @@
         "-i",
         "<ROOT>/output/.work/with_audio.mp4",
         "-vf",
-        "subtitles='<ROOT>/subtitles/episode.ass'",
+        "subtitles=filename='<ROOT>/subtitles/episode.ass'",
         "-c:v",
         "libx264",
         "-crf",

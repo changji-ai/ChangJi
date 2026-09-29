@@ -18,6 +18,8 @@
 
 #include <filesystem>
 #include <fstream>
+#include <sstream>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -31,6 +33,7 @@
 #include "pipeline/film_join.hpp"
 #include "pipeline/jobs.hpp"
 #include "util/paths.hpp"
+#include "util/proc.hpp"
 
 using namespace changji;
 
@@ -407,4 +410,53 @@ TEST_CASE("再合一次砸了：上一部成片还在，不是一部都不剩") 
 
     std::error_code ec;
     fs::remove_all(store.root(), ec);
+}
+
+TEST_CASE("整部电影：各章尺寸不一样，先把不齐的那几章统一了再拼（真 ffmpeg）") {
+    // 每一章按它自己那几镜里最大的尺寸装配——换过机器、画质档、开关过放大之后出的那
+    // 几章尺寸就不一样。concat -c copy 硬拼不报错，后半截参数全变：播放器花屏、卡住。
+    if (!proc::which("ffmpeg") || !proc::which("ffprobe")) {
+        WARN("这台机器上没有 ffmpeg，跳过");
+        return;
+    }
+    const fs::path root = fresh_project("尺寸不齐");
+    models::ProjectStore store(root);
+    models::Project p = store.load_project();
+    p.episodes.push_back(chapter_episode("ep01", "ch01"));
+    p.episodes.push_back(chapter_episode("ep02", "ch02"));
+    p.episodes.push_back(chapter_episode("ep03", "ch03"));
+    store.save_project(p);
+    store.save_story(story_with({"ch01", "ch02", "ch03"}));
+    fs::create_directories(store.paths().output());
+    const auto make = [&](const std::string& stem, const std::string& size) {
+        const auto r = proc::run(
+            "ffmpeg", {"-y", "-v", "error", "-f", "lavfi", "-i", "testsrc=size=" + size + ":rate=24:duration=1",
+                       "-f", "lavfi", "-i", "sine=frequency=440:duration=1", "-shortest",
+                       "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac",
+                       paths::to_utf8(store.paths().output() / (stem + ".mp4"))},
+            60000);
+        REQUIRE(r.exit_code == 0);
+    };
+    make("ep01", "320x240");
+    make("ep02", "320x240");
+    make("ep03", "640x360");   // 这一章不齐
+
+    const media::FFmpeg ff("ffmpeg", "ffprobe", media::default_runner());
+    const auto report = join_with(store, ff);
+    REQUIRE(fs::is_regular_file(report.path));
+    // 解一遍整部片子：每一帧都得是多数那一种的尺寸。
+    const auto frames = proc::run(
+        "ffprobe", {"-v", "error", "-select_streams", "v:0", "-show_entries", "frame=width,height",
+                    "-of", "csv=p=0", paths::to_utf8(report.path)},
+        60000);
+    REQUIRE(frames.exit_code == 0);
+    std::set<std::string> sizes;
+    std::istringstream in(frames.out);
+    for (std::string line; std::getline(in, line);) {
+        while (!line.empty() && (line.back() == ',' || line.back() == '\r')) line.pop_back();  // 有的帧带一栏空的附加信息
+        if (!line.empty()) sizes.insert(line);
+    }
+    CHECK(sizes == std::set<std::string>{"320,240"});
+    std::error_code ec;
+    fs::remove_all(root, ec);
 }

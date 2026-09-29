@@ -10,7 +10,7 @@ def check(n): ok.append(n); print("  ✓", n)
 tmp = tempfile.mkdtemp()
 G.CONFIG_PATH = os.path.join(tmp, "cloud.json"); G.LEGACY_CONFIG = os.path.join(tmp, "l.json")
 for k in ("AUTODL_TOKEN","PPIO_API_KEY","PPIO_TOKEN","ALIBABA_CLOUD_ACCESS_KEY_ID",
-          "ALIBABA_CLOUD_ACCESS_KEY_SECRET","TENCENTCLOUD_SECRET_ID","TENCENTCLOUD_SECRET_KEY"):
+          "ALIBABA_CLOUD_ACCESS_KEY_SECRET","ALICLOUD_ACCESS_KEY","ALICLOUD_SECRET_KEY","TENCENTCLOUD_SECRET_ID","TENCENTCLOUD_SECRET_KEY"):
     os.environ.pop(k, None)
 
 G.save_config({"aliyun": {"key_id":"AK","key_secret":"SK"}})
@@ -25,6 +25,34 @@ assert G.load_config()["aliyun"]["key_id"] == "AK"
 check("存配方不会把钥匙冲掉")
 assert oct(os.stat(G.CONFIG_PATH).st_mode)[-3:] == "600"
 check("配置文件权限还是 600")
+
+# 写到一半出错（这儿用存不成 JSON 的东西顶替断电、磁盘满）：原来直接覆盖原文件，
+# 留下半截 JSON，下次打开读不动当成空的——几家的钥匙全丢。
+try:
+    G.save_config({"aliyun": {"key_id": "AK2"}, "bad": object()})
+except TypeError:
+    pass
+else:
+    raise AssertionError("存不成的东西应该抛")
+assert G.load_config()["aliyun"]["key_id"] == "AK"
+assert not os.path.exists(G.CONFIG_PATH + ".part")
+check("存到一半出错：原来那份配置原样在，也不留半截的临时文件")
+
+# 生出来那一刻就是 600：拿一个宽松的 umask 存，中途的临时文件也不能是 644
+old_mask = os.umask(0o022)
+seen = []
+real_replace = os.replace
+def spy(a, b):
+    seen.append(oct(os.stat(a).st_mode)[-3:])
+    return real_replace(a, b)
+os.replace = spy
+try:
+    G.save_config(G.load_config())
+finally:
+    os.replace = real_replace
+    os.umask(old_mask)
+assert seen == ["600"], seen
+check("临时文件生出来就是 600（不是先 644 写完再 chmod）")
 
 G.save_prefs(min_vram=32, min_cards=1)
 assert G.load_prefs() == {"min_vram":32, "min_cards":1}

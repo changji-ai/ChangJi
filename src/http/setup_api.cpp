@@ -233,8 +233,8 @@ std::string pick_problem(const Group& g, const config::Settings& s) {
     if (g.find(it->second) != nullptr) return {};
     // **一句话一个键，不拿 `+` 拼三块。** 理由在 `util/say.hpp` 里
     // `SAYF` 那段：拼出来的碎片翻不了，语序也改不动。
-    return SAYF("配置里 [models.pick].%1 写的是「%2」，这一组里没有这一档"
-                "——这次按配置里的文件名算",
+    return SAYF("配置中 [models.pick].%1 的值「%2」不在此组的可选版本中，"
+                "本次按配置中的文件名判断",
                 g.key, it->second);
 }
 
@@ -526,7 +526,7 @@ ApiResult get_setup_state(const config::Settings& settings,
                                 {"probe", probe_hf}},
                            json{{"id", "hf-mirror"},
                                 {"label", SAY("HuggingFace 镜像")},
-                                {"note", SAY("魔搭上万一缺某个文件时的退路，不参与自动挑选")},
+                                {"note", SAY("魔搭缺少某个文件时的备用下载源，不参与自动选择")},
                                 {"probe", ""}}})},
              {"recommended", recommended},
              {"selected", selected},
@@ -557,37 +557,42 @@ ApiResult post_setup_download(const config::Settings& settings, const json& body
     // **真要下文件就不能"只对本次进程生效"。** 下完那一下 `on_item_done`
     // 会把这一组写回配置文件（它必须写：配置指着老模型而文件是新的，
     // sd.cpp 不报错，只出一段花屏）。收下这个要求再反悔，比当场说清楚糟。
-    if (!want_persist && want_download) {
+    // **只下文件、一个配置字都不动**（设置 ▸ 大模型里下本地编剧模型那一下，用户
+    // 2026-09-26）。那一组选中项的 settings 里写死着 `llm.backend = local`——照常写
+    // 的话，下一份本地模型就把整台机器的编剧换成了本地，而人只是想在某一条对话里
+    // 挑它（`llm/chat_pick.hpp`）。下完它就出现在输入框底下「本地」那一家里。
+    const bool keep_config = field_bool(body, "keep_config", false);
+    if (!want_persist && want_download && !keep_config) {
         throw ApiError(400,
-                       SAY("要下模型就得写回配置文件：文件下完之后配置得指"
-                           "过去，不然出图会拿着老模型跑。先勾上「写回配置"
-                           "文件」。"));
+                       SAY("下载模型时必须写入配置文件（persist 须为 true），"
+                           "否则下载完成后仍会使用旧模型。"));
     }
 
     // **搬着模型的时候不许下、不许换目录**：搬的那一头正拿着老目录和新目录两个
     // 路径在挪文件，这会儿再改一次目录，搬完的东西就落在一个配置已经不指着的地方。
     if (setup::Mover::instance().running()) {
-        throw ApiError(409, SAY("正在搬模型，搬完再说。"));
+        throw ApiError(409, SAY("正在移动模型，请在完成后再试。"));
     }
     if (setup::Downloader::instance().running()) {
         // 409 而不是静默忽略：用户点了第二次而界面什么都没变的话，
         // 他会以为第一次没点上。
         // **只保存也拦**：下载器正拿着上一套选择在跑，这会儿把配置改成
         // 另一套，下完那一下 on_item_done 又会写回去，两边打架。
-        // 按钮上写的是「停下」不是「停止」（ModelDialog 里那颗
-        // `stopDownload`）。这句话出现的时候人正卡着，而那颗按钮就在同一个
-        // 窗里、进度条旁边——名字差一个字，他会以为要找的是别的东西。
+        // 按钮名照界面上的字一字不差：2026-09-28 设置页改成正规说法起，进度条旁边
+        // 那颗叫「停止」（原来叫「停下」）。这句话出现的时候人正卡着，而那颗按钮
+        // 就在同一页、进度条旁边——名字差一个字，他会以为要找的是别的东西。
+        // 下面搬模型那条 409 是同一句，两处一起改。
         throw ApiError(409,
-                       SAY("已经在下了。要换选择先点进度条旁边那颗"
-                           "「停下」。"));
+                       SAY("正在下载。如需更改选择，请先点进度条旁边的"
+                           "「停止」。"));
     }
     // **这一条只在真要下的时候问。** 机器上没装 aria2/curl 跟"我想把配置
     // 存下来"毫无关系，而拦在这儿的话，没装下载器的机器连模型都选不了。
     if (want_download && setup::pick_tool().empty()) {
         throw ApiError(400,
-                       SAY("这台机器上没找到下载器（aria2c 或 curl）。"
-                           "装一个再回来：Debian/Ubuntu 是 apt-get install "
-                           "-y aria2，Windows 是 winget install aria2.aria2。"));
+                       SAY("本机未找到下载工具（aria2c 或 curl）。请先安装："
+                           "Debian/Ubuntu 执行 apt-get install -y aria2，"
+                           "Windows 执行 winget install aria2.aria2。"));
     }
 
     // 从哪儿下。前端不传就用探出来的那个。
@@ -598,7 +603,7 @@ ApiResult post_setup_download(const config::Settings& settings, const json& body
         // **认不出就报错，不静默退回默认值**：用户选了个源而程序偷偷换掉，
         // 他会以为自己选的生效了，然后对着"怎么还是这么慢"发愣。
         if (!picked.has_value()) {
-            throw ApiError(400, SAYF("不认识的下载源：%1",
+            throw ApiError(400, SAYF("无法识别的下载源：%1",
                                      raw->get<std::string>()));
         }
         if (*picked != setup::Source::Auto) source = *picked;
@@ -606,7 +611,7 @@ ApiResult post_setup_download(const config::Settings& settings, const json& body
 
     const auto it = body.find("selections");
     if (it == body.end() || !it->is_object()) {
-        throw ApiError(400, SAY("缺 selections"));
+        throw ApiError(400, SAY("缺少 selections"));
     }
     std::map<std::string, std::string> selections;
     for (const auto& [key, value] : it->items()) {
@@ -619,7 +624,7 @@ ApiResult post_setup_download(const config::Settings& settings, const json& body
     // 改目录时一组都不用选。真要下却一组没选才是错：那时候没有任何文件
     // 可下，静默返回的话用户会对着一个不动的进度条等。
     if (selections.empty() && want_download) {
-        throw ApiError(400, SAY("一组都没选"));
+        throw ApiError(400, SAY("未选择任何模型组"));
     }
 
     // 模型放哪。用户填了就以填的为准，**而且要先写进配置再开下**——
@@ -650,7 +655,7 @@ ApiResult post_setup_download(const config::Settings& settings, const json& body
         if (pick == selections.end()) continue;
         const Option* opt = g.find(pick->second);
         if (opt == nullptr) {
-            throw ApiError(400, SAYF("不认识的选项：%1", pick->second));
+            throw ApiError(400, SAYF("无法识别的选项：%1", pick->second));
         }
         const bool changed = current_option(g, settings) != pick->second;
 
@@ -684,7 +689,7 @@ ApiResult post_setup_download(const config::Settings& settings, const json& body
         // **一组都没变时反而全写**：那正是按钮显示「重写配置」的那一下，
         // 用途就是配置手改坏了拿它修回来。少了这一支，那个功能会变成
         // 一个什么都不做的按钮。
-        if (!opt->settings.empty() && (changed || !any_changed)) {
+        if (!keep_config && !opt->settings.empty() && (changed || !any_changed)) {
             // **整份 selections 传进去，不是只传这一组的 id。** 替换档
             // （编码器、VAE）挑的是哪一份就在里面，只传 id 的话写回配置的
             // 永远是默认那份——下的是小编码器、配置里写的是大编码器。
@@ -723,7 +728,7 @@ ApiResult post_setup_download(const config::Settings& settings, const json& body
     try {
         persist(immediate, want_persist);
     } catch (const std::exception& e) {
-        throw ApiError(500, SAYF("配置写不进去：%1", e.what()));
+        throw ApiError(500, SAYF("无法写入配置：%1", e.what()));
     }
 
     // ---- 「这部电影要哪一档」写进项目 ----
@@ -737,13 +742,24 @@ ApiResult post_setup_download(const config::Settings& settings, const json& body
     // 对等机装模型那条路都不属于任何一部电影。
     std::string wrote_pick;
     if (const auto pj = body.find("project");
-        pj != body.end() && pj->is_string() && !pj->get<std::string>().empty()) {
+        !keep_config && pj != body.end() && pj->is_string() &&
+        !pj->get<std::string>().empty()) {
         json pick = json::object();
         for (const auto& [group, id] : selections) pick[group] = id;
         if (!pick.empty()) {
-            const fs::path toml =
-                paths::expand_user(pj->get<std::string>()) / "changji.toml";
+            const fs::path root = paths::expand_user(pj->get<std::string>());
+            const fs::path toml = root / "changji.toml";
+            // 拿一个不存在的目录来，别顺手给它建一个出来。
+            std::error_code dir_ec;
+            if (!fs::is_directory(root, dir_ec)) {
+                throw ApiError(404, SAYF("项目目录不存在：%1", paths::to_utf8(root)));
+            }
             try {
+                // **先放一份电影自己的模板。** 片子里还没有 changji.toml 时
+                // save_user_config 拿的是**机器那份**模板起底——于是片子里出现
+                // [llm]、[workers] 这些和电影无关的节（片子是会被拷来拷去的）。
+                // 已经有了就一个字节都不动。
+                config::write_project_config(root, config::load_settings(root).video);
                 // 节名直接写 `models.pick`——写回那一层是按整串认节头的，
                 // 于是文件里出现的就是 `[models.pick]`。
                 wrote_pick = paths::to_utf8(
@@ -754,8 +770,8 @@ ApiResult post_setup_download(const config::Settings& settings, const json& body
                 // 比整个回 500 让人重来一遍强。
                 throw ApiError(
                     500,
-                    SAYF("这一档记不进项目里：%1。文件和本机配置都已经写好了，"
-                         "下次打开这部电影会退回按文件名认",
+                    SAYF("无法将所选版本记录到影片中：%1。文件和本机配置均已写入，"
+                         "下次打开此影片时将按文件名识别",
                          e.what()));
             }
         }
@@ -776,7 +792,8 @@ ApiResult post_setup_download(const config::Settings& settings, const json& body
     // 每下完一个文件回来一次。**一组的文件全齐了才写那一组的配置**：
     // 只写一半的话，配置里 video 指着新模型、video_vae 还是上一档的，
     // 而这种组合 sd.cpp 不报错，只是出一段花屏。
-    const auto on_item_done = [](const Item& done) {
+    const auto on_item_done = [keep_config](const Item& done) {
+        if (keep_config) return;
         const auto snap = setup::Downloader::instance().snapshot();
         for (const auto& p : snap.items) {
             if (p.group != done.group || p.option != done.option) continue;
@@ -845,7 +862,7 @@ fs::path normal_dir(const fs::path& p) {
 }  // namespace
 
 ApiResult get_setup_move_plan(const config::Settings& settings, const std::string& to) {
-    if (to.empty()) throw ApiError(400, SAY("缺新目录"));
+    if (to.empty()) throw ApiError(400, SAY("缺少新目录"));
     const fs::path from = settings.models.dir_path(settings.workspace_path());
     return {200, setup::plan_move(from, target_dir(to)).to_json()};
 }
@@ -853,18 +870,18 @@ ApiResult get_setup_move_plan(const config::Settings& settings, const std::strin
 ApiResult post_setup_move(const config::Settings& settings, const json& body) {
     const auto it = body.find("to");
     if (it == body.end() || !it->is_string() || it->get<std::string>().empty()) {
-        throw ApiError(400, SAY("缺新目录"));
+        throw ApiError(400, SAY("缺少新目录"));
     }
     const fs::path from = settings.models.dir_path(settings.workspace_path());
     const fs::path to = target_dir(it->get<std::string>());
     if (normal_dir(from) == normal_dir(to)) {
-        throw ApiError(400, SAY("新目录和原来的是同一个，不用搬。"));
+        throw ApiError(400, SAY("新目录与原目录相同，无需移动。"));
     }
     if (setup::Mover::instance().running()) {
-        throw ApiError(409, SAY("正在搬模型，搬完再说。"));
+        throw ApiError(409, SAY("正在移动模型，请在完成后再试。"));
     }
     if (setup::Downloader::instance().running()) {
-        throw ApiError(409, SAY("已经在下了。要换选择先点进度条旁边那颗「停下」。"));
+        throw ApiError(409, SAY("正在下载。如需更改选择，请先点进度条旁边的「停止」。"));
     }
     // **有活在跑就不搬。** 出片、出图、写东西都可能正握着一个模型文件，搬走它
     // 那一件就在半路读不到权重。账本上排着的也算：它一开工就要去读。
@@ -874,7 +891,7 @@ ApiResult post_setup_move(const config::Settings& settings, const json& body) {
         return f != board.end() && f->is_array() && !f->empty();
     };
     if (busy("running") || busy("queued")) {
-        throw ApiError(409, SAY("有活在跑，等它跑完或者停下再搬模型。"));
+        throw ApiError(409, SAY("有任务正在运行，请等待其完成或停止后再移动模型。"));
     }
 
     // 没人用着的模型先卸掉。**Windows 上加载着的文件改不了名、删不掉**，不卸的话
@@ -888,7 +905,7 @@ ApiResult post_setup_move(const config::Settings& settings, const json& body) {
     try {
         persist(json{{"models", {{"dir", paths::to_utf8(to)}}}});
     } catch (const std::exception& e) {
-        throw ApiError(500, SAYF("配置写不进去：%1", e.what()));
+        throw ApiError(500, SAYF("无法写入配置：%1", e.what()));
     }
     setup::Mover::instance().start(from, to);
     return {200, setup::Mover::instance().snapshot().to_json()};

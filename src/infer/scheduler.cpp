@@ -230,19 +230,22 @@ std::string out_of_vram_message(Slot slot) {
     // 无从下手——尤其是配音：它是唯一一个有现成外部服务可换的，
     // 而那条路不用改一行代码，改个配置就行。
     const std::string base =
-        SAYF("显存不够加载 %1。腾不出空间——别的槽正被借用着，或者这张卡"
-             "确实太小。",
+        SAYF("显存不足，无法加载 %1：其他模型正在占用显存，"
+             "或显卡显存确实不足。",
              slot_label(slot));
     switch (slot) {
         case Slot::TTS:
             return base +
-                   SAY("\n配音这一步**不必占显存**：把 changji.toml 里的 "
-                       "[tts].backend 改成 \"http\"，再填 [tts].base_url "
-                       "指向一个外部配音服务，本机就不用装配音模型了。"
+                   // 2026-09-28：界面上有这一格了（「设置 ▸ 出片」的「配音」），先指界面，
+                   // 括号里带上配置键，给只改配置文件的人。
+                   SAY("\n配音步骤可以不占用显存：在「设置 ▸ 出片」的「配音」中"
+                       "选择「HTTP 服务」并填写「服务地址」（即 [tts].backend = "
+                       "\"http\" 和 [tts].base_url），改用外部配音服务，"
+                       "本机无需安装配音模型。"
                    // **别提 comfy。** 那条路 2026-09-10 拆了，现在填它
                    // 连配置校验都过不去。把人指到一个不存在的取值上，
                    // 比只说一句"显存不够"更糟。
-                       "\n（另一个取值是 \"local\"，就是现在这条、进程内跑的。）");
+                       "\n（另一个取值为 \"local\"，即当前使用的内置配音。）");
         case Slot::LLM:
             // ⚠️ **这一支跑不到。** 2026-09-14 起没有任何东西注册这一档
             // （见 scheduler.hpp 上 Slot::LLM 那段：进程内大模型删了，编剧
@@ -270,6 +273,8 @@ std::string out_of_vram_message(Slot slot) {
             // 项目的 changji.toml 里，改了名老项目读不出来），但那个字符串
             // 不该出现在给人看的话里——2026-09-10 画幅从 704×1280 改成
             // 544×928 之后，再管它叫 720p 就是假的（720p 是 720 行）。
+            //（这一段说的是指向下拉框那时候。2026-09-28 起指的是 changji.toml，
+            // 得写取值，见下面 return 那一句的注释。）
             //
             // **尺寸跟着画幅翻。** 下拉框里那几个数是
             // `qualitySize(档位, orientation)` 现算的：竖屏是短边×长边，
@@ -278,16 +283,22 @@ std::string out_of_vram_message(Slot slot) {
             // 一句话里混着两种画幅，而默认的竖屏项目在下拉框里看到的是
             // 1440×2560。统一按竖屏写，并说明横屏反过来。
             return base +
-                   SAY("\n出图出片是躲不掉的显存开销。能调的两处：在项目页"
-                       "「这部电影」那一行点开，把清晰度降一档——三档分别是"
-                       "「标准（544×928）」「高清（704×1280）」「2K（1440×2560）」"
-                       "（竖屏项目是这几个数，横屏项目宽高反过来），"
+                   // 2026-09-28：项目页 09-26 删了，「这部电影」那一行跟着没了，界面上
+                   // 已经没有改分辨率的地方——只剩这部片子自己的 changji.toml。
+                   // 指到配置文件上，就得写**文件里认的取值**（settings.cpp 只认
+                   // "720p" / "hd" / "2k"，写「标准」「高清」会读不进去），尺寸跟在
+                   // 括号里，所以 "720p" 不会被读成 720 行。括号里也别写「清晰度」：
+                   // 设置 ▸ 出片 ▸ 装配里那一行叫「清晰度」，管的是 CRF，跟显存无关。
+                   SAY("\n出图和出片必然占用显存。可调整两处：在本片的 changji.toml "
+                       "中将 [video].quality（分辨率档位）降低一档，可选值依次为 "
+                       "\"2k\"（1440×2560）、\"hd\"（704×1280）、\"720p\"（544×928），"
+                       "以上为竖屏尺寸，横屏宽高互换；"
                    // **别再教人手填 weights。** 它默认是 "smart"，装不下时
                    // 程序自己就会把权重放内存——用户 2026-09-10 的原话：
                    // "都应该让程序自己算"。这里只对"手动写死过"的人有意义。
-                       "或者检查 [models].weights 是不是被手动写死了——"
-                       "它默认 \"smart\"，会按这张卡和模型大小自己决定权重放哪，"
-                       "写死成别的值就把这份判断关掉了。");
+                       "或检查 [models].weights 是否被手动固定：其默认值为 "
+                       "\"smart\"，会按显卡和模型大小自动决定权重位置，"
+                       "固定为其他值将关闭这一判断。");
     }
     return base;
 }
@@ -538,6 +549,7 @@ Lease Scheduler::acquire_once(Slot slot, std::size_t work) {
     }
 
     e->last_used = ++clock_;
+    e->idle_since = std::chrono::steady_clock::now();
 
     if (e->is_loaded) {
         // **装着不等于这次跑得下。**
@@ -760,13 +772,52 @@ void Scheduler::give_back(Slot slot) {
     Entry* e = find(slot);
     if (!e || e->leases <= 0) return;
     --e->leases;
+    if (e->leases == 0) e->idle_since = std::chrono::steady_clock::now();
     // 用完就放的槽，最后一个借用还回来时立刻卸载。
     // 留着纯粹是占地方——它按定义不会再被用了。
     if (e->leases == 0 && e->spec.residency == Residency::Ephemeral) {
         do_unload(*e);
     }
+    // 闲卸设成 0 的：同上，还回来就卸
+    if (e->leases == 0 && e->is_loaded && e->spec.keep_alive) {
+        if (const auto ka = e->spec.keep_alive(); ka && ka->count() <= 0) do_unload(*e);
+    }
     // **还回来了就叫醒排队的。** 排头正等着的就是这一下。
     queue_cv_.notify_all();
+}
+
+int Scheduler::reap_idle(std::chrono::steady_clock::time_point now) {
+    int n = 0;
+    {
+        std::lock_guard lg(mu_);
+        for (Entry& e : entries_) {
+            if (!e.is_loaded || e.leases > 0 || !e.spec.keep_alive) continue;
+            const auto ka = e.spec.keep_alive();
+            if (!ka) continue;
+            if (now - e.idle_since >= *ka) {
+                do_unload(e);
+                ++n;
+            }
+        }
+    }
+    if (n > 0) queue_cv_.notify_all();
+    return n;
+}
+
+Scheduler::SlotState Scheduler::slot_state(Slot slot, std::chrono::steady_clock::time_point now) const {
+    std::lock_guard lg(mu_);
+    SlotState st;
+    const Entry* e = find(slot);
+    if (!e) return st;
+    st.loaded = e->is_loaded;
+    st.leases = e->leases;
+    if (e->is_loaded && e->leases == 0 && e->spec.keep_alive) {
+        if (const auto ka = e->spec.keep_alive()) {
+            const double left = std::chrono::duration<double>(*ka - (now - e->idle_since)).count();
+            st.release_in_s = left > 0 ? left : 0.0;
+        }
+    }
+    return st;
 }
 
 bool Scheduler::evict(Slot slot) {

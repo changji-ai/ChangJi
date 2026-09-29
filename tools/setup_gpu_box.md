@@ -327,7 +327,8 @@ CUDA 设备也是按进程选的。子进程把这两件事都绕开，而且工
     ExecStart=/root/changji/build-worker/changji --worker --gpu %i --port 900$((%i+1))
 
     # 协调者。--host 0.0.0.0 才能从外面开 webapp（端口就是这个 --port）。
-    # **这套接口没有鉴权**，连上就能读项目、改分镜、起流水线。
+    # 对外监听时进来要口令：`journalctl -u` 里「网页端口令」那一行打着带口令的地址；
+    # [peer].token 也认（桌面端连这台时地址写成 http://<ip>:8080/?token=<口令>）。
     ExecStart=/root/changji/build-coord/changji --port 8080 --host 0.0.0.0
     Environment=CHANGJI_WORKSPACE=/root/.local/share/changji/projects
 

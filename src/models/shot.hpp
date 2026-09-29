@@ -124,6 +124,18 @@ bool status_has_film(ShotStatus s);
 
 /// 枚举转回字符串。错误消息里要用，和 Python 的 `.value` 对齐。
 const char* to_string(ShotSize v);
+
+/// 一个镜头（JSON 形状）里**认不出的枚举取值抹掉**，回抹掉了哪几栏（「shot_size=WS」这样）。
+///
+/// nlohmann 的枚举反序列化（NLOHMANN_JSON_SERIALIZE_ENUM）认不出取值时**静默回落到表里第一项**：
+/// shot_size 写成 "WS" 读出来是 ECU（**大特写**），camera_angle 认不出是 low（仰拍），不报错。
+/// 抹掉之后走的是结构体默认值（中景、平视……），和这一栏压根没填一模一样。
+///
+/// 三条路都过这一道：模型出的分镜（stages::storyboard）、读盘上的 project.json
+/// （ProjectStore::load_project，手改过的、别的版本写的）——客户端改一镜那条路另有 400
+/// （http/editing.cpp 的 parse_enum）。null 也抹掉：这几栏都不可空，留着 null 的话
+/// `..._WITH_DEFAULT` 拿它去转枚举，照样落到第一项。
+std::vector<std::string> drop_unknown_shot_enums(nlohmann::json& shot);
 const char* to_string(CameraAngle v);
 const char* to_string(CameraMove v);
 const char* to_string(Lens v);

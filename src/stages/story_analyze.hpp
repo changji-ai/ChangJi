@@ -12,7 +12,9 @@
 //
 // 纯函数，不碰网络也不碰 llama.cpp。
 
+#include <map>
 #include <string>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
@@ -27,6 +29,20 @@ namespace changji::stages {
 /// 中间的过程靠这两头能推个八九不离十。章多的时候每章分到的字数更少，
 /// 但**每章都在**——漏掉一整章比每章少几百字糟糕得多。
 std::string render_chapters_for_analysis(const models::Story& story);
+
+/// 已有的人物和地方名单，渲染成「【已有的人物】…【已有的地方】…」两段，让读
+/// 正文的那一步照名单上的名字写、别给同一个地方换个叫法。故事里没名单
+///（粘贴导入的）就回空串。理解、分析两条路都用它。
+std::string render_known_names(const models::Story& story);
+
+/// 存量故事里同一个地方两个叫法的收成一份（名字取先出现的，说明互相补），
+/// 章节里的引用跟着改。回的是「别名 → 名单上的名字」。判据同
+/// stages::match_place_name。
+std::map<std::string, std::string> unify_story_locations(models::Story& story);
+
+/// 资产库里叫别名的场景改回名单上的名字（id 不动）。回改了几条。
+int canonicalize_location_names(models::AssetLibrary& lib,
+                                const std::vector<std::string>& names);
 
 /// 请求里带的 JSON Schema。
 ///

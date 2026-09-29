@@ -42,12 +42,14 @@ import calendar
 import concurrent.futures
 import hashlib
 import hmac
+import http.client
 import json
 import os
 import re
 import socket
 import stat
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -114,6 +116,10 @@ def check_password(pw, kinds_needed):
     if kinds < kinds_needed:
         raise CloudError("登录密码要在「小写/大写/数字/符号」四类里占满 %d 类，"
                          "现在只占了 %d 类" % (kinds_needed, kinds))
+
+
+# 列表翻页的上限：真有这么多台是另一回事，这里只防接口一直回满页时转不出来。
+MAX_PAGES = 20
 
 
 class CloudError(Exception):
@@ -183,6 +189,13 @@ def _send(req, url, timeout):
     except urllib.error.URLError as e:
         host = urllib.parse.urlsplit(url).netloc
         raise CloudError("连不上 %s：%s" % (host, e.reason))
+    except (TimeoutError, socket.timeout, ConnectionError, http.client.HTTPException,
+            OSError) as e:
+        # **读的那一段超时、连接被掐，urlopen 不包成 URLError**，原样往外冒：底下
+        # 一路只接 CloudError——重试那层不重试、按地域隔离的比价一个慢地域拖垮整张
+        # 表、安全释放在关机之后的等待里被一个超时打断（机器关了没删，照样扣钱）。
+        host = urllib.parse.urlsplit(url).netloc
+        raise CloudError("%s 没回话（%s）" % (host, e.__class__.__name__ if not str(e) else e))
     if not raw.strip():
         return {}          # 删除、启停这类接口回 200 空body
     try:
@@ -222,6 +235,8 @@ class Platform(object):
     CREDS = (("token", "Token", ()),)
 
     def __init__(self, creds=None):
+        self._region = ""
+        self._tl = threading.local()
         # 传字典（新格式）和传一段字符串（老配置、单段钥匙的家）都认，
         # 归一在 as_creds 这一处。
         creds = as_creds(creds)
@@ -276,6 +291,9 @@ class Platform(object):
     # 另一条是开机从对象存储走内网拉（boot_script），适合常换的那几个模型。
 
     USERDATA_KB = 0       # UserData 上限（编码前），0 表示这家不支持
+
+    # 列表一次最多拿得到几台（翻不了页的家才设）。0 = 会自己翻页，拿得全。
+    LIST_CAP = 0
 
     def boot_script(self, v):
         """开机脚本。返回空串表示这家 / 这次不装这一套。"""
@@ -398,6 +416,23 @@ class Platform(object):
     # 而地域是表单上选的——不推进来它只能问默认那个地域，答非所问。
     def set_context(self, values):
         pass
+
+    # **地域分两层**：`_region` 是表单上选的那个（界面线程里 set_context 推），
+    # 一件后台活自己的地域挂在**它那条线程上**（bind_region）。原来只有一个共享的
+    # `self.region`，后台活自己改它（看监控那个窗口每 5 秒把它换成那台机器的地域），
+    # 同时在跑的另一件（自动刷新、释放）读到的就是别人的地域：列表那一刻空了，
+    # 释放发到了另一个地域回「找不到」。
+    @property
+    def region(self):
+        return getattr(self._tl, "region", "") or self._region
+
+    @region.setter
+    def region(self, v):
+        self._region = v
+
+    def bind_region(self, region):
+        """这条线程上接下来的请求发到哪个地域；传空串解绑（线程池的线程会复用）。"""
+        self._tl.region = region or ""
 
     # 下面这些由子类实现
     def fields(self):                      raise NotImplementedError
@@ -541,8 +576,15 @@ class AutoDLPlatform(Platform):
         return {"image": out + self.IMAGES}
 
     def instances(self):
-        rows = (self._call("POST", "/api/v1/dev/instance/pro/list",
-                           {"page_index": 1, "page_size": 50}) or {}).get("list") or []
+        # **一页只有 50 台**，原来只问第一页：第 51 台起在界面上不存在——看不见
+        # 就想不起来关，而它按小时扣钱。一页满了就接着问下一页。
+        rows = []
+        for page in range(1, MAX_PAGES + 1):
+            got = (self._call("POST", "/api/v1/dev/instance/pro/list",
+                              {"page_index": page, "page_size": 50}) or {}).get("list") or []
+            rows += got
+            if len(got) < 50:
+                break
         out = []
         for it in rows:
             out.append({
@@ -785,14 +827,23 @@ class PPIOPlatform(Platform):
                 "cpu": spec.get("cpu", ""), "mem": spec.get("memory_gb", ""),
                 "spot": best, "origin": pay,
                 "note": ("可用 %s 卡" % g["available"]) if g.get("available") is not None else "",
-                "pick": {"product": p.get("id", "")},
+                # 报的是哪一档价，填回去的就得是哪一档计费。原来只填 product：列表上写
+                # 「0.88 元/时」（竞价），建出来却是表单上存着的那一档——默认按量，1.98。
+                "pick": {"product": p.get("id", ""),
+                         "billing": "spot" if spot is not None else "postpaid"},
+                # 一张空闲卡都没有的，「一键最便宜」别挑它（没这一栏的一律当有货）。
+                "stock": g.get("available") != 0,
             })
         rows.sort(key=lambda r: r["spot"])
         return rows
 
+    # 这家的列表接口没有公开的翻页参数，一次最多 100 台。满了界面上照实说一句
+    # （见 Window.refresh），别让人以为那就是全部。
+    LIST_CAP = 100
+
     def instances(self):
         rows = (self._call("GET", "/gpus/v2/instances",
-                           query={"limit": 100}) or {}).get("data") or []
+                           query={"limit": self.LIST_CAP}) or {}).get("data") or []
         out = []
         for it in rows:
             spec = it.get("resource_specs") or it.get("resource") or {}
@@ -887,7 +938,11 @@ class PPIOPlatform(Platform):
         except CloudError as e:
             log("直接删没成：%s" % e)
             log("那就先停机再删……")
-            self.power_off(iid)
+            try:
+                self.power_off(iid)
+            except CloudError as e2:
+                # 已经在停机途中时 power_off 会报错，这不算失败，接着等状态（同 AutoDL 那条）。
+                log("关机接口说：%s（接着等状态）" % e2)
             st = self._wait_off(iid, log, wait_s)
             if st not in OFF_STATES:
                 raise CloudError("等了 %d 秒还停在「%s」，没敢再删。去控制台看一眼这台机器"
@@ -1302,6 +1357,10 @@ echo "=== $(date -Is) 拉完了 ==="
         }
         if v["strategy"] == "SpotWithPriceLimit":
             p["SpotPriceLimit"] = v["price"]
+        if v.get("client_token"):
+            # 同一次确认只建一台：请求超时了而服务端其实建成了，再发一遍带同一个
+            # ClientToken 的，阿里云认得出是同一件、不会再建第二台。
+            p["ClientToken"] = v["client_token"]
         script = self.boot_script(v)
         if script:
             # UserData 要 base64，编码前不超过 32 KB（RunInstances 文档）
@@ -1341,7 +1400,17 @@ echo "=== $(date -Is) 拉完了 ==="
         p = {"RegionId": self.region, "PageSize": 100}
         if iid:
             p["InstanceIds"] = json.dumps([iid])
-        return self._dig(self._call("DescribeInstances", p), "Instances", "Instance")
+            return self._dig(self._call("DescribeInstances", p), "Instances", "Instance")
+        # 一页最多 100 台，原来只问第一页：多出来的在界面上不存在，看不见就想不起来关
+        out = []
+        for page in range(1, MAX_PAGES + 1):
+            p["PageNumber"] = page
+            r = self._call("DescribeInstances", p)
+            got = self._dig(r, "Instances", "Instance")
+            out += got
+            if len(got) < 100 or len(out) >= int(r.get("TotalCount") or 0):
+                break
+        return out
 
     def instances(self):
         out = []
@@ -1656,7 +1725,17 @@ echo "=== $(date -Is) 拉完了 ==="
         self._call("StartInstance", {"InstanceId": iid})
 
     def power_off(self, iid):
-        self._call("StopInstance", {"InstanceId": iid})
+        # **停机不收费**（StopCharging）。不带这一栏阿里云按账号的默认走，没开过「节省停机」
+        # 的账号就是 KeepCharging——界面上「✓ 已发关机」，算力照扣。节省停机要求 VPC 实例，
+        # 不支持的（经典网络之类）接口会直接说，那时退回普通停机、照实记一句。
+        try:
+            self._call("StopInstance", {"InstanceId": iid, "StoppedMode": "StopCharging"})
+        except CloudError as e:
+            if "StoppedMode" not in str(e) and "StopCharging" not in str(e):
+                raise
+            self._call("StopInstance", {"InstanceId": iid})
+            raise CloudError("关了，但这台不支持停机不收费（%s）：停着的时候算力照样扣钱，"
+                             "不用了就释放" % e)
 
     def release(self, iid):
         self._call("DeleteInstance", {"InstanceId": iid})
@@ -2059,6 +2138,8 @@ class TencentPlatform(Platform):
             "InstanceName": v.get("name") or "changji",
             "InstanceCount": 1,
         }
+        if v.get("client_token"):
+            p["ClientToken"] = v["client_token"]      # 同一次确认只建一台，见阿里云那边
         if script:
             p["UserData"] = self.encode_userdata(script)
             p["CamRoleName"] = v["cam_role"]
@@ -2189,7 +2270,17 @@ echo "=== $(date -Is) 拉完了 ==="
         p = {"Limit": 100}
         if iid:
             p["InstanceIds"] = [iid]
-        return self._call("DescribeInstances", p).get("InstanceSet") or []
+            return self._call("DescribeInstances", p).get("InstanceSet") or []
+        # 一页最多 100 台，原来只问第一页：多出来的在界面上不存在，看不见就想不起来关
+        out = []
+        for page in range(MAX_PAGES):
+            p["Offset"] = page * 100
+            r = self._call("DescribeInstances", p)
+            got = r.get("InstanceSet") or []
+            out += got
+            if len(got) < 100 or len(out) >= int(r.get("TotalCount") or 0):
+                break
+        return out
 
     def instances(self):
         out = []
@@ -2241,7 +2332,16 @@ echo "=== $(date -Is) 拉完了 ==="
         self._call("StartInstances", {"InstanceIds": [iid]})
 
     def power_off(self, iid):
-        self._call("StopInstances", {"InstanceIds": [iid]})
+        # **关机不收费**（STOP_CHARGING）。不带的话腾讯云默认 KEEP_CHARGING：界面上「✓ 已发
+        # 关机」，算力照扣。不支持的机型接口会直接说，那时退回普通关机、照实记一句。
+        try:
+            self._call("StopInstances", {"InstanceIds": [iid], "StoppedMode": "STOP_CHARGING"})
+        except CloudError as e:
+            if "StoppedMode" not in str(e) and "STOP_CHARGING" not in str(e):
+                raise
+            self._call("StopInstances", {"InstanceIds": [iid]})
+            raise CloudError("关了，但这台不支持关机不收费（%s）：关着的时候照样扣钱，"
+                             "不用了就退还" % e)
 
     def release(self, iid):
         self._call("TerminateInstances", {"InstanceIds": [iid]})
@@ -2260,7 +2360,11 @@ echo "=== $(date -Is) 拉完了 ==="
         except CloudError as e:
             log("直接销毁没成：%s" % e)
             log("那就先关机再销毁……")
-            self.power_off(iid)
+            try:
+                self.power_off(iid)
+            except CloudError as e2:
+                # 已经在关机途中时 power_off 会报错，这不算失败，接着等状态（同 AutoDL 那条）。
+                log("关机接口说：%s（接着等状态）" % e2)
             st = self._wait_off(iid, log, wait_s)
             if not is_off(st):
                 raise CloudError("等了 %d 秒还停在「%s」，没敢再销毁。去控制台看一眼"
@@ -2377,9 +2481,31 @@ def save_config(cfg):
     d = os.path.dirname(CONFIG_PATH)
     if not os.path.isdir(d):
         os.makedirs(d, 0o700)
-    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-        json.dump(cfg, f)
-    # 钥匙就是账号的全部权限，别留成 644。
+    # 钥匙就是账号的全部权限，别留成 644——而且**生出来那一刻就是 600**：原来
+    # 先按 umask（多半 644）写完再 chmod，中间那一下别的用户读得到；又是直接
+    # 覆盖原文件，写到一半断电或磁盘满，整份配置（几家的钥匙、存的表单）变成
+    # 半截 JSON，下次打开 load_config 读不动，当成空的——钥匙全丢。
+    # 先写旁边一份、落盘、再换上去。
+    part = CONFIG_PATH + ".part"
+    try:
+        os.remove(part)
+    except OSError:
+        pass
+    fd = os.open(part, os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                 stat.S_IRUSR | stat.S_IWUSR)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(cfg, f)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(part, CONFIG_PATH)
+    except BaseException:
+        try:
+            os.remove(part)
+        except OSError:
+            pass
+        raise
+    # 老版本留下的 644 文件：replace 之后已经是新文件的权限，这句只是兜底。
     os.chmod(CONFIG_PATH, stat.S_IRUSR | stat.S_IWUSR)
 
 
@@ -2917,11 +3043,10 @@ class MetricsDialog(QtWidgets.QDialog):
 
     @staticmethod
     def _gather(plat, iid, region):
-        # **在后台线程里再设一次地域。** run_bg 发车前会把表单里选的地域推给
-        # 平台，而这台机器未必在那个地域；这一句在它之后跑，说了算的是这台
-        # 机器自己的地域。
+        # **说了算的是这台机器自己的地域**，不是表单上选的那个——两者常常不是
+        # 一个。只挂在这条线程上，不去改平台共享的那份（见 Platform.bind_region）。
         if region:
-            plat.set_context({"region": region})
+            plat.bind_region(region)
         out = plat.metrics(iid)
         try:
             lines, ssh = plat.detail(iid)
@@ -3105,6 +3230,9 @@ class Window(QtWidgets.QWidget):
         self.switching = False
         self.rows = {}
         self.busy = 0
+        self.creating = False      # 建机那一下还没回话（见 do_create）
+        self.closing = False       # 关窗那一下之后不再开新活（见 closeEvent）
+        self.refresh_ticket = 0    # 见 refresh
         # 每换一次平台 +1。切过去的请求还在路上、用户又切回来时，回包带着旧号，
         # 整条作废。只比平台名不够：A→B→A 的时候名字又相等了，旧回包会混进来。
         self.seq = 0
@@ -3177,7 +3305,7 @@ class Window(QtWidgets.QWidget):
             for key, val in load_recipe(p.NAME).items():
                 if key in self.forms[p.NAME].fields:
                     self.forms[p.NAME].set_value(key, val)
-            self.forms[p.NAME].on_change(p.REFRESH_ON, self.on_fetch)
+            self.forms[p.NAME].on_change(p.REFRESH_ON, self.on_region_changed)
             self.stack.addWidget(page)
             self.page_of[p.NAME] = i
         left.addWidget(self.stack)
@@ -3223,6 +3351,7 @@ class Window(QtWidgets.QWidget):
         btns = QtWidgets.QHBoxLayout()
         b = QtWidgets.QPushButton("创建")
         b.clicked.connect(self.on_create)
+        self.create_btn = b
         btns.addWidget(b)
         b = QtWidgets.QPushButton("拉规格 / 镜像")
         b.clicked.connect(self.on_fetch)
@@ -3318,22 +3447,44 @@ class Window(QtWidgets.QWidget):
     # --- 后台 -------------------------------------------------------
 
     def set_busy(self, delta):
+        # 等待光标是个**栈**：set 一次压一层，restore 一次弹一层。原来每次变动
+        # 只要还忙就压一层（两件活并行：压三层），归零时只弹一层——转圈的光标
+        # 从此再也不回来。只在 0→有、有→0 那两下动它。
+        before = self.busy
         self.busy = max(0, self.busy + delta)
         self.busy_label.setText("忙…" if self.busy else "")
-        if self.busy:
+        if not before and self.busy:
             QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
-        else:
+        elif before and not self.busy:
             QtWidgets.QApplication.restoreOverrideCursor()
 
-    def run_bg(self, fn, done=None, guard=True):
-        """guard=True 的活，回包带的号跟当前对不上就丢掉（用户换平台了）。"""
+    def run_bg(self, fn, done=None, guard=True, after=None, region=""):
+        """guard=True 的活，回包带的号跟当前对不上就丢掉（用户换平台了）。
+
+        `after`：不管成没成都跑的收尾（`done` 只在成了的时候跑）。
+        `region`：这件活发到哪个地域。对着列表里一台机器的动作传**那台自己的**
+        地域——表单上的地域人随时会改，改完再点释放，请求就发到了别的地域。
+        不传就用发车这一刻表单上的。
+        """
+        if self.closing:
+            return
         seq = self.seq
-        name = self.plat.NAME
+        plat = self.plat
+        name = plat.NAME
         if self.form is not None:
             # 阿里云的一切都按地域，而地域在表单上。别的家不理这个调用。
-            self.plat.set_context(self.form.values())
+            plat.set_context(self.form.values())
+        # 发车这一刻就定下来，挂到干活那条线程上（不是跑到一半再去读共享的那份）
+        bound = region or plat.region
+
+        def run(log):
+            plat.bind_region(bound)
+            try:
+                return fn(log)
+            finally:
+                plat.bind_region("")
         self.set_busy(+1)
-        job = Job(fn)
+        job = Job(run)
         self.jobs.append(job)
         job.sig.logged.connect(lambda m: self.log("  " + m))
         job.sig.failed.connect(lambda m: self.log("✗ [%s] %s" % (name, m)))
@@ -3348,10 +3499,36 @@ class Window(QtWidgets.QWidget):
             self.set_busy(-1)
             if job in self.jobs:
                 self.jobs.remove(job)
+            if after:
+                after()
 
         job.sig.done.connect(on_done)
         job.sig.finished.connect(on_finished)
         self.pool.start(job)
+
+    def closeEvent(self, e):
+        """还有活在路上时关窗，先问一句。
+
+        建机、释放、关机的请求**已经发出去了**，关掉窗口云上照样做完，只是回话
+        没人收：建出来的那台不出现在任何地方，而它按小时扣钱。原来直接关，
+        线程池里那几件还在跑、回来往一个已经没了的窗口上发信号。
+        """
+        if self.busy and not self.closing:
+            ans = QtWidgets.QMessageBox.question(
+                self, "还有活没做完",
+                "还有 %d 件在跑（建机、释放这类请求已经发出去了，关掉窗口云上"
+                "照样做完，只是这边看不到结果）。\n\n等它们做完再关？" % self.busy,
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.Cancel,
+                QtWidgets.QMessageBox.Yes)
+            if ans != QtWidgets.QMessageBox.Yes:
+                e.ignore()
+                return
+        self.closing = True
+        self.timer.stop()
+        # 等在路上的那几件回来（各家请求都有超时，不会无限等）。回来之后的
+        # 收尾（刷新列表那种）看 closing 不再开新活。
+        self.pool.waitForDone()
+        super().closeEvent(e)
 
     # --- 换平台 -----------------------------------------------------
 
@@ -3428,8 +3605,14 @@ class Window(QtWidgets.QWidget):
 
     def refresh(self):
         plat = self.plat
+        # 只认最后一次刷新的回包：换了地域马上又刷，先发的那次（旧地域）可能后到，
+        # 把新地域的列表冲回旧的。
+        self.refresh_ticket += 1
+        ticket = self.refresh_ticket
 
         def done(rows):
+            if ticket != self.refresh_ticket:
+                return
             self.table.setRowCount(len(rows))
             self.rows.clear()
             for r, it in enumerate(rows):
@@ -3443,7 +3626,21 @@ class Window(QtWidgets.QWidget):
                         item.setForeground(QtGui.QBrush(QtGui.QColor("#9aa3ad")))
                     self.table.setItem(r, c, item)
             self.log("%s：%d 台" % (plat.NAME, len(rows)))
+            if plat.LIST_CAP and len(rows) >= plat.LIST_CAP:
+                self.log("  ⚠ %s 的接口一次只给 %d 台，多出来的这里看不到——去控制台核对，"
+                         "别漏了还在扣钱的" % (plat.NAME, plat.LIST_CAP))
         self.run_bg(lambda _log: plat.instances(), done)
+
+    def on_region_changed(self, *_):
+        # 地域变了，规格那几张表要重拉，**实例列表也是**：列表是按地域问的，
+        # 不刷的话表上还是旧地域的机器，而人以为那是新地域的。
+        self.on_fetch()
+        if self.plat.has_creds():
+            self.refresh()
+
+    def row_region(self, iid):
+        """列表里这一台自己在哪个地域（倒推不出来就回空串，退回表单上的）。"""
+        return self.plat.region_of(self.rows.get(iid, {}))
 
     def on_auto(self, on):
         self.timer.start() if on else self.timer.stop()
@@ -3626,7 +3823,8 @@ class Window(QtWidgets.QWidget):
                 self.run_bg(lambda log: plat.save_image(iid, name),
                             lambda img: (self.log("✓ 镜像 %s 已发起，做完之后点"
                                                   "「拉规格 / 镜像」就能在镜像下拉里选到" % img),
-                                         self.refresh()))
+                                         self.refresh()),
+                            region=self.row_region(iid))
             else:
                 _, image_id, regions = d.action
                 self.log("复制镜像 %s → %s ……" % (image_id, "、".join(regions)))
@@ -3652,15 +3850,31 @@ class Window(QtWidgets.QWidget):
             save_recipe(plat.NAME, v)
         except Exception as e:
             self.log("配方没存下来：%s" % e)
+        if self.creating:
+            self.log("上一台还在建，等它回话再说（点两下会建出两台）")
+            return
         if QtWidgets.QMessageBox.question(
                 self, "确认创建（%s）" % plat.NAME, prefix + summary) != \
                 QtWidgets.QMessageBox.Yes:
             return
+        # **一次确认只建一台。** 建机那一下常要几十秒：原来按钮一直能点，请求超时了（服务端
+        # 其实建成了）列表又不刷新，人再点一次就是第二台竞价机，两台一起扣钱。
+        #   · 一次确认一个 ClientToken（阿里云、腾讯云认它：同一件不建第二台）；
+        #   · 建着的时候按钮灰掉、再点只说一句；
+        #   · 成没成都刷新一次列表——超时了但建成了的那台要看得见。
+        v = dict(v)
+        v["client_token"] = uuid.uuid4().hex
+        self.creating = True
+        self.create_btn.setEnabled(False)
 
         def done(iid):
             self.log("✓ 创建成功：%s" % iid)
+
+        def after():
+            self.creating = False
+            self.create_btn.setEnabled(True)
             self.refresh()
-        self.run_bg(lambda _log: plat.create(v), done)
+        self.run_bg(lambda _log: plat.create(v), done, after=after)
 
     def on_power_on(self):
         iid = self.selected()
@@ -3670,7 +3884,8 @@ class Window(QtWidgets.QWidget):
         cmd = self.form.value("command") if "command" in self.form.fields else ""
         self.log("开机 %s ……" % iid)
         self.run_bg(lambda _log: plat.power_on(iid, cmd),
-                    lambda _r: (self.log("✓ 已发开机"), self.refresh()))
+                    lambda _r: (self.log("✓ 已发开机"), self.refresh()),
+                    region=self.row_region(iid))
 
     def on_power_off(self):
         iid = self.selected()
@@ -3679,7 +3894,8 @@ class Window(QtWidgets.QWidget):
         plat = self.plat
         self.log("关机 %s ……" % iid)
         self.run_bg(lambda _log: plat.power_off(iid),
-                    lambda _r: (self.log("✓ 已发关机"), self.refresh()))
+                    lambda _r: (self.log("✓ 已发关机"), self.refresh()),
+                    region=self.row_region(iid))
 
     def on_metrics(self):
         iid = self.selected()
@@ -3708,7 +3924,8 @@ class Window(QtWidgets.QWidget):
                 # SSH 那行进剪贴板，下一步就是 install_workers.sh。
                 QtGui.QGuiApplication.clipboard().setText(ssh)
                 self.log("  （SSH 命令已复制）")
-        self.run_bg(lambda _log: plat.detail(iid), done)
+        self.run_bg(lambda _log: plat.detail(iid), done,
+                    region=self.row_region(iid))
 
     def on_release(self):
         iid = self.selected()
@@ -3725,7 +3942,7 @@ class Window(QtWidgets.QWidget):
         self.log("释放 %s ……" % iid)
         # 关机要等，整串都在后台线程上跑，过程日志靠信号一行一行发回来。
         self.run_bg(lambda log: plat.release_safely(iid, log),
-                    lambda _r: self.refresh())
+                    lambda _r: self.refresh(), region=self.row_region(iid))
 
 
 def selftest():

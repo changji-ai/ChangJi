@@ -199,6 +199,11 @@ TEST_CASE("写一章会把梗概存回项目") {
     {
         const models::ProjectStore store(root);
         REQUIRE(store.load_project().premise != premise);
+        // 故事页那份（story.json）也在：原来这条只改 project.json，故事页下一次
+        // 存盘就把旧梗概抄回去，一声不响。
+        models::Story story;
+        story.premise = "旧梗概";
+        store.save_story(story);
     }
 
     const json reply = golden().at("cases")[6].at("llm_reply");
@@ -212,6 +217,7 @@ TEST_CASE("写一章会把梗概存回项目") {
 
     const models::ProjectStore store(root);
     CHECK(store.load_project().premise == premise);
+    CHECK(store.load_story().premise == premise);
 
     std::error_code ec;
     fs::remove_all(root, ec);

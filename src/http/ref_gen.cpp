@@ -1,5 +1,6 @@
 #include "http/ref_gen.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
@@ -85,7 +86,8 @@ struct Rendered {
 /// 见 pipeline::apply_project_spec）。刻意不另设一档：参考图是拿去喂首帧
 /// 的，比首帧小等于先把细节丢掉再让模型照着画，比首帧大只是白花时间——
 /// 实测 5090 上多花一倍（544×928 约一分钟，1088×1920 要两分钟）。
-Rendered render_ref(const ProjectStore& store, const std::string& stem,
+Rendered render_ref(const ProjectStore& store, const std::string& project,
+                    const std::string& stem,
                     const std::string& positive, const std::string& negative,
                     std::int64_t seed, const std::string& stream_id,
                     const stages::FrameRenderer* shared = nullptr,
@@ -101,7 +103,9 @@ Rendered render_ref(const ProjectStore& store, const std::string& stem,
                               .scaled_to(settings.video.aspect_ratio());
     if (spec.width <= 0 || spec.height <= 0 || spec.steps <= 0) {
         throw ApiError(500,
-                       SAY("档位表里没有首帧那一档，出不了图。先去设置页体检一下"));
+                       // 体检在界面上叫「环境检测」，摆在「通用」里（2026-09-28 起）
+                       SAY("档位表中缺少首帧档位，无法生成图像。请先查看「设置 ▸ 通用」"
+                           "中的环境检测"));
     }
 
     const fs::path dest = claim_ref_path(store, stem, ".png");
@@ -121,7 +125,7 @@ Rendered render_ref(const ProjectStore& store, const std::string& stem,
     if (enrolled == nullptr) {
         // `image` 一词两用，这儿是参考图（见 `util/task_slot.hpp`）。
         own_act.emplace("image", paths::to_utf8(store.root()), std::string{},
-                        SAY("正在画参考图"), "assets");
+                        SAY("正在生成参考图"), "assets");
     }
     pipeline::Activity adopt_act = pipeline::Activity(
         enrolled != nullptr ? *enrolled : own_act->task());
@@ -157,9 +161,9 @@ Rendered render_ref(const ProjectStore& store, const std::string& stem,
     // 只认自己那件活的预览。**同时可以有别人挂着**（出片那条就挂着一个），
     // 不认 tag 的话镜头墙的小图会飘到参考图这边来。
     infer::PreviewSinkHandle preview_sink(
-        [&stream_id, &stem](const std::string& tag, int step, std::string url) {
+        [&stream_id, &stem, &project](const std::string& tag, int step, std::string url) {
             if (tag != stream_id && tag != stem) return;
-            ref_preview(stem, step, url);       // 固定频道那份
+            ref_preview(project, stem, step, url);   // 固定频道那份
             job_preview(stream_id, step, std::move(url));
         });
 
@@ -182,8 +186,8 @@ Rendered render_ref(const ProjectStore& store, const std::string& stem,
         enrolled != nullptr ? enrolled->token() : current_cancel();
     try {
         render(fake, prompts, spec, dest, tok,
-               [&act, &stream_id, &stem](int step, int steps, double,
-                                         infer::Phase phase) {
+               [&act, &stream_id, &stem, &project](int step, int steps, double,
+                                                   infer::Phase phase) {
                    // 读权重、解码和采样不是一个量级（1927 个张量、78 块
                    // vs 8 步），画在同一条进度条上会像"跑到头又倒回去了"。
                    // 顶栏只有一行，就只画采样那一段。
@@ -192,7 +196,7 @@ Rendered render_ref(const ProjectStore& store, const std::string& stem,
                    // 异步那条路上，点了按钮的人也在等这个数。
                    job_progress(stream_id, step, steps);
                    // 再往固定频道播一份：**刷新过页面的人只剩这条路**。
-                   ref_progress(stem, step, steps);
+                   ref_progress(project, stem, step, steps);
                });
     } catch (const std::exception& e) {
         // **人按的停不是失败。** 报成「出图失败：已取消」的话，人会去找哪
@@ -258,7 +262,7 @@ json character_ref_job(const std::string& project_path,
 
     Character& c = it->second;
     const Rendered out = render_ref(
-        store, char_id + "_" + slot,
+        store, project_path, char_id + "_" + slot,
         stages::build_character_ref_prompt(c, assets.style, slot),
         stages::ref_negative(assets.style), seed, stream_id, shared, enrolled);
 
@@ -349,10 +353,10 @@ ApiResult post_character_reference_generate(const json& body) {
                 job_done(stream_id, character_ref_job(project_path, char_id,
                                                       slot, seed, stream_id));
                 // 固定频道那份：刷新过页面的人靠它知道该重新拉这张图了。
-                ref_done(target);
+                ref_done(project_path, target);
             } catch (const std::exception& e) {
                 job_error(stream_id, e.what());
-                ref_error(target, e.what());
+                ref_error(project_path, target, e.what());
             }
         });
         return {202, {{"started", true}, {"stream", stream_id}}};
@@ -378,7 +382,7 @@ json location_ref_job(const std::string& project_path,
 
     Location& l = it->second;
     const Rendered out = render_ref(
-        store, location_id + "_empty",
+        store, project_path, location_id + "_empty",
         stages::build_location_ref_prompt(l, assets.style),
         stages::ref_negative(assets.style), seed, stream_id, shared, enrolled);
 
@@ -428,10 +432,10 @@ ApiResult post_location_reference_generate(const json& body) {
             try {
                 job_done(stream_id, location_ref_job(project_path, location_id,
                                                      seed, stream_id));
-                ref_done(target);
+                ref_done(project_path, target);
             } catch (const std::exception& e) {
                 job_error(stream_id, e.what());
-                ref_error(target, e.what());
+                ref_error(project_path, target, e.what());
             }
         });
         return {202, {{"started", true}, {"stream", stream_id}}};
@@ -473,6 +477,8 @@ struct RefQueue {
     ///（`pipeline::chat_lane`）。**对话说「停」只停自己起的**——同出片、写作
     /// 那两样按道分（CLAUDE.md 第十四条）。
     std::string lane;
+    /// 这一批是不是「全部重画」。不是的话，轮到每一件时再看一眼那一格空不空（见 worker）。
+    bool force = false;
     std::vector<QueueItem> items;
     std::size_t next = 0;         ///< 下一件派谁
     std::size_t done = 0;
@@ -608,7 +614,7 @@ void enroll(std::vector<QueueItem>& items, const std::string& project) {
         // 那儿是出首帧（镜头那一格）。`kind` 网页那套在读，改不得，所以
         // 哪一格由起任务的人自己说（见 `util/task_slot.hpp`）。
         it.task = std::make_shared<pipeline::Task>(
-            "image", SAYF("画参考图 · %1", it.label), project, std::string{},
+            "image", SAYF("生成参考图 · %1", it.label), project, std::string{},
             "assets");
         it.task->set_target(it.target);
     }
@@ -638,6 +644,7 @@ void run_queue(std::string project_path) {
         for (;;) {
             QueueItem item;
             std::size_t idx = 0;
+            bool force_all = false;
             {
                 std::unique_lock<std::mutex> lk(q.mu);
                 if (q.tok.cancelled() || q.next >= q.items.size()) return;
@@ -650,6 +657,32 @@ void run_queue(std::string project_path) {
                     item.task.reset();
                     continue;
                 }
+                force_all = q.force;
+            }
+            // **轮到它了再看一眼那一格还空不空。** 名单是按下去那一刻拍的；排着的这
+            // 几十分钟里人可能已经传了一张（或者单张画了一张）。不看的话照画不误：
+            // 画完 settle 把人传的那张删掉、角色那栏指向新画的，还把这个人的镜头全
+            // 退回重出。「全部重画」那一批照画。
+            if (!force_all) {
+                bool still_missing = true;
+                try {
+                    const auto now_missing =
+                        missing_refs(ProjectStore(paths::from_utf8(project_path)).load_assets(), false);
+                    still_missing = std::any_of(now_missing.begin(), now_missing.end(),
+                                                [&](const QueueItem& m) { return m.target == item.target; });
+                } catch (const std::exception&) {
+                    // 读不动就照原计划画
+                }
+                if (!still_missing) {
+                    std::lock_guard<std::mutex> lg(q.mu);
+                    q.items[idx].task.reset();
+                    item.task.reset();
+                    q.done += 1;
+                    continue;
+                }
+            }
+            {
+                std::lock_guard<std::mutex> lg(q.mu);
                 q.running[item.target] = item.label;
             }
             // 轮到它了，开始计时。
@@ -668,12 +701,17 @@ void run_queue(std::string project_path) {
                     location_ref_job(project_path, item.id, seed, "",
                                      shared.get(), item.task.get());
                 }
-                ref_done(item.target);
+                ref_done(project_path, item.target);
             } catch (const std::exception& e) {
                 // ApiError 也是 runtime_error，what() 就是那句原话。
                 err = e.what();
             }
 
+            // **单独停了这一张**（任务页那一行上的叉），而整批没停：这一张算划掉，不算
+            // 这一批砸了。原来照「第一件砸了就别接着派」处理——停一张等于停一整批，
+            // 「停一件」和「停一整批」只剩一个（CLAUDE.md 第十条那条 link 就是为这个）。
+            const bool stopped_one = !err.empty() && item.task && item.task->cancelled() &&
+                                     !q.tok.cancelled();
             if (item.task && !err.empty()) item.task->fail(err);
             {
                 std::lock_guard<std::mutex> lg(q.mu);
@@ -686,7 +724,7 @@ void run_queue(std::string project_path) {
                 //
                 // 两个持有者都要放：队列里那份和手上这份。
                 q.items[idx].task.reset();
-                if (err.empty()) {
+                if (err.empty() || stopped_one) {
                     q.done += 1;
                 } else {
                     q.failed += 1;
@@ -704,7 +742,7 @@ void run_queue(std::string project_path) {
             }
             // 手上这份最后放。放完这一件就进"做完的"了。
             item.task.reset();
-            if (!err.empty()) ref_error(item.target, err);
+            if (!err.empty() && !stopped_one) ref_error(project_path, item.target, err);
             publish(q);
         }
     };
@@ -750,6 +788,7 @@ ApiResult post_references_generate_all(const json& body) {
         }
         q.project = project_path;
         q.lane = opt_str(body, "lane");
+        q.force = force;
         enroll(items, project_path);
         q.items = std::move(items);
         q.next = 0;
@@ -806,6 +845,79 @@ ApiResult get_references_queue(const std::string& project) {
         return {200, {{"active", false}, {"total", 0}}};
     }
     return {200, state};
+}
+
+namespace {
+
+/// 等 `root` 这一批画完。假 = 人按了停（这一批也停掉，带着道：只停自己起的）。
+bool wait_refs_done(const std::string& root, const std::string& lane,
+                    const std::function<bool()>& cancelled,
+                    const std::function<void(const std::string&)>& note) {
+    for (;;) {
+        if (cancelled()) {
+            // **停这一件也停它起的那一批。** 不停的话显卡照旧把整批画完（几十张、每张
+            // 几十秒），期间别的片子要画参考图一律 409。
+            try {
+                post_references_generate_all_stop(json{{"project", root}, {"lane", lane}});
+            } catch (const std::exception&) {
+            }
+            return false;
+        }
+        try {
+            const ApiResult r = get_references_queue(root);
+            if (!r.body.value("active", false)) return true;
+            const int done = r.body.value("done", 0);
+            const int total = r.body.value("total", 0);
+            if (total > 0) {
+                note(SAYF("还剩 %1 张（共 %2）", std::to_string(total - done),
+                          std::to_string(total)));
+            }
+        } catch (const std::exception&) {
+            // 自己打嗝那几拍。**不当成画完了**：当成画完的话下一步在图没出齐时就去出首帧。
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1200));
+    }
+}
+
+/// 参考图那条队列（不管是哪部片子的）空出来。停了回假。
+bool wait_refs_idle(const std::function<bool()>& cancelled,
+                    const std::function<void(const std::string&)>& note) {
+    for (;;) {
+        if (cancelled()) return false;
+        try {
+            if (!get_references_queue("").body.value("active", false)) return true;
+        } catch (const std::exception&) {
+        }
+        note(SAY("等前面那一批参考图画完"));
+        std::this_thread::sleep_for(std::chrono::milliseconds(1200));
+    }
+}
+
+}  // namespace
+
+bool ensure_refs(const std::string& root, const std::string& lane,
+                 const std::function<bool()>& cancelled,
+                 const std::function<void(const std::string&)>& note) {
+    for (int round = 0; round < 3; ++round) {
+        if (cancelled()) return false;
+        try {
+            const ApiResult r = post_references_generate_all(
+                json{{"project", root}, {"force", false}, {"lane", lane}});
+            if (r.body.value("started", false)) return wait_refs_done(root, lane, cancelled, note);
+            return true;  // 一张都不缺
+        } catch (const ApiError& e) {
+            if (e.status() == 409 && round + 1 < 3) {
+                if (!wait_refs_idle(cancelled, note)) return false;
+                continue;
+            }
+            note(SAYF("参考图这一步没跑成：%1。接着试出片", e.what()));
+            return true;
+        } catch (const std::exception& e) {
+            note(SAYF("参考图这一步没跑成：%1。接着试出片", e.what()));
+            return true;
+        }
+    }
+    return true;
 }
 
 }  // namespace changji::http

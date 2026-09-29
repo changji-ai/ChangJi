@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <cstring>
 #include <fstream>
 #include <system_error>
 
@@ -186,34 +187,67 @@ MovePlan plan_move(const fs::path& from_in, const fs::path& to_in) {
     return p;
 }
 
+namespace {
+
+/// 两个文件一个字节一个字节地比。读不动的算不一样。
+bool same_bytes(const fs::path& a, const fs::path& b) {
+    std::ifstream ia(a, std::ios::binary);
+    std::ifstream ib(b, std::ios::binary);
+    if (!ia || !ib) return false;
+    std::vector<char> x(kChunk);
+    std::vector<char> y(kChunk);
+    for (;;) {
+        ia.read(x.data(), static_cast<std::streamsize>(x.size()));
+        ib.read(y.data(), static_cast<std::streamsize>(y.size()));
+        const auto na = ia.gcount();
+        const auto nb = ib.gcount();
+        if (na != nb) return false;
+        if (na <= 0) return !ia.bad() && !ib.bad();
+        if (std::memcmp(x.data(), y.data(), static_cast<std::size_t>(na)) != 0) return false;
+    }
+}
+
+}  // namespace
+
 std::string move_one(const fs::path& src, const fs::path& dst,
                      const std::function<bool(std::uint64_t)>& progress, bool* canceled,
                      bool force_copy) {
     if (canceled != nullptr) *canceled = false;
     std::error_code ec;
     const auto want = fs::file_size(src, ec);
-    if (ec) return SAYF("搬不动：%1", err_text(ec));
+    if (ec) return SAYF("无法移动：%1", err_text(ec));
 
     if (fs::exists(dst, ec)) {
+        // **同一个文件换了个写法**（大小写不敏感的盘挂在 Linux 上、bind mount、硬链接）：
+        // weakly_canonical 认不出来，下面按「那边已经有一份一样大的」处理就是删掉唯一
+        // 的那一份。什么都不做。
+        std::error_code eq;
+        if (fs::equivalent(src, dst, eq)) return {};
         std::error_code sec;
         const auto there = fs::file_size(dst, sec);
-        // 新目录里已经有一份一样大的（上一回搬到一半、或者人先拷过去了）：算搬过了。
+        // 新目录里已经有一份一样大的（上一回搬到一半、或者人先拷过去了）：**逐字节比
+        // 过**才算搬过了。只比大小的话，人拿资源管理器 / rsync --preallocate 拷到一半
+        // 的那份（大小先占满了）会被当成全的，删掉的是完整的原件。
         if (!sec && there == want) {
+            if (!same_bytes(src, dst)) {
+                return SAY("新目录中已有同名、同大小但内容不同的文件（可能未复制完整），"
+                           "已跳过。");
+            }
             fs::remove(src, ec);
-            if (ec) return SAYF("复制过去了，原来那份删不掉：%1", err_text(ec));
+            if (ec) return SAYF("已复制，但无法删除原文件：%1", err_text(ec));
             return {};
         }
         // **不盖**：大小不一样就是两份不同的东西，盖掉哪一份都可能是人要的那份。
-        return SAY("新目录里已经有一个同名的，大小不一样，没动它。");
+        return SAY("新目录中已有同名但大小不同的文件，已跳过。");
     }
 
     fs::create_directories(dst.parent_path(), ec);
-    if (ec) return SAYF("搬不动：%1", err_text(ec));
+    if (ec) return SAYF("无法移动：%1", err_text(ec));
 
     if (!force_copy) {
         fs::rename(src, dst, ec);
         if (!ec) return {};
-        if (!cross_device(ec)) return SAYF("搬不动：%1", err_text(ec));
+        if (!cross_device(ec)) return SAYF("无法移动：%1", err_text(ec));
     }
 
     // ---- 跨盘：复制、核字节数、改名、删原来那份 ----
@@ -223,9 +257,9 @@ std::string move_one(const fs::path& src, const fs::path& dst,
     {
         // 先开原来那份：开不了就别在新目录里留一个空的 `.moving`。
         std::ifstream in(src, std::ios::binary);
-        if (!in) return SAYF("复制到一半出错：%1", paths::to_utf8(src));
+        if (!in) return SAYF("复制过程中出错：%1", paths::to_utf8(src));
         std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
-        if (!out) return SAYF("复制到一半出错：%1", paths::to_utf8(tmp));
+        if (!out) return SAYF("复制过程中出错：%1", paths::to_utf8(tmp));
         std::vector<char> buf(kChunk);
         std::uint64_t done = 0;
         while (in) {
@@ -237,7 +271,7 @@ std::string move_one(const fs::path& src, const fs::path& dst,
             if (!out) {
                 out.close();
                 fs::remove(tmp, ec);
-                return SAYF("复制到一半出错：%1", paths::to_utf8(tmp));
+                return SAYF("复制过程中出错：%1", paths::to_utf8(tmp));
             }
             done += static_cast<std::uint64_t>(n);
             if (progress && !progress(done)) {
@@ -248,7 +282,7 @@ std::string move_one(const fs::path& src, const fs::path& dst,
         if (!stopped && in.bad()) {
             out.close();
             fs::remove(tmp, ec);
-            return SAYF("复制到一半出错：%1", paths::to_utf8(src));
+            return SAYF("复制过程中出错：%1", paths::to_utf8(src));
         }
     }
     if (stopped) {
@@ -259,15 +293,17 @@ std::string move_one(const fs::path& src, const fs::path& dst,
     std::error_code sec;
     if (fs::file_size(tmp, sec) != want || sec) {
         fs::remove(tmp, ec);
-        return SAY("复制完大小对不上，原来那份没删。");
+        return SAY("复制后大小不一致，已保留原文件。");
     }
+    // **落盘了再删原件**：复制的那份还在页缓存里就删了原来那份，这时断电两份都没了。
+    paths::sync_to_disk(tmp);
     fs::rename(tmp, dst, ec);
     if (ec) {
         fs::remove(tmp, sec);
-        return SAYF("搬不动：%1", err_text(ec));
+        return SAYF("无法移动：%1", err_text(ec));
     }
     fs::remove(src, ec);
-    if (ec) return SAYF("复制过去了，原来那份删不掉：%1", err_text(ec));
+    if (ec) return SAYF("已复制，但无法删除原文件：%1", err_text(ec));
     return {};
 }
 
@@ -416,7 +452,7 @@ void Mover::run(fs::path from, fs::path to, std::vector<std::string> files,
             snap_.state = MoveState::Canceled;
         } else if (!snap_.errors.empty()) {
             snap_.state = MoveState::Failed;
-            snap_.error = SAYF("有 %1 个没搬过去，原因在每一条后面。",
+            snap_.error = SAYF("有 %1 个文件未能移动，原因见各条目。",
                                std::to_string(snap_.errors.size()));
         } else {
             snap_.state = MoveState::Done;

@@ -29,6 +29,11 @@ Settings Runtime::snapshot() const {
     return settings_;
 }
 
+std::string Runtime::peer_token() const {
+    std::lock_guard lg(mu_);
+    return settings_.peer.token;
+}
+
 stages::VideoLimits video_limits_for(const Settings& s) {
     // **先按模型自己认，配置里填了才覆盖。** 换模型时人改的是 [models].video
     // 那一行，不会想起来还有帧数格子要跟着改——所以默认让它自己认，

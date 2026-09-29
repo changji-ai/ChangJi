@@ -113,12 +113,24 @@ double cpu_percent_since_last() {
 /// AutoDL 无卡模式给 2 GiB，而 meminfo 写着 754 GB，看着像永远用不满。
 /// {上限, 当前用量}，单位 GB。没上限回 nullopt。
 std::optional<std::pair<double, double>> cgroup_memory() {
+    // **用量扣掉不活跃的页缓存**（同 docker stats 的口径）。memory.current /
+    // usage_in_bytes 连页缓存一起算：读过一个 20 GB 的模型文件，限额里的容器就
+    // 显示快满了，而那一大块随时能收回——宿主机那条路按 MemAvailable 算，本来
+    // 就不算它，两条路报出来的不是一个意思。
+    const auto used_of = [](const std::string& cur, const std::string& stat,
+                            const char* key) -> double {
+        double used = std::strtod(cur.c_str(), nullptr);
+        if (const auto inactive = parse_memory_stat(stat, key)) {
+            used = std::max(0.0, used - static_cast<double>(*inactive));
+        }
+        return used / kGb;
+    };
     // v2 在前：现在的机器基本都是 v2；v1 那对文件只在老内核上有。
     if (auto lim = parse_cgroup_limit(read_file("/sys/fs/cgroup/memory.max"))) {
         const std::string cur = trim(read_file("/sys/fs/cgroup/memory.current"));
         if (cur.empty()) return std::nullopt;
         return std::make_pair(static_cast<double>(*lim) / kGb,
-                              std::strtod(cur.c_str(), nullptr) / kGb);
+                              used_of(cur, read_file("/sys/fs/cgroup/memory.stat"), "inactive_file"));
     }
     if (auto lim = parse_cgroup_limit(
             read_file("/sys/fs/cgroup/memory/memory.limit_in_bytes"))) {
@@ -126,7 +138,8 @@ std::optional<std::pair<double, double>> cgroup_memory() {
             trim(read_file("/sys/fs/cgroup/memory/memory.usage_in_bytes"));
         if (cur.empty()) return std::nullopt;
         return std::make_pair(static_cast<double>(*lim) / kGb,
-                              std::strtod(cur.c_str(), nullptr) / kGb);
+                              used_of(cur, read_file("/sys/fs/cgroup/memory/memory.stat"),
+                                      "total_inactive_file"));
     }
     return std::nullopt;
 }
@@ -375,6 +388,19 @@ std::optional<unsigned long long> parse_cgroup_limit(const std::string& text) {
     // 超过 2^60（1 EiB）的都当没设。
     if (v == 0 || v > (1ULL << 60)) return std::nullopt;
     return v;
+}
+
+std::optional<unsigned long long> parse_memory_stat(const std::string& text,
+                                                    const std::string& key) {
+    std::istringstream in(text);
+    std::string line;
+    while (std::getline(in, line)) {
+        std::istringstream row(line);
+        std::string k;
+        unsigned long long v = 0;
+        if (row >> k >> v && k == key) return v;
+    }
+    return std::nullopt;
 }
 
 std::vector<GpuLoad> parse_nvidia_smi(const std::string& out) {

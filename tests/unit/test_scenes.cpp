@@ -9,6 +9,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include <filesystem>
+
 #include <string>
 #include <vector>
 
@@ -19,6 +21,7 @@
 #include "pipeline/storyboard_run.hpp"
 #include "stages/script.hpp"
 #include "stages/storyboard.hpp"
+#include "util/paths.hpp"
 
 using namespace changji;
 using json = nlohmann::json;
@@ -254,6 +257,48 @@ TEST_CASE("地点名接到资产库：全等优先，其次互相包含，最后
     door.name = "门口";
     c.locations["loc_door"] = door;
     CHECK_FALSE(stages::resolve_scene_location("公安局门前的台阶", c).has_value());
+
+    // **一头接一头。** 2026-09-27 实测「走路带风」：场次头「城西人才市场」，
+    // 资产库「人才市场大厅」；「军营营区」对「营区门口」。谁也不包含谁，子序列
+    // 差着「大厅」「门口」——三条全不中，整部片子每一场都被写成「不在清单里」。
+    // 一个名字的尾巴是另一个的开头，写的是同一个地方的一部分。
+    models::AssetLibrary d;
+    for (const auto& [id, name] : std::vector<std::pair<std::string, std::string>>{
+             {"loc_job_hall", "人才市场大厅"},
+             {"loc_camp_gate", "营区门口"},
+             {"loc_rental_room", "林知夏的出租屋"},
+             {"loc_alley_street", "巷口街面"},
+             {"loc_meeting_room", "董一帆的公司"},
+             {"loc_tailor_shop", "县城裁缝铺"}}) {
+        models::Location l;
+        l.location_id = id;
+        l.name = name;
+        d.locations[id] = l;
+    }
+    CHECK(stages::resolve_scene_location("城西人才市场", d) ==
+          std::optional<std::string>("loc_job_hall"));
+    CHECK(stages::resolve_scene_location("军营营区", d) ==
+          std::optional<std::string>("loc_camp_gate"));
+    // 反过来也接：资产是大的那个地方，场次头是它的一部分。
+    models::AssetLibrary e;
+    models::Location market;
+    market.location_id = "loc_market";
+    market.name = "城西人才市场";
+    e.locations["loc_market"] = market;
+    CHECK(stages::resolve_scene_location("人才市场大厅", e) ==
+          std::optional<std::string>("loc_market"));
+    // 共后缀不算：「城中村出租屋」和「林知夏的出租屋」字面上和「曾老板办公室」对
+    // 「宋律师办公室」一个形状，这儿分不出，留给模型挑（提示词那句）。
+    CHECK_FALSE(stages::resolve_scene_location("城中村出租屋", d).has_value());
+    // 「酒店大厅」不是「人才市场大厅」；「小面馆」谁都不是。
+    CHECK_FALSE(stages::resolve_scene_location("酒店大厅", d).has_value());
+    CHECK_FALSE(stages::resolve_scene_location("小面馆", d).has_value());
+    // 两个资产接得一样长就不猜。
+    models::Location gate2;
+    gate2.location_id = "loc_camp_gate2";
+    gate2.name = "营区后门";
+    d.locations["loc_camp_gate2"] = gate2;
+    CHECK_FALSE(stages::resolve_scene_location("军营营区", d).has_value());
 }
 
 TEST_CASE("按场次头切场：段头归到它后面那一场，序号按出现次序数") {
@@ -335,7 +380,11 @@ TEST_CASE("一场的提示词：钉死地点和时段，带共用的硬性要求
         const std::string q = stages::build_scene_storyboard_prompt(
             first, 2, make_assets(), quota, "ep01", "");
         CHECK_FALSE(has(q, "上一场收在"));
-        CHECK(has(q, "地点不在场景清单里"));
+        // 接不上不再替模型下结论说「不在清单里」（2026-09-27 前那句让模型开头
+        // 一万字辩"听指令还是听清单"）：把地名给它，让它在清单里挑，整场一个。
+        CHECK_FALSE(has(q, "地点不在场景清单里"));
+        CHECK(has(q, "这一场的地点「天台」在场景清单里没有一模一样的名字"));
+        CHECK(has(q, "location_id 就填它，整场都填同一个"));
     }
 }
 
@@ -367,6 +416,25 @@ TEST_CASE("盖场景的印：scene_id、location_id 统一，第一镜不接上�
     CHECK(shots[1].location_id == std::optional<std::string>("loc_cafe"));
     CHECK_FALSE(shots[0].continuous_with_prev);
     CHECK(shots[1].continuous_with_prev);
+
+    SUBCASE("引擎接不上地点时，模型挑的按多数统一整场") {
+        stages::SceneBlock loose = scenes[1];
+        loose.location_id.reset();
+        std::vector<models::Shot> picked(4);
+        picked[0].location_id = "loc_cafe";
+        picked[1].location_id = "loc_rooftop";
+        picked[2].location_id = "loc_cafe";
+        picked[3].location_id.reset();
+        stages::stamp_scene(picked, loose);
+        for (const auto& s : picked) {
+            CHECK(s.location_id == std::optional<std::string>("loc_cafe"));
+        }
+        // 一个都没挑：照旧空着，不编一个出来。
+        std::vector<models::Shot> none(2);
+        stages::stamp_scene(none, loose);
+        CHECK_FALSE(none[0].location_id.has_value());
+        CHECK_FALSE(none[1].location_id.has_value());
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -488,4 +556,120 @@ TEST_CASE("一场的 schema 把 scene_id 也钉死：模型不必为会被盖掉
                             .at("properties").at("scene_id");
         CHECK_FALSE(p.contains("enum"));
     }
+}
+
+// ---------------------------------------------------------------------------
+// 按场拆的中途草稿：拆好的场先留底，断了接着拆（2026-09-27）
+// ---------------------------------------------------------------------------
+//
+// 实跑：智谱 Coding · glm-5.3-flash 一场想十几分钟，一章五场，第 4 场连接断了——
+// 前三场一个镜头都没留下，一小时白跑。
+
+namespace {
+
+/// 一个干净的片子目录（纯 ASCII 名，见 scoped_env.hpp 那段）。
+struct PartsDir {
+    std::filesystem::path root;
+    explicit PartsDir(const char* tag)
+        : root(std::filesystem::temp_directory_path() / (std::string("changji_sb_parts_") + tag)) {
+        std::error_code ec;
+        std::filesystem::remove_all(root, ec);
+        std::filesystem::create_directories(root, ec);
+    }
+    ~PartsDir() {
+        std::error_code ec;
+        std::filesystem::remove_all(root, ec);
+    }
+    std::filesystem::path file() const { return pipeline::storyboard_parts_path(root, "ep01"); }
+};
+
+pipeline::StoryboardRunOptions two_scene_opts(const PartsDir& d) {
+    pipeline::StoryboardRunOptions o;
+    o.script = kTwoSceneScript;
+    o.assets = make_assets();
+    o.episode_id = "ep01";
+    o.duration_s = 60.0;
+    o.parts_file = d.file();
+    return o;
+}
+
+}  // namespace
+
+TEST_CASE("按场拆：第 2 场断了，第 1 场留在草稿里；重拆只问第 2 场，接得上上一场") {
+    PartsDir d("resume");
+    pipeline::CancelToken tok;
+    {
+        // 只有第 1 场的答复：第 2 场一问就抛（和连接断了、被人停了一样是异常）。
+        ScriptedClient client({one_shot_reply("ep01_sh001", "c_lin_wan", "天台边缘的林晚", "你来了。")});
+        CHECK_THROWS_AS(pipeline::run_storyboard(two_scene_opts(d), client, tok), llm::LlmError);
+        CHECK(client.prompts.size() == 2);
+    }
+    // 草稿在片子里引擎那一格，project.json 一个字没动（调用方拿不到镜头）。
+    CHECK(d.file() == d.root / ".changji" / "storyboard" / "ep01.json");
+    REQUIRE(std::filesystem::exists(d.file()));
+
+    ScriptedClient client({one_shot_reply("ep01_sh001", "c_chen_mo", "咖啡馆门口的陈默", "我不该来。")});
+    std::vector<std::string> progress;
+    auto o = two_scene_opts(d);
+    o.on_progress = [&progress](const std::string& m) { progress.push_back(m); };
+    const auto r = pipeline::run_storyboard(o, client, tok);
+
+    // 只问了第 2 场，而且"上一场收在"接的是草稿里第 1 场的最后一镜。
+    REQUIRE(client.prompts.size() == 1);
+    CHECK(has(client.prompts[0], "这是第 2 场"));
+    CHECK(has(client.prompts[0], "上一场收在：\n  天台边缘的林晚"));
+    CHECK(r.reused_scenes == 1);
+    REQUIRE(progress.size() == 2);
+    CHECK(has(progress[0], "上回已经拆好"));
+    // 合起来和一口气拆完的一样：重编号、次序、场次、地点都对。
+    REQUIRE(r.shots.size() == 2);
+    CHECK(r.shots[0].shot_id == "ep01_sh001");
+    CHECK(r.shots[1].shot_id == "ep01_sh002");
+    CHECK(r.shots[0].order == 0);
+    CHECK(r.shots[1].order == 1);
+    CHECK(r.shots[0].scene_id == "s1");
+    CHECK(r.shots[1].scene_id == "s2");
+    CHECK(r.shots[0].location_id == std::optional<std::string>("loc_rooftop"));
+    REQUIRE(r.shots[0].dialogue.size() == 1);
+    CHECK(r.shots[0].dialogue[0].text == "你来了。");
+    // 整章拆完，草稿删掉——不然剧本没改就一直"接着用"。
+    CHECK_FALSE(std::filesystem::exists(d.file()));
+}
+
+TEST_CASE("按场拆的草稿：剧本改了就不认，整章重拆") {
+    PartsDir d("stale");
+    pipeline::CancelToken tok;
+    {
+        ScriptedClient client({one_shot_reply("ep01_sh001", "c_lin_wan", "天台边缘的林晚", "你来了。")});
+        CHECK_THROWS(pipeline::run_storyboard(two_scene_opts(d), client, tok));
+    }
+    REQUIRE(std::filesystem::exists(d.file()));
+    auto o = two_scene_opts(d);
+    o.script = std::string(kTwoSceneScript) + "陈默转身走了。\n";
+    ScriptedClient client({
+        one_shot_reply("ep01_sh001", "c_lin_wan", "天台边缘的林晚", "你来了。"),
+        one_shot_reply("ep01_sh001", "c_chen_mo", "咖啡馆门口的陈默", "我不该来。"),
+    });
+    const auto r = pipeline::run_storyboard(o, client, tok);
+    CHECK(client.prompts.size() == 2);
+    CHECK(r.reused_scenes == 0);
+}
+
+TEST_CASE("按场拆的草稿：粘回来的、只看不发的一律不留") {
+    PartsDir d("nokeep");
+    pipeline::CancelToken tok;
+    ScriptedClient none({});
+    {
+        auto o = two_scene_opts(d);
+        o.peek = true;
+        pipeline::run_storyboard(o, none, tok);
+    }
+    {
+        auto o = two_scene_opts(d);
+        // 第 2 段坏的：第 1 段解析过了也不该留（粘回来的不花钱，不值得留底）。
+        o.pasted = {one_shot_reply("ep01_sh001", "c_lin_wan", "天台边缘的林晚", "你来了。"), "不是 JSON"};
+        CHECK_THROWS(pipeline::run_storyboard(o, none, tok));
+    }
+    CHECK(none.prompts.empty());
+    CHECK_FALSE(std::filesystem::exists(d.file()));
 }

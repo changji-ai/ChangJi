@@ -5,9 +5,13 @@
 #include <string>
 #include <vector>
 
+#include <map>
+#include <optional>
+
 #include "stages/json_extract.hpp"
 #include "stages/prompts.inc.hpp"
 #include "stages/story_outline.hpp"
+#include "stages/storyboard.hpp"
 #include "util/text.hpp"
 
 using json = nlohmann::json;
@@ -220,10 +224,115 @@ std::string build_analyze_prompt(const Story& story, StyleLine style_line) {
                                           : prompt::story_analyze::kHintRealistic;
     out += prompt::story_analyze::kSeg1;
     out += prompt::story_analyze::kRules;
+    out += render_known_names(story);
     out += prompt::story_analyze::kChaptersHead;
     out += render_chapters_for_analysis(story);
     out += prompt::story_analyze::kTail;
     return out;
+}
+
+std::string render_known_names(const Story& story) {
+    // **把已有的名单给它看。** 不给的话它对着正文自己起名，同一个地方换个叫法
+    //（2026-09-27「走路带风」：大纲的「城西人才市场」被读成「人才市场大厅」），
+    // 名单就成了两份。名字在眼前，它照抄的多；照抄不到的那几个，落库那头再接
+    //（apply_analysis 里那段）。没名单（粘贴导入的故事）就一个字不加。
+    std::string out;
+    std::vector<std::string> chars;
+    for (const auto& c : story.characters) {
+        if (!text::strip_ws(c.name).empty()) chars.push_back(c.name);
+    }
+    if (!chars.empty()) {
+        out += prompt::story_analyze::kKnownCharactersHead;
+        for (std::size_t i = 0; i < chars.size(); ++i) {
+            if (i > 0) out += "、";
+            out += chars[i];
+        }
+        out += "\n";
+    }
+    bool any = false;
+    for (const auto& l : story.locations) {
+        if (text::strip_ws(l.name).empty()) continue;
+        if (!any) {
+            out += prompt::story_analyze::kKnownLocationsHead;
+            any = true;
+        }
+        out += l.name;
+        if (!l.what.empty()) out += "：" + l.what;
+        out += "。";
+        if (!l.when.empty()) out += l.when + "。";
+        out += "\n";
+    }
+    return out;
+}
+
+std::map<std::string, std::string> unify_story_locations(Story& story) {
+    // 存量故事里同一个地方两个叫法（大纲一份、理解一份）的，收成一份：名字取
+    // 先出现的那个（大纲的在前，章节和剧本引的是它），说明空着的用后一条补上；
+    // 章节里引到别名的改成名单上的名字。判据同 match_place_name。
+    std::map<std::string, std::string> alias;
+    std::vector<StoryLocation> kept;
+    std::vector<std::string> names;
+    for (const StoryLocation& l : story.locations) {
+        const std::string name = text::strip_ws(l.name);
+        if (name.empty()) continue;
+        std::optional<std::string> canon;
+        for (const std::string& k : names) {
+            if (k == name) {
+                canon = k;
+                break;
+            }
+        }
+        if (!canon.has_value()) canon = match_place_name(name, names);
+        if (!canon.has_value()) {
+            names.push_back(name);
+            StoryLocation c = l;
+            c.name = name;
+            kept.push_back(std::move(c));
+            continue;
+        }
+        if (*canon != l.name) alias[l.name] = *canon;
+        auto it = std::find_if(kept.begin(), kept.end(),
+                               [&](const StoryLocation& k) { return k.name == *canon; });
+        if (it == kept.end()) continue;
+        if (it->what.empty() && !l.what.empty()) it->what = l.what;
+        if (it->when.empty() && !l.when.empty()) it->when = l.when;
+    }
+    story.locations = std::move(kept);
+    for (Chapter& ch : story.chapters) {
+        std::vector<std::string> fixed;
+        std::set<std::string> seen;
+        for (const std::string& n : ch.locations) {
+            const auto al = alias.find(n);
+            const std::string m = al == alias.end() ? n : al->second;
+            if (seen.insert(m).second) fixed.push_back(m);
+        }
+        ch.locations = std::move(fixed);
+    }
+    return alias;
+}
+
+int canonicalize_location_names(models::AssetLibrary& lib,
+                                const std::vector<std::string>& names) {
+    // 资产里叫别名的场景改回名单上的名字（id 不动，镜头上的引用不受影响）。
+    // 改完同名的那几条由 dedupe_locations 按名字收拢。
+    int renamed = 0;
+    for (auto& [id, loc] : lib.locations) {
+        const std::string name = text::strip_ws(loc.name);
+        if (name.empty()) continue;
+        bool exact = false;
+        for (const std::string& n : names) {
+            if (text::strip_ws(n) == name) {
+                exact = true;
+                break;
+            }
+        }
+        if (exact) continue;
+        const auto canon = match_place_name(name, names);
+        if (!canon.has_value() || *canon == name) continue;
+        loc.name = *canon;
+        ++renamed;
+    }
+    return renamed;
 }
 
 Story apply_analysis(const Story& story, const std::string& raw, bool overwrite) {
@@ -317,25 +426,57 @@ Story apply_analysis(const Story& story, const std::string& raw, bool overwrite)
     }
 
     std::set<std::string> loc_names;
-    std::vector<StoryLocation> keep_locs;
-    if (!overwrite) {
-        for (const StoryLocation& l : out.locations) {
-            if (l.name.empty() || !loc_names.insert(l.name).second) continue;
-            keep_locs.push_back(l);
-        }
+    // **地方名单只有一份。** 模型读正文时爱给同一个地方换个叫法——2026-09-27
+    // 「走路带风」：大纲写的「城西人才市场」，理解那一步回来是「人才市场大厅」，
+    // 「军营营区」回来是「营区门口」，「城中村出租屋」回来是「林知夏的出租屋」。
+    // 原来这儿按名字全等去重，同一个地方两条都留下：圣经照第二份定妆、剧本照
+    // 第一份写场次头，拆分镜时一场都接不上（每一场都被写成「不在清单里」）。
+    //
+    // 现在回来的名字先往已有名单上接（match_place_name，和场次头接资产库同一套
+    // 四手）：接上的就是那个地方，**名字用名单上的**（章节、剧本、资产都认它），
+    // what / when 按勾决定顶不顶；接不上才是新地方。勾了「全部重出」名字也不换
+    // ——名字是这个地方的身份，换了下游全断；换的只是说明。
+    std::vector<std::string> canon_names;   // 名单上的名字，按原顺序
+    for (const StoryLocation& l : story.locations) {
+        if (!l.name.empty() && loc_names.insert(l.name).second) canon_names.push_back(l.name);
     }
-    out.locations = std::move(keep_locs);
+    std::vector<StoryLocation> merged;
+    if (!overwrite) merged = story.locations;   // 只补不顶：已有的原样留着
+    std::map<std::string, std::string> alias;   // 模型的叫法 → 名单上的名字
     const auto locs = data.find("locations");
     if (locs != data.end() && locs->is_array()) {
         for (const auto& l : *locs) {
             StoryLocation sl;
             sl.name = text::clean_field(get_str(l, "name"));
-            if (sl.name.empty() || !loc_names.insert(sl.name).second) continue;
+            if (sl.name.empty()) continue;
             sl.what = text::clean_field(get_str(l, "what"));
             sl.when = text::clean_field(get_str(l, "when"));
-            out.locations.push_back(std::move(sl));
+            std::optional<std::string> canon;
+            if (loc_names.count(sl.name)) {
+                canon = sl.name;
+            } else {
+                canon = match_place_name(sl.name, canon_names);
+            }
+            if (!canon.has_value()) {
+                loc_names.insert(sl.name);
+                canon_names.push_back(sl.name);
+                merged.push_back(std::move(sl));
+                continue;
+            }
+            if (*canon != sl.name) alias[sl.name] = *canon;
+            auto it = std::find_if(merged.begin(), merged.end(),
+                                   [&](const StoryLocation& m) { return m.name == *canon; });
+            if (it == merged.end()) {
+                // 勾了重出：名单上的名字留着，说明用这一趟的。
+                sl.name = *canon;
+                merged.push_back(std::move(sl));
+                continue;
+            }
+            if (!sl.what.empty() && (overwrite || it->what.empty())) it->what = sl.what;
+            if (!sl.when.empty() && (overwrite || it->when.empty())) it->when = sl.when;
         }
     }
+    out.locations = std::move(merged);
 
     const auto chaps = data.find("chapters");
     if (chaps == data.end() || !chaps->is_array()) return out;
@@ -392,7 +533,10 @@ Story apply_analysis(const Story& story, const std::string& raw, bool overwrite)
         if (overwrite || target->locations.empty()) {
             target->locations.clear();
             std::set<std::string> seen_locs;
-            for (const auto& n : get_str_array(c, "locations")) {
+            for (const auto& raw_name : get_str_array(c, "locations")) {
+                // 章里写的也归到名单上的名字（上面那段的别名表）。
+                const auto al = alias.find(raw_name);
+                const std::string n = al == alias.end() ? raw_name : al->second;
                 if (loc_names.count(n) && seen_locs.insert(n).second) {
                     target->locations.push_back(n);
                 }

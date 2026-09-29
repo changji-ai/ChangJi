@@ -508,6 +508,42 @@ TEST_CASE("取消之后不再往下跑") {
     fs::remove_all(root, ec);
 }
 
+TEST_CASE("渲染途中按停：抛出来的「取消了」不算一次失败，不降级") {
+    // 停下时后端抛「取消了」。原来这一下落进失败那一支：attempts += 1、重试，
+    // 到上限就 fallback 成降级写进 project.json——那一镜手上有旧片子的话，
+    // 启动修复不认它，从此不再重出。
+    const fs::path root = temp_root("中途停");
+    const models::ProjectPaths paths(root);
+    std::vector<models::Shot> owned = {make_shot("ep01_sh001")};
+    owned[0].attempts = 2;   // 离上限（3）只差一次
+    std::vector<models::Shot*> shots = {&owned[0]};
+
+    pipeline::JobTable table;
+    pipeline::CancelToken tok;
+    std::vector<stages::RenderOutcome> outs;
+    // **只停这一镜**（任务页上那一行的叉）：停的是这一镜自己的令牌，整批那个
+    // 没动。整批停早就认得（循环头上查着），漏的是这一种。
+    int calls = 0;
+    auto renderer = [&](const models::Shot&, const stages::RenderPlan&,
+                        const std::optional<fs::path>&, const fs::path&,
+                        pipeline::CancelToken& mine, const infer::StepCallback&) {
+        ++calls;
+        mine.request();
+        throw std::runtime_error("取消了");
+    };
+    table.start(pipeline::JobKind::Run, "ep01", [&](pipeline::JobProgress& p) {
+        outs = stages::render_batch(shots, make_assets(), make_spec(), paths,
+                                    renderer, p, tok);
+    });
+    table.wait_idle();
+
+    CHECK(calls == 1);   // 停了就不再重试
+    CHECK(owned[0].attempts == 2);
+    CHECK(owned[0].status == models::ShotStatus::PLANNED);
+    std::error_code ec;
+    fs::remove_all(root, ec);
+}
+
 TEST_CASE("每一镜的帧数按它自己的时长算") {
     const fs::path root = temp_root("帧数");
     const models::ProjectPaths paths(root);

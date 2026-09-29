@@ -12,6 +12,7 @@
 #include <thread>
 
 #include "gates/checks.hpp"
+#include "util/lanes.hpp"
 #include "util/human_time.hpp"
 #include "pipeline/task_board.hpp"
 #include "util/paths.hpp"
@@ -338,7 +339,8 @@ std::vector<RenderOutcome> render_batch(std::vector<Shot*>& shots,
                                               : ShotStatus::DRAFT_DONE;
 
             for (;;) {
-                if (tok.cancelled()) { done[i].skipped = true; break; }
+                // 整批停了、或者只停这一镜（任务页上那个叉）——两个都认。
+                if (tok.cancelled() || task.cancelled()) { done[i].skipped = true; break; }
 
                 fs::path dest;
                 RenderPlan plan;
@@ -539,6 +541,16 @@ std::vector<RenderOutcome> render_batch(std::vector<Shot*>& shots,
                     }
                     local.video_path = paths.rel(dest);
                 } catch (const std::exception& e) {
+                    // ⚠️ **人按的停不是渲染失败。** 停下时后端抛「取消了」，原来
+                    // 照样落到下面 attempts += 1、continue——只停这一镜的话每次
+                    // 重试当场又抛，一路转到重试超限，fallback 把它记成「降级」
+                    // 写进 project.json；那一镜手上有旧片子的话启动修复不认它，
+                    // 从此不再重出（2026-09-25 审出来）。停了就是没跑：不记次数、
+                    // 不动状态、不写回。
+                    if (tok.cancelled() || task.cancelled()) {
+                        done[i].skipped = true;
+                        break;
+                    }
                     // **整池连不上不会到这儿**：池自己在队列里等机器回来
                     // （worker_pool.cpp run_task），卡片上是 Phase::Wait 那句。
                     // 到这儿的是真的渲染失败——换台机器也一样的那种。
@@ -671,14 +683,8 @@ std::vector<RenderOutcome> render_batch(std::vector<Shot*>& shots,
         }
     };
 
-    if (lanes == 1) {
-        lane();  // 串行那条路一个线程都不起
-    } else {
-        std::vector<std::thread> pool;
-        pool.reserve(static_cast<std::size_t>(lanes));
-        for (int k = 0; k < lanes; ++k) pool.emplace_back(lane);
-        for (auto& t : pool) t.join();
-    }
+    // 一路抛了不从线程里漏出去（漏出去是 terminate），见 util/lanes.hpp。
+    util::run_lanes(lanes, lane);
 
     // ---- 收。**在调用线程上顺序改 Shot** ----
     //

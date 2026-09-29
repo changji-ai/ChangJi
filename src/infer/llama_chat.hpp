@@ -4,6 +4,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "pipeline/jobs.hpp"
 
@@ -43,6 +44,31 @@ struct ChatRun {
 /// 提示词后面（llm::schema_as_prompt），回来之后本地校验（checked_output）；
 /// 思考自由流，按 `<think>…</think>` 拆开（think_split.hpp）。本地和远端
 /// 于是只差"谁在算"，不差"怎么约束"。
+/// 带工具的多轮对话那一条（`converse`）用的几样。和 `llm::Message` 一个意思，另起
+/// 一份是因为 infer 这一层不认 llm 那一层的类型。
+struct ChatCall {
+    std::string id;
+    std::string name;
+    std::string arguments;   ///< JSON 字符串
+};
+struct ChatMsg {
+    std::string role;        ///< system / user / assistant / tool
+    std::string content;
+    std::vector<ChatCall> calls;   ///< assistant 那一条要调的工具
+    std::string tool_call_id;      ///< tool 那一条回的是哪一次
+    std::string tool_name;
+};
+struct ChatTool {
+    std::string name;
+    std::string description;
+    std::string parameters;  ///< JSON Schema，字符串
+};
+struct ChatAnswer {
+    std::string content;
+    std::string reasoning;
+    std::vector<ChatCall> calls;
+};
+
 class LlamaChat {
 public:
     /// 载模型。失败回 nullptr 并把原因写进 `why`。
@@ -76,6 +102,14 @@ public:
                   bool& truncated);
 
     /// 这个模型的上下文长度。提示词超了要先知道，别等它自己截断。
+    /// 带工具的多轮对话：整段来回 + 工具表进去，回来要么是话、要么是要调的工具。
+    /// 场记那条对话（`agent/`）走这条——本地模型原来只有 `complete`，对话一开口就是
+    /// 「这个大模型后端不带工具调用」（2026-09-26 拿 Qwen3-4B 实撞）。
+    /// 正文边写边从 `run.on_piece` 给，调工具那一段不给；思考走 `run.on_thinking`。
+    bool converse(const std::vector<ChatMsg>& msgs, const std::vector<ChatTool>& tools,
+                  const ChatRun& run, pipeline::CancelToken& tok, ChatAnswer& out,
+                  std::string& why, bool& truncated);
+
     int context_tokens() const;
 
     /// 实际开出来几个上下文，也就是能同时跑几路。**可能比要的少**。

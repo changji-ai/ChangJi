@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "http/job_stream.hpp"
+#include "http/projects.hpp"
 #include "models/project.hpp"
 #include "models/story.hpp"
 #include "pipeline/activity.hpp"
@@ -33,7 +34,7 @@ using namespace changji::models;
 /// FastAPI 走的是校验错误那条路，body 是结构化数组不是一句话。
 /// 对拍语料抓到过我在别处写成 400。
 void forbid_extra(const json& body, const std::set<std::string>& allowed) {
-    if (!body.is_object()) throw ApiError(400, SAY("请求体要是一个对象"));
+    if (!body.is_object()) throw ApiError(400, SAY("请求体须为 JSON 对象"));
     for (const auto& kv : body.items()) {
         // **`stream` 一律放行。** 它是传输层的信封字段，不是业务字段：
         // 路由那一层（script_route / batch_route）拿它决定这件活挪不挪到
@@ -293,7 +294,7 @@ ApiResult post_script_premise(const json& body, llm::Client& client,
     // 挂在「显存不够加载 LLM」上，挡路的那件事却查不到。
     // 见 pipeline/activity.hpp 开头那段。
     pipeline::Activity act{"premise", paths::to_utf8(store.root()), "",
-                           SAY("正在想梗概")};
+                           SAY("正在构思梗概")};
     const pipeline::CancelLink stop_here{tok, act};
     const auto ideas = llm_guard([&] {
         return stages::parse_premises(client.complete(req, tok));
@@ -498,7 +499,7 @@ ApiResult post_script_write(const json& body, llm::Client& client,
     // 干什么的」）。
     pipeline::Activity act{
         "script", paths::to_utf8(store.root()), episode_id,
-        (plan != nullptr ? SAY("改编成剧本") : SAY("写剧本")) +
+        (plan != nullptr ? SAY("改编剧本") : SAY("撰写剧本")) +
             (episode_id.empty() ? std::string{} : " · " + episode_id)};
     const pipeline::CancelLink stop_here{tok, act};
 
@@ -594,17 +595,11 @@ ApiResult post_script_write(const json& body, llm::Client& client,
     // 却要把整份旧 project 写回去，那些改动就被悄悄吞掉了。
     //
     // 同一个形状在批量那两条长任务上也有，理由写在 batch.cpp 里那两段。
-    const std::string trimmed = text::strip_ws(premise);
-    if (project.premise != trimmed) {
-        // 重读→改→存一把锁；锁只圈这一小段，不圈上面那趟生成。
-        const auto store_guard = store.lock();
-        Project latest = store.load_project();
-        if (latest.premise != trimmed) {
-            latest.premise = text::truncate_utf8(trimmed, 2000);
-            store.save_project(latest);
-        }
+    // 重读→改→存一把锁（store_premise 里），锁只圈这一小段，不圈上面那趟生成；
+    // story.json 那份一起改。
+    if (project.premise != text::strip_ws(premise)) {
         // 本地这份也跟上：下面还要拿它拼回包
-        project.premise = latest.premise;
+        project.premise = store_premise(store, premise);
     }
 
     const int budget = stages::budget_chars(used_duration);
@@ -688,7 +683,7 @@ ApiResult post_script_trailer(const json& body, llm::Client& client,
     req.on_thinking = thinking_sink();
 
     pipeline::Activity act{"trailer", paths::to_utf8(store.root()), "",
-                           SAY("正在剪预告")};
+                           SAY("正在剪辑预告片")};
     const pipeline::CancelLink stop_here{tok, act};
     const stages::ScriptDraft draft = llm_guard([&] {
         return stages::parse_script(client.complete(req, tok));

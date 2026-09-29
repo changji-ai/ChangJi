@@ -13,6 +13,7 @@
 #include "infer/scheduler.hpp"
 #include "pipeline/activity.hpp"
 #include "pipeline/task_board.hpp"
+#include "util/lanes.hpp"
 #include "util/paths.hpp"
 #include "util/say.hpp"
 #include "util/text.hpp"
@@ -220,7 +221,7 @@ std::vector<FrameOutcome> run_frames(std::vector<Shot*>& shots,
         // ⚠️ **`image` 一词两用**：这儿是出首帧（镜头那一格），`ref_gen.cpp`
         // 那儿是参考图（设定那一格）。见 `util/task_slot.hpp`。
         tasks.push_back(std::make_unique<pipeline::Task>(
-            "image", SAYF("出首帧 · %1", shots[i]->shot_id), project_path,
+            "image", SAYF("生成首帧 · %1", shots[i]->shot_id), project_path,
             std::string{}, "shots"));
         tasks.back()->token().link(&tok);
     }
@@ -255,7 +256,7 @@ std::vector<FrameOutcome> run_frames(std::vector<Shot*>& shots,
                 e.current = index;
                 e.total = total;
                 e.shot_id = shot->shot_id;
-                e.message = SAYF("出首帧 %1", shot->shot_id);
+                e.message = SAYF("生成首帧 %1", shot->shot_id);
                 progress.report(e);
             }
 
@@ -313,7 +314,7 @@ std::vector<FrameOutcome> run_frames(std::vector<Shot*>& shots,
                     //
                     // 几镜并发时这条可能是同一个槽上兄弟镜头留下的判断——
                     // 同一个槽、同一时刻的状态，内容一样，不会说错。
-                    e.message = SAYF("出首帧 %1", shot->shot_id) +
+                    e.message = SAYF("生成首帧 %1", shot->shot_id) +
                                 infer::phase_note(phase, step, steps) +
                                 (phase == infer::Phase::Sample && step == 1
                                      ? room_note_suffix(infer::Slot::Image)
@@ -358,19 +359,26 @@ std::vector<FrameOutcome> run_frames(std::vector<Shot*>& shots,
                     }
                 }
             } catch (const std::exception& e) {
-                // 一镜失败不拖垮后面几镜。跑一晚上，早上发现第三镜挂了
-                // 导致后面三十镜都没动，那这一晚上就白熬了。
-                done[i].ok = false;
-                done[i].error = e.what();
-                task.fail(done[i].error);
+                // ⚠️ **人按的停不是失败**（同 render.cpp 那处）：原来照样记一次
+                // attempts——那个数和出片共用重试上限，停两次首帧，这一镜就离
+                // 「降级」只差一次抖动。停了就是没跑：不写回、不记次数。
+                if (tok.cancelled() || task.cancelled()) {
+                    done[i].skipped = true;
+                } else {
+                    // 一镜失败不拖垮后面几镜。跑一晚上，早上发现第三镜挂了
+                    // 导致后面三十镜都没动，那这一晚上就白熬了。
+                    done[i].ok = false;
+                    done[i].error = e.what();
+                    task.fail(done[i].error);
 
-                pipeline::Event ev;
-                ev.stage = "frames";
-                ev.kind = "warn";
-                ev.shot_id = shot->shot_id;
-                ev.message =
-                    SAYF("%1 出首帧失败：%2", shot->shot_id, done[i].error);
-                progress.report(ev);
+                    pipeline::Event ev;
+                    ev.stage = "frames";
+                    ev.kind = "warn";
+                    ev.shot_id = shot->shot_id;
+                    ev.message =
+                        SAYF("%1 出首帧失败：%2", shot->shot_id, done[i].error);
+                    progress.report(ev);
+                }
             }
             done[i].elapsed_s = now_seconds() - started;
             // **在这儿结账**，不是等整批跑完：页面上「做完的」那一栏要边跑
@@ -385,8 +393,10 @@ std::vector<FrameOutcome> run_frames(std::vector<Shot*>& shots,
                 // 整章序列化存盘，撞上就是脏数据。
                 std::unique_lock<std::mutex> lg(flow ? flow->commit_mutex()
                                                      : commit_mu);
-                apply(i);
-                if (commit) commit();
+                if (!done[i].skipped) {
+                    apply(i);
+                    if (commit) commit();
+                }
                 lg.unlock();
                 // 写回之后才划：出片那层一放行就会去读 frame_path
                 if (flow) flow->mark_ready(shot->shot_id);
@@ -412,14 +422,8 @@ std::vector<FrameOutcome> run_frames(std::vector<Shot*>& shots,
         }
     };
 
-    if (lanes == 1) {
-        worker();               // 串行那条路一个线程都不起
-    } else {
-        std::vector<std::thread> pool;
-        pool.reserve(static_cast<std::size_t>(lanes));
-        for (int k = 0; k < lanes; ++k) pool.emplace_back(worker);
-        for (auto& t : pool) t.join();
-    }
+    // 一路抛了不从线程里漏出去（漏出去是 terminate），见 util/lanes.hpp。
+    util::run_lanes(lanes, worker);
 
     // ---- 收。**在调用线程上顺序改 Shot** ----
     //

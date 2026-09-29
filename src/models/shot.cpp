@@ -353,4 +353,41 @@ void apply_lipsync_rules(std::vector<Shot>& shots) {
     }
 }
 
+namespace {
+
+template <typename E>
+void drop_if_unknown(nlohmann::json& obj, const char* key, const std::string& where,
+                     std::vector<std::string>& dropped) {
+    const auto it = obj.find(key);
+    if (it == obj.end()) return;
+    if (!it->is_string()) {
+        dropped.push_back(where + key + "=" + it->dump());
+        obj.erase(key);
+        return;
+    }
+    const std::string want = it->get<std::string>();
+    if (std::string(to_string(it->get<E>())) != want) {
+        dropped.push_back(where + key + "=" + want);
+        obj.erase(key);
+    }
+}
+
+}  // namespace
+
+std::vector<std::string> drop_unknown_shot_enums(nlohmann::json& shot) {
+    std::vector<std::string> dropped;
+    if (!shot.is_object()) return dropped;
+    drop_if_unknown<ShotSize>(shot, "shot_size", "", dropped);
+    drop_if_unknown<CameraAngle>(shot, "camera_angle", "", dropped);
+    drop_if_unknown<CameraMove>(shot, "camera_move", "", dropped);
+    drop_if_unknown<Lens>(shot, "lens", "", dropped);
+    drop_if_unknown<Transition>(shot, "transition_in", "", dropped);
+    const auto cit = shot.find("characters");
+    if (cit == shot.end() || !cit->is_array()) return dropped;
+    for (auto& ch : *cit) {
+        if (ch.is_object()) drop_if_unknown<FacePose>(ch, "face_pose", "characters.", dropped);
+    }
+    return dropped;
+}
+
 }  // namespace changji::models

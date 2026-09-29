@@ -81,6 +81,29 @@ fs::path make_models_dir(const std::string& tag,
 
 }  // namespace
 
+TEST_CASE("密钥文件一生下来就只有自己读得到，旁边不留临时文件") {
+    // 原来先按默认权限（0644）建、写完再 chmod 成 0600，中间那一下同机别的账号
+    // 读得到；写的结果也不看。现在临时文件拿 0600 建、写全了再换名。
+    changji::test::ScopedUserConfigDir iso("key-perms");
+    const auto p = config::write_api_key_for("https://a.example.com/v1", "secret-key");
+    CHECK(config::read_api_key_for("https://a.example.com/v1") == "secret-key");
+#ifndef _WIN32
+    const auto perms = std::filesystem::status(p).permissions();
+    CHECK((perms & (std::filesystem::perms::group_all | std::filesystem::perms::others_all)) ==
+          std::filesystem::perms::none);
+#endif
+    // 换一把：整把换，不留 .tmp 在旁边。
+    config::write_api_key_for("https://a.example.com/v1", "second-key");
+    CHECK(config::read_api_key_for("https://a.example.com/v1") == "second-key");
+    int leftovers = 0;
+    for (const auto& e : std::filesystem::directory_iterator(p.parent_path())) {
+        if (changji::paths::to_utf8(e.path().filename()).find(".tmp") != std::string::npos) {
+            ++leftovers;
+        }
+    }
+    CHECK(leftovers == 0);
+}
+
 TEST_CASE("换一家去问模型：用那一家自己的钥匙") {
     // ⚠️ 密钥是**按地址各存一把**的。换平台那一下界面上的地址已经变了，
     // 而 `settings` 里那把还是上一家的——照它发就必然 401，**而 401 长得像
@@ -214,7 +237,7 @@ TEST_CASE("模型列表：拿不到的三种情况") {
     llm::HttpResponse down;
     down.status = 0;
     down.transport_error = "Connection refused";
-    check_failed(down, "连不上");
+    check_failed(down, "无法连接");
     check_failed(llm::HttpResponse{500, "{}", std::nullopt}, "返回 500");
     check_failed(llm::HttpResponse{200, "<html>", std::nullopt}, "不是 JSON");
 }

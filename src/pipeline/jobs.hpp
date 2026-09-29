@@ -328,6 +328,13 @@ struct JobSlot {
     /// 第几个起的（全表递增）。"这一类最新那件"按它挑，不按时钟——
     /// 两件在同一个时钟刻度里起的话，按时钟挑不出先后。
     std::uint64_t seq = 0;
+    /// start() 正解着锁等上一条线程退（join）。**这当口槽不许再被占**：
+    /// 那一下有人按停的话 running 被写回 false，第二个 start() 看它空着挤进
+    /// 来，两个一起 join 同一条线程——未定义行为，实际是 terminate。
+    bool starting = false;
+    /// starting 那当口有人按了停。join 完不能拿 token.reset() 把它抹掉：
+    /// 这一件照起，但令牌一上来就是停着的，进门就退、报那句"已停"。
+    bool cancel_pending = false;
 };
 
 /// 派活那条「道」的写法：`chat:<对话编号>`。

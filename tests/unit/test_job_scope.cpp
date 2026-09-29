@@ -63,20 +63,46 @@ TEST_CASE("按 stream 把活停掉") {
         CHECK_FALSE(http::cancel_job("job-b"));
     }
 
-    SUBCASE("同一个 id 被重用：停的是现在这件") {
-        // 用户连点两下、前一件还没退干净时就是这个形状。析构时按地址比过
-        // 再删，所以后来那件的登记不会被前一件抹掉。
+    SUBCASE("同一个 id 被重用：一按全停，谁先退都不留死地址") {
+        // 用户连点两下、前一件还没退干净时就是这个形状。页面手里只有这一个
+        // id，按「停下」要的是它底下的活都停。
         const http::JobScope outer{"job-same"};
         {
             const http::JobScope inner{"job-same"};
             CHECK(http::cancel_job("job-same"));
             CHECK(http::current_cancel().cancelled());
         }
-        // 里层退了，外层那条还登记着，而且是另一个令牌（没被停过）
-        CHECK_FALSE(http::current_cancel().cancelled());
-        CHECK(http::cancel_job("job-same"));
+        // 里层退了，外层那条还登记着，而且也被停到了
         CHECK(http::current_cancel().cancelled());
+        CHECK(http::cancel_job("job-same"));
     }
+}
+
+TEST_CASE("同一个 id 两条线程：先开的先退，后退的那件不把死令牌写回去") {
+    // 2026-09-25 审出来的：原来后开的那件把前一件的令牌地址记在自己身上，
+    // 退出时"还原"回表里。两条线程不按后进先出的顺序退——前一件先退、
+    // 令牌已经析构，后一件退出时把死地址写回去，下一次按停就是对一块释放
+    // 了的内存 request()。ASan 下这条用例会当场报 use-after-free。
+    std::atomic<int> stage{0};
+    std::thread a([&] {
+        const http::JobScope s{"t-same"};
+        stage = 1;
+        while (stage.load() < 2) std::this_thread::yield();
+        // a 先退
+    });
+    while (stage.load() < 1) std::this_thread::yield();
+    std::thread b([&] {
+        const http::JobScope s{"t-same"};
+        stage = 2;
+        while (stage.load() < 3) std::this_thread::yield();
+        // b 后退
+    });
+    a.join();                 // a 的令牌已经没了
+    CHECK(http::cancel_job("t-same"));   // 只剩 b 的那一个，停得到
+    stage = 3;
+    b.join();
+    // 两件都退了，表里一条都不该剩——剩的就是那个死地址
+    CHECK_FALSE(http::cancel_job("t-same"));
 }
 
 TEST_CASE("没有 JobScope 时给个哑元，别让调用方自己 new") {
@@ -261,4 +287,19 @@ TEST_CASE("信箱：各步自己那几种消息（story_token 这些）也要留
     // 这两种都不是收尾消息，别把信箱销早了——后面还有 job_done 要送。
     CHECK_FALSE(r.at("done").get<bool>());
     CHECK(http::mail_take("box-story", 2).at("exists").get<bool>());
+}
+
+TEST_CASE("排着队还没开跑的活，按停也停得住") {
+    // 慢活挪到后台线程池上跑，池子满了后面的排着。JobScope 要轮到它才登记——
+    // 排着那一段按「停下」，cancel_job 找不到这个 id，回 false，那件活轮到了照样开跑。
+    pipeline::CancelToken tok;
+    {
+        const http::JobPending pending("chat-queued", tok);
+        CHECK(http::cancel_job("chat-queued"));
+        CHECK(tok.cancelled());
+        // 开跑时 JobScope 借同一个令牌接手，排队那份撤掉之后还停得住
+        const http::JobScope scope("chat-queued", tok);
+    }
+    // 两份都撤了：表里不再有这个 id
+    CHECK_FALSE(http::cancel_job("chat-queued"));
 }

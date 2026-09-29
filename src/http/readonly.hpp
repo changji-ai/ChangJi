@@ -11,6 +11,7 @@
 // 见方案第三节。错误响应要和 FastAPI 的 HTTPException 一致：
 // 状态码加一个 {"detail": "..."} 的 body——前端只认这个形状。
 
+#include <cstdint>
 #include <string>
 
 #include <nlohmann/json.hpp>
@@ -283,6 +284,46 @@ inline nlohmann::json parse_body(const std::string& raw) {
             }})}});
     }
     return v;
+}
+
+/// 请求体里取一栏。**类型不对回 400 说清是哪一栏**，没给（或 null）用默认值。
+///
+/// `body.value("x", std::string())` 遇到数字、null 抛 nlohmann 的 type_error，一路落到
+/// `guard` 成了 500「服务端出错：[json.exception.type_error.302] …」——界面或脚本传错
+/// 一栏，看着像引擎坏了（2026-09-25 拿 /api/chat/permit 传 `"id":"1"` 撞到）。不在 `guard`
+/// 里一把兜：那样引擎自己读坏了盘上的 project.json 也会说成「你请求里哪一栏不对」。
+/// 请求体不是对象的，一律当没给（调用方另有 400 说它）。
+inline std::string field_str(const nlohmann::json& body, const char* key,
+                             const std::string& def = {}) {
+    if (!body.is_object()) return def;
+    const auto it = body.find(key);
+    if (it == body.end() || it->is_null()) return def;
+    if (!it->is_string()) throw ApiError(400, SAYF("「%1」应该是一串字", key));
+    return it->get<std::string>();
+}
+
+inline bool field_bool(const nlohmann::json& body, const char* key, bool def) {
+    if (!body.is_object()) return def;
+    const auto it = body.find(key);
+    if (it == body.end() || it->is_null()) return def;
+    if (!it->is_boolean()) throw ApiError(400, SAYF("「%1」应该是 true 或 false", key));
+    return it->get<bool>();
+}
+
+inline std::int64_t field_int(const nlohmann::json& body, const char* key, std::int64_t def) {
+    if (!body.is_object()) return def;
+    const auto it = body.find(key);
+    if (it == body.end() || it->is_null()) return def;
+    if (!it->is_number_integer()) throw ApiError(400, SAYF("「%1」应该是整数", key));
+    return it->get<std::int64_t>();
+}
+
+inline double field_num(const nlohmann::json& body, const char* key, double def) {
+    if (!body.is_object()) return def;
+    const auto it = body.find(key);
+    if (it == body.end() || it->is_null()) return def;
+    if (!it->is_number()) throw ApiError(400, SAYF("「%1」应该是一个数", key));
+    return it->get<double>();
 }
 
 /// 把上面那些函数的异常翻成 ApiResult。路由层统一走它。

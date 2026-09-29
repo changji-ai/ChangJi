@@ -1,5 +1,7 @@
 #include "lan/peers.hpp"
 
+#include "util/atomic_file.hpp"
+
 #include <algorithm>
 #include <fstream>
 #include <random>
@@ -30,6 +32,18 @@ void PeerBook::saw(const Peer& p) {
     // **名字空着就别把旧的盖掉。** mDNS 那头有几种回调只带地址不带 TXT，
     // 拿空串盖过去的话，表上那一行会突然变成没有名字的一台。
     if (!p.name.empty()) slot.name = p.name;
+    // **地址变了，他给我的那张票作废。** id 写在 mDNS 的 TXT 里、谁都报得出：
+    // 同网段有人拿他的 id 报一个自己的地址，票原来原样跟着搬过去——下一轮
+    // 问状态、把他写进机器表时，票就交到冒名的那台手上了。真是他换了网络的
+    // 话，下一轮照新地址再要一次，拿回来的还是同一张（那头不换票）。
+    const bool moved = (!p.host.empty() && !slot.host.empty() && p.host != slot.host) ||
+                       (p.port > 0 && slot.port > 0 && p.port != slot.port);
+    if (moved) {
+        slot.their_ticket.clear();
+        slot.their_gpu = -1;
+        slot.their_vram_used = 0;
+        slot.their_vram_total = 0;
+    }
     if (!p.host.empty()) slot.host = p.host;
     if (p.port > 0) slot.port = p.port;
     if (p.seen_at > slot.seen_at) slot.seen_at = p.seen_at;
@@ -101,10 +115,26 @@ Grant PeerBook::by_ticket(const std::string& ticket) const {
     // "空票配空票"会把所有人都放行——这一条正是那种一读就过、
     // 一想就出冷汗的写法。
     if (ticket.empty()) return {};
+    // **逐字节比完再回，不提前短路**（同 infer::token_ok）：这是对局域网开着的门，
+    // `==` 在第一个不同的字节就返回，按响应快慢能一个字节一个字节地猜出票来。
+    const auto same = [](const std::string& a, const std::string& b) {
+        if (a.size() != b.size()) return false;
+        unsigned char diff = 0;
+        for (std::size_t i = 0; i < a.size(); ++i) {
+            diff |= static_cast<unsigned char>(a[i] ^ b[i]);
+        }
+        return diff == 0;
+    };
+    Grant hit;
+    bool found = false;
     for (const auto& [_, g] : grants_) {
-        if (g.ticket == ticket) return g;
+        // 每一张都比：找到就停的话，比了几张也是时间差。
+        if (same(g.ticket, ticket) && !found) {
+            hit = g;
+            found = true;
+        }
     }
-    return {};
+    return found ? hit : Grant{};
 }
 
 json PeerBook::grants_json() const {
@@ -155,8 +185,13 @@ std::string my_id(const fs::path& data_dir) {
     id.reserve(16);
     for (int i = 0; i < 16; ++i) id += kHex[rd() % 16];
     fs::create_directories(data_dir, ec);
-    std::ofstream out(f);
-    out << id << "\n";
+    // 整份换：原地截断写到一半没了的话，下次读回来是空串，又现生一个——
+    // 这台机器在别人表上就成了另一台，发给它的票全对不上。
+    try {
+        util::write_file_atomic(f, id + "\n", /*private_only=*/false);
+    } catch (const std::exception&) {
+        // 写不下也照样用这一个 id 跑完这一趟；下次起来再生一个。
+    }
     return id;
 }
 

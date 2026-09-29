@@ -33,3 +33,32 @@ struct adl_serializer<std::optional<T>> {
 };
 
 }  // namespace nlohmann
+
+namespace changji::models {
+
+/// 递归去掉**对象里**值为 null 的键，交给 `..._WITH_DEFAULT` 按默认值补。
+///
+/// 那个宏读每一栏是 `j.value(key, 默认值)`：键不在回默认值，**键在而值是 null
+/// 就抛 type_error.302**。于是 project.json 里一栏 `"title": null`（手改的、老版本
+/// 写的、别的工具生成的）让整部片子读不进来——每一条接口都回 400，包括拿来修它
+/// 的那几条。去掉之后和「没写这一栏」一样：std::optional 那几栏本来就是 nullopt。
+///
+/// **数组里的 null 不动**：几组数组是按下标对齐的（台词和它的时长），抽掉一个
+/// 后面全错一格，比读不进来更难发现。
+template <typename J>
+void drop_nulls(J& j) {
+    if (j.is_object()) {
+        for (auto it = j.begin(); it != j.end();) {
+            if (it->is_null()) {
+                it = j.erase(it);
+            } else {
+                drop_nulls(*it);
+                ++it;
+            }
+        }
+    } else if (j.is_array()) {
+        for (auto& e : j) drop_nulls(e);
+    }
+}
+
+}  // namespace changji::models

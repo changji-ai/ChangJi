@@ -3,6 +3,7 @@
 #include "util/say.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 
 namespace changji::util {
@@ -28,10 +29,13 @@ std::string fmt(const char* spec, double v) {
 /// 中日韩照旧写整词——那几种语言本来就不分复数。
 std::string human_time(double seconds) {
     seconds = std::max(0.0, seconds);
-    if (seconds < 60.0) return SAYF("%1 秒", fmt("%.0f", seconds));
-    const double minutes = seconds / 60.0;
-    if (minutes < 60.0) return SAYF("%1 分钟", fmt("%.0f", minutes));
-    return SAYF("%1 小时", fmt("%.1f", minutes / 60.0));
+    // **先按要显示的精度取整，再挑单位。** 反过来的话 59.6 秒挑的是「秒」、
+    // 印出来是「60 秒」，3599 秒是「60 分钟」。
+    const long long secs = std::llrint(seconds);   // 就近、逢半取偶（同原来 %.0f 的取法）
+    if (secs < 60) return SAYF("%1 秒", std::to_string(secs));
+    const long long minutes = std::llrint(seconds / 60.0);
+    if (minutes < 60) return SAYF("%1 分钟", std::to_string(minutes));
+    return SAYF("%1 小时", fmt("%.1f", seconds / 3600.0));
 }
 
 std::string human_time_precise_as(double seconds, double scale_ref) {
@@ -39,11 +43,13 @@ std::string human_time_precise_as(double seconds, double scale_ref) {
     scale_ref = std::max(0.0, scale_ref);
     if (scale_ref < 60.0) return SAYF("%1 秒", fmt("%.1f", seconds));
     if (scale_ref < 3600.0) {
-        const int mins = static_cast<int>(seconds / 60.0);
-        const double rest = seconds - mins * 60.0;
+        // 按十分之一秒取整了再拆（119.97 秒原来拆成「1 分 60.0 秒」）。
+        const long long tenths = std::llround(seconds * 10.0);
+        const long long mins = tenths / 600;
+        const long long rest = tenths % 600;
         // 整分钟就别拖个 " 0.0 秒" 的尾巴。
-        if (rest < 0.05) return SAYF("%1 分", std::to_string(mins));
-        return SAYF("%1 分 %2 秒", std::to_string(mins), fmt("%.1f", rest));
+        if (rest == 0) return SAYF("%1 分", std::to_string(mins));
+        return SAYF("%1 分 %2 秒", std::to_string(mins), fmt("%.1f", rest / 10.0));
     }
     const int hours = static_cast<int>(seconds / 3600.0);
     const int mins = static_cast<int>((seconds - hours * 3600.0) / 60.0);

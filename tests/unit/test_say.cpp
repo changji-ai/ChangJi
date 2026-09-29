@@ -130,6 +130,8 @@ TEST_CASE("两个读者：给模型那一份一个字节都不变，给人那一
     // `chapter_word` 是同一件事：`ep03` → 「第 3 章」，模型那份要中文。
     // **默认给模型**——它最早只有模型在用。
     CHECK(util::chapter_word("ep03") == "第 3 章");
+    // 全是数字不等于装得下：原来 stoi 当场 out_of_range（id 可能是模型给的）。
+    CHECK(util::chapter_word("ch99999999999") == "ch99999999999");
     CHECK(util::chapter_word("ep03", i18n::Audience::model()) == "第 3 章");
     CHECK(util::chapter_word("ep03", i18n::Audience::human()) != "第 3 章");
 }

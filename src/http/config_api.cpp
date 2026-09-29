@@ -70,7 +70,7 @@ json checks_json(const doctor::Report& r) {
 
 void forbid_extra(const json& body, const std::set<std::string>& allowed,
                   const char* where) {
-    if (!body.is_object()) throw ApiError(400, SAY("请求体要是一个对象"));
+    if (!body.is_object()) throw ApiError(400, SAY("请求体须为 JSON 对象"));
     for (const auto& kv : body.items()) {
         if (allowed.count(kv.key()) == 0) {
             throw unprocessable_top(std::string(where) + kv.key(),
@@ -198,12 +198,12 @@ ApiResult get_connections() {
         // **走接口而不是只留在 config.toml 里**，理由是这两项是「随手要动」
         // 的：拷项目给别人之前先关掉、磁盘快满了先调小——让人为这个去改 toml
         // 再重启，多半就不关了。
-        // ⚠️ **界面上还没有这两个控件**（`webapp/client/src` 里搜不到
-        // `call_log`），所以现在只有直接打 `/api/connections` 这一条路。
-        // 补界面的时候记着：`call_log_max_mb` 填离谱的数会被 `validate()`
-        // 挡在 400 上（见 settings.cpp 那段），控件给个数字框加上下界就够。
+        // 界面在设置页「提示词日志」那一节（SettingsView.vue）。
+        // `call_log_max_mb` 填离谱的数会被 `validate()` 挡在 400 上（见
+        // settings.cpp 那段），那一节的数字框带着同一对上下界（1…102400）。
         {"llm_call_log", s.llm.call_log},
         {"llm_call_log_max_mb", s.llm.call_log_max_mb},
+        {"llm_keep_alive_minutes", s.llm.keep_alive_minutes},
         {"tts_backend", s.tts.backend},
         {"tts_base_url", s.tts.base_url.value_or("")},
         {"vram_gb_override", s.vram_gb_override.has_value()
@@ -225,7 +225,7 @@ ApiResult post_connections(const json& body, const DoctorFn& check) {
     const json& patch = *pit;
     static const std::set<std::string> kAllowed = {
         "llm_base_url", "llm_model", "llm_api_key", "llm_temperature",
-        "llm_call_log", "llm_call_log_max_mb",
+        "llm_call_log", "llm_call_log_max_mb", "llm_keep_alive_minutes",
         "llm_backend", "llm_command", "llm_command_args", "llm_command_timeout_s",
         "llm_thinking", "llm_reasoning_effort",
         "tts_backend", "tts_base_url", "vram_gb_override"};
@@ -234,7 +234,7 @@ ApiResult post_connections(const json& body, const DoctorFn& check) {
     // 正在跑的时候换机器会把这一章跑坏：前半章是一台机器出的，
     // 后半章是另一台，画风对不上。
     if (pipeline::jobs().running(pipeline::JobKind::Run)) {
-        throw ApiError(409, SAY("正在跑，这时候换机器会把这一章跑坏"));
+        throw ApiError(409, SAY("正在出片，此时更换机器会导致本章出错"));
     }
 
     // 值为 null 的当作没给，对应 pydantic 的 exclude_none=True
@@ -242,7 +242,7 @@ ApiResult post_connections(const json& body, const DoctorFn& check) {
     for (const auto& kv : patch.items()) {
         if (!kv.value().is_null()) data[kv.key()] = kv.value();
     }
-    if (data.empty()) throw ApiError(400, SAY("没有要改的项"));
+    if (data.empty()) throw ApiError(400, SAY("没有需要修改的项"));
 
     Settings s = runtime().snapshot();
     std::vector<std::string> changed;
@@ -282,6 +282,10 @@ ApiResult post_connections(const json& body, const DoctorFn& check) {
                 const auto x = need_num(v, key);
                 note(key, s.llm.call_log_max_mb != x);
                 s.llm.call_log_max_mb = x;
+            } else if (field == "keep_alive_minutes") {
+                const auto x = need_num(v, key);
+                note(key, s.llm.keep_alive_minutes != x);
+                s.llm.keep_alive_minutes = x;
             } else if (field == "backend") {
                 const auto x = need_string(v, key);
                 note(key, s.llm.backend != x);
@@ -305,14 +309,14 @@ ApiResult post_connections(const json& body, const DoctorFn& check) {
                 // 它的值）是一体的，合并出来的组合谁也说不清。
                 if (!v.is_array()) {
                     throw unprocessable("patch", key,
-                                        SAY("要是一个字符串数组"), v,
+                                        SAY("须为字符串数组"), v,
                                         "list_type");
                 }
                 std::vector<std::string> xs;
                 for (const auto& one : v) {
                     if (!one.is_string()) {
                         throw unprocessable("patch", key,
-                                            SAY("数组里每一项都要是字符串"), v,
+                                            SAY("数组中的每一项都须为字符串"), v,
                                             "string_type");
                     }
                     xs.push_back(one.get<std::string>());
@@ -358,10 +362,10 @@ ApiResult post_connections(const json& body, const DoctorFn& check) {
     // **ComfyUI 拆掉之后那条限制没有意义了**：comfy 已经不是合法取值，
     // 而 local 是现在的默认。照旧不放别的取值过。
     if (s.tts.backend != "local" && s.tts.backend != "http") {
-        throw ApiError(400, SAY("配音后端只能是 local 或 http"));
+        throw ApiError(400, SAY("配音方式只能是 local 或 http"));
     }
     if (s.tts.backend == "http" && !s.tts.base_url.has_value()) {
-        throw ApiError(400, SAY("配音后端选 http 就必须填地址"));
+        throw ApiError(400, SAY("配音方式为 http 时必须填写服务地址"));
     }
 
     // ⚠️ **换了地址就得换钥匙，在这一句之前。**
@@ -426,6 +430,7 @@ ApiResult post_connections(const json& body, const DoctorFn& check) {
                 else if (field == "temperature") value = s.llm.temperature;
                 else if (field == "call_log") value = s.llm.call_log;
                 else if (field == "call_log_max_mb") value = s.llm.call_log_max_mb;
+                else if (field == "keep_alive_minutes") value = s.llm.keep_alive_minutes;
                 else if (field == "backend") value = s.llm.backend;
                 else if (field == "thinking") value = s.llm.thinking;
                 else if (field == "reasoning_effort")
@@ -468,7 +473,7 @@ ApiResult post_connections(const json& body, const DoctorFn& check) {
                 saved_to = paths::to_utf8(save_user_config(payload));
             }
         } catch (const std::exception& e) {
-            throw ApiError(500, SAYF("配置写不进去：%1", e.what()));
+            throw ApiError(500, SAYF("无法写入配置：%1", e.what()));
         }
 
         // **密钥单独写它自己那个文件。**
@@ -491,7 +496,7 @@ ApiResult post_connections(const json& body, const DoctorFn& check) {
                 config::write_api_key_file(s.llm.api_key);
                 if (saved_to.is_null()) saved_to = paths::to_utf8(p);
             } catch (const std::exception& e) {
-                throw ApiError(500, SAYF("密钥写不进去：%1", e.what()));
+                throw ApiError(500, SAYF("无法写入密钥：%1", e.what()));
             }
         }
     }
@@ -519,12 +524,12 @@ ApiResult post_connections(const json& body, const DoctorFn& check) {
 }
 
 ApiResult post_settings(const json& body) {
-    if (!body.is_object()) throw ApiError(400, SAY("请求体要是一个对象"));
+    if (!body.is_object()) throw ApiError(400, SAY("请求体须为 JSON 对象"));
 
     // 正在跑的时候改参数会让这一章前后不一致：前十个镜头一种码率，
     // 后十个另一种，拼起来能看出接缝。
     if (pipeline::jobs().running(pipeline::JobKind::Run)) {
-        throw ApiError(409, SAY("正在跑，改参数会让这一章前后不一致"));
+        throw ApiError(409, SAY("正在出片，此时修改参数会导致本章前后不一致"));
     }
 
     // 老写法是把字段直接摊在请求体里，新写法包在 patch 里。两种都收，
@@ -560,7 +565,6 @@ ApiResult post_settings(const json& body) {
 
     std::vector<std::string> changed;
     Settings s = runtime().snapshot();
-    models::HardwareProfile profile = runtime().profile();
 
     // ---- 画质档位 ----
     //
@@ -570,13 +574,13 @@ ApiResult post_settings(const json& body) {
     // 真实后果是**设完重启就丢**——用户把成片档调成 1280×704 跑了一章，
     // 重启回到 960×544，而界面上没有任何提示。
     // 没填的项在 [tiers] 里是 0，照旧按显存推。
-    for (const auto& [tier, prefix] :
-         std::vector<std::pair<models::Tier, std::string>>{
-             {models::Tier::DRAFT, "draft"}, {models::Tier::FINAL, "final"}}) {
-        const auto tit = profile.tiers.find(tier);
-        if (tit == profile.tiers.end()) continue;
-        models::TierSpec spec = tit->second;
-        bool touched = false;
+    // **只落到配置对象上，等下面校验过了随整份一起换进去**（`runtime().replace`）。
+    // 原来每一项当场 `set_tier_override` 进进程：`-64`（`-64 % 32 == 0`）过了倍数
+    // 那关就已经生效，下面 `validate()` 回 400「不能是负的」，引擎却照着 -64 出图；
+    // 同一个请求里别的项类型不对回 422，档位那几项也留在进程里了。填 0（= 按显存推）
+    // 更糟：覆盖把 0 原样抄进去，进程里按 0 出图，文件里 0 却是「自动」。
+    // `Runtime::profile()` 本来就先落 `[tiers]` 那一份（0 跳过），不需要另一层覆盖。
+    for (const std::string prefix : {"draft", "final"}) {
         for (const char* field : {"width", "height", "steps"}) {
             const std::string key = prefix + "_" + field;
             const auto dit = data.find(key);
@@ -589,11 +593,7 @@ ApiResult post_settings(const json& body) {
             if (std::string(field) == "height" && v % 32) {
                 throw ApiError(400, SAY("高度必须是 32 的倍数"));
             }
-            if (std::string(field) == "width") spec.width = v;
-            else if (std::string(field) == "height") spec.height = v;
-            else spec.steps = v;
-            // 同时落到配置对象上，下面 persist 那一步会写进文件
-            const bool is_draft = tier == models::Tier::DRAFT;
+            const bool is_draft = prefix == "draft";
             if (std::string(field) == "width") {
                 (is_draft ? s.tiers.draft_width : s.tiers.final_width) = v;
             } else if (std::string(field) == "height") {
@@ -602,9 +602,7 @@ ApiResult post_settings(const json& body) {
                 (is_draft ? s.tiers.draft_steps : s.tiers.final_steps) = v;
             }
             changed.push_back(key);
-            touched = true;
         }
-        if (touched) runtime().set_tier_override(tier, spec);
     }
 
     // ---- 装配、闸门、配音 ----
@@ -697,9 +695,10 @@ ApiResult post_settings(const json& body) {
     // before_transition_s 那段。
     if (s.assembly.scene_transition_s != before_transition_s) {
         notes.push_back(
-            SAY("[assembly].scene_transition_s 存下来了，但它现在不生效："
-                "装配是 -f concat -c copy 直接拼，全程硬切，引擎里一处转场"
-                "都没渲染。改这个数不会有任何变化。"));
+            // 「已保存」跟着设置页那颗「保存」叫（2026-09-28 起不再说「存下来」）。
+            SAY("[assembly].scene_transition_s 已保存，但目前不生效："
+                "装配使用 -f concat -c copy 直接拼接，全程硬切，"
+                "引擎不渲染任何转场，修改此值不会产生任何变化。"));
     }
     // 同上：闸门那一组里也有一个只写不读的。**没有「与首帧比相似度」这道
     // 闸门**——gates/checks.cpp 里读 `min_frame_similarity` 的一处都没有
@@ -708,10 +707,9 @@ ApiResult post_settings(const json& body) {
     // 光是跟着一整份 params 发过来不算。
     if (s.gates.min_frame_similarity != before_similarity) {
         notes.push_back(
-            SAY("[gates].min_frame_similarity 存下来了，但它现在不生效："
-                "引擎里没有「和首帧比相似度」这道闸门，一处都没读过这个数。"
-                "拦画面跑飞的是「片中亮度剧烈跳变」那一条，它有自己写死的"
-                "阈值。"));
+            SAY("[gates].min_frame_similarity 已保存，但目前不生效："
+                "引擎中没有「与首帧比较相似度」的闸门，此值未被读取。"
+                "防止画面失控的是「片中亮度剧烈跳变」闸门，它使用固定阈值。"));
     }
 
     // 校验不过就整体回滚——半套改动比不改更糟，用户看到"已应用"
@@ -773,7 +771,7 @@ ApiResult post_settings(const json& body) {
             try {
                 saved_to = paths::to_utf8(save_user_config(payload));
             } catch (const std::exception& e) {
-                throw ApiError(500, SAYF("配置写不进去：%1", e.what()));
+                throw ApiError(500, SAYF("无法写入配置：%1", e.what()));
             }
         }
     }

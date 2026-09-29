@@ -205,6 +205,22 @@ TEST_CASE("时长和分辨率不符是 REGRESS，不是 RETRY") {
     }
 }
 
+TEST_CASE("取样位置按它自己记的说，不按剩下几张里排第几") {
+    // 取不到的点会被跳过。片尾那一点没取到，剩下两张的第二张是片中——按下标
+    // 说成「片尾」，而这几个字正是分「模型没起头」和「帧数超了」用的。
+    media::PixelStats mid;
+    mid.at = 0.5;
+    CHECK(gates::position_name(mid, 1, 2) == "片中");
+    media::PixelStats head;
+    head.at = 0.1;
+    CHECK(gates::position_name(head, 0, 1) == "片头");
+    media::PixelStats tail;
+    tail.at = 0.9;
+    CHECK(gates::position_name(tail, 0, 1) == "片尾");
+    media::PixelStats unknown;   // 没记位置的：照旧按下标
+    CHECK(gates::position_name(unknown, 1, 2) == "片尾");
+}
+
 TEST_CASE("纯色画面被拦下，而且说清是哪一段") {
     // 片头纯色多半是模型没起来，片尾纯色多半是帧数超了模型的上限，
     // 两者的下一步完全不同。只说"画面近乎纯色"等于什么都没说。

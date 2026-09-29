@@ -6,6 +6,7 @@
 #include <doctest/doctest.h>
 
 #include <chrono>
+#include <thread>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -41,14 +42,25 @@ TEST_CASE("human_time 逐条对上 Python 的输出") {
     // `:.0f` 用的是 IEEE 754 的就近取偶：
     //   0.5 → "0 秒"、1.5 → "2 秒"、2.5 → "2 秒"
     //
-    // C++ 这边靠 snprintf("%.0f") 拿到同样的行为。这件事**只有在恰好落在
-    // .5 上才看得出来**，随便挑几个数是测不到的——所以语料里专门挑了那几个点。
+    // C++ 这边靠 llrint（默认舍入模式就是就近取偶）拿到同样的行为。这件事
+    // **只有在恰好落在 .5 上才看得出来**，随便挑几个数是测不到的——所以语料里
+    // 专门挑了那几个点。
+    //
+    // ⚠️ **有三条是 2026-09-25 故意改掉的**（Python 引擎 09-10 就删了，录语料那个
+    // 脚本跟着没了）：59.5、59.6 秒原来是「60 秒」，3599 秒是「60 分钟」——先挑
+    // 单位再取整，取完整跨过了单位的边。现在先取整再挑，是「1 分钟」「1.0 小时」。
     for (const auto& c : load_golden().at("cases")) {
         const double seconds = c.at("seconds").get<double>();
         const std::string want = c.at("text").get<std::string>();
         CAPTURE(seconds);
         CHECK(util::human_time(seconds) == want);
     }
+}
+
+TEST_CASE("human_time_precise：取整之后不拆出「60.0 秒」") {
+    CHECK(util::human_time_precise(119.97) == "2 分");
+    CHECK(util::human_time_precise(119.94) == "1 分 59.9 秒");
+    CHECK(util::human_time_precise(61.0) == "1 分 1.0 秒");
 }
 
 TEST_CASE("human_time 负数当零，不出现「-3 秒」") {
@@ -81,6 +93,23 @@ TEST_CASE("file_mtime_unix 返回的是 Unix 纪元的秒，不是 1601") {
     CHECK(got < now + 300);
 
     fs::remove_all(dir, ec);
+}
+
+TEST_CASE("file_mtime_unix：同一个没动过的文件，读多少次都是同一个数") {
+    // 「原地重出」靠 mtime 相等认（agent/outcome 的 changed_media）。原来的退路
+    // 拿两次 now() 作差换纪元，两次读之间线程被切走一下就差一个刻度，没动过的
+    // 参考图被报成新出的——全量跑偶尔撞到一次，单跑不出。
+    const fs::path f = fs::temp_directory_path() / "changji_fs_time_same.txt";
+    { std::ofstream(f) << "x"; }
+    const double first = util::file_mtime_unix(f);
+    int differ = 0;
+    for (int i = 0; i < 20000; ++i) {
+        if (i % 100 == 0) std::this_thread::yield();
+        differ += util::file_mtime_unix(f) != first;
+    }
+    CHECK(differ == 0);
+    std::error_code ec;
+    fs::remove(f, ec);
 }
 
 TEST_CASE("file_mtime_unix 对不存在的文件返回 0，不抛") {
@@ -118,6 +147,18 @@ TEST_CASE("strip_ws 和 Python 的 str.strip() 一致") {
         CAPTURE(in);
         CHECK(text::strip_ws(in) == c.at("out").get<std::string>());
     }
+}
+
+TEST_CASE("parse_int_or：判过全是数字也可能装不下，装不下回兜底，不抛") {
+    // 原来这几处是 std::stoi：`ch99999999999` 这种章号一进来，这部片子每次
+    // 加章都 out_of_range（2026-09-25）。
+    CHECK(text::parse_int_or("07", -1) == 7);
+    CHECK(text::parse_int_or("2147483647", -1) == 2147483647);
+    CHECK(text::parse_int_or("2147483648", -1) == -1);
+    CHECK(text::parse_int_or("99999999999999999999", -1) == -1);
+    CHECK(text::parse_int_or("", -1) == -1);
+    CHECK(text::parse_int_or("12a", -1) == -1);
+    CHECK(text::parse_int_or("-3", 5) == 5);
 }
 
 TEST_CASE("rstrip_punct 按字符剥，不按字节") {

@@ -78,11 +78,22 @@ struct WorkerPool::Impl {
     ///
     /// 返回空表示**每一个都试过了、都连不上**。那也不是失败：run_task
     /// 在队列里等它们回来（见那儿）。
-    std::optional<std::size_t> take(const std::set<std::size_t>& skip = {}) {
+    ///
+    /// **等的时候认「停」**：一次最多睡 200ms 就看一眼令牌。原来是一个不带超时
+    /// 的 cv.wait——别的几个位置都被别的活占着（出片一镜几分钟），人按了停、
+    /// 或者别的机器发来取消，这一件得等到有人还位置才醒（2026-09-25 审出来）。
+    std::optional<std::size_t> take(const std::set<std::size_t>& skip,
+                                    const pipeline::CancelToken* tok) {
         std::unique_lock lk(mu);
         if (skip.size() >= workers.size()) return std::nullopt;
-        cv.wait(lk, [&] { return roster->worth_waiting(skip); });
+        while (!roster->worth_waiting(skip)) {
+            if (tok != nullptr && tok->cancelled()) throw std::runtime_error(SAY("取消了"));
+            cv.wait_for(lk, std::chrono::milliseconds(200));
+        }
         return roster->take(skip, std::chrono::steady_clock::now());
+    }
+    std::optional<std::size_t> take(const std::set<std::size_t>& skip = {}) {
+        return take(skip, nullptr);
     }
 
     void mark_bad(std::size_t i) {
@@ -224,9 +235,17 @@ struct WorkerPool::Impl {
         std::string body;
         std::uint64_t total = 0;
         for (std::uint64_t off = 0;;) {
-            auto res = cli.Get(prefix + "/blob/" + artifact_id +
-                               "?off=" + std::to_string(off) +
-                               "&len=" + std::to_string(kChunk));
+            // **一段断了接着取这一段**，同轮询进度那条的容忍度（12 次、隔五秒，
+            // 一分钟）：跨境链路隔几分钟掉一次，原来一段 256 KB 掉一下就整镜作废——
+            // 活明明跑完了，换一台从头再出一遍，这台还被记成坏的晾三十秒。
+            httplib::Result res;
+            for (int miss = 0;; ++miss) {
+                res = cli.Get(prefix + "/blob/" + artifact_id +
+                              "?off=" + std::to_string(off) +
+                              "&len=" + std::to_string(kChunk));
+                if (res || miss >= 12) break;
+                std::this_thread::sleep_for(std::chrono::seconds(5));
+            }
             if (!res) {
                 throw Unreachable(SAYF("取不回产物 %1：%2", url,
                                        httplib::to_string(res.error())));
@@ -383,6 +402,10 @@ struct WorkerPool::Impl {
                     std::this_thread::sleep_for(std::chrono::seconds(5));
                     continue;
                 }
+                // 判它断了之前**顺手叫停那一件**（尽力而为，发不到也不管）：那边的活
+                // 多半还在跑，不叫停的话它一直占着那张卡，而这一镜马上要换一处重派。
+                cli.set_connection_timeout(3);
+                cli.Post(prefix + "/task/" + id + "/cancel", "", "application/json");
                 throw Unreachable(SAYF("工作进程 %1 断了：%2",
                                        workers[idx].ep.url,
                                        httplib::to_string(st.error())));
@@ -405,7 +428,8 @@ struct WorkerPool::Impl {
                 // 和进程内采样走同一个口子，镜头墙上的小图就不用管活在哪台跑
                 last_preview = p.preview_step;
                 last_preview_at = std::chrono::steady_clock::now();
-                publish_preview(task.shot_id, p.preview_step, p.preview);
+                // 替别人转发的那一件带上它的前缀（见 PreviewScope）。
+                publish_preview(scoped_preview_tag(task.shot_id), p.preview_step, p.preview);
             }
             const bool changed = p.step != last_step || p.steps != last_steps ||
                                  p.phase != last_phase;
@@ -446,7 +470,11 @@ struct WorkerPool::Impl {
         // 一个的表现是"出图用对了模型、出片用错了"，而两者出来都是能看
         // 的东西，没有哪一层会去比。
         Task task = raw;
-        task.pick = pick;
+        // **池子自己挑过档才盖。** 多卡机上主进程把别的机器派来的活转给自己
+        // 那几个子进程时，用的是 farm 那个池子（run_deps.cpp，没挑过档，pick
+        // 是空的）——原来无条件盖，派活方那部电影挑的档被抹成空，子进程按
+        // 自己默认那一档画，和这一章别的镜头对不上，一声不响（2026-09-25）。
+        if (!pick.empty()) task.pick = pick;
         std::set<std::size_t> tried;
         std::string last_error;
         // 最后一台说"我满了"的是谁、它说了什么。全都满了的时候去它那儿等。
@@ -454,7 +482,7 @@ struct WorkerPool::Impl {
         // 每一台都连不上是从什么时候开始的；连上过一次就清零
         std::optional<std::chrono::steady_clock::time_point> down_since;
         for (;;) {
-            const auto got = take(tried);
+            const auto got = take(tried, &tok);
             if (!got && !busy_url.empty()) {
                 // **全都满了（不是掉线）：去那台上挂着等一声。**
                 //

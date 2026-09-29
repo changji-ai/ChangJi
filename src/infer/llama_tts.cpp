@@ -65,7 +65,7 @@ LlamaTtsProbe probe_llama_tts() {
     const char* marker = mtmd_default_marker();
 
     if (marker == nullptr) {
-        out.detail = SAY("mtmd 链进来了，但 mtmd_default_marker() 返回空");
+        out.detail = SAY("已链接 mtmd，但 mtmd_default_marker() 返回空值");
         return out;
     }
     out.ok = true;
@@ -382,7 +382,7 @@ bool LlamaTts::synthesize(const LlamaTtsRequest& req, double& out_duration_s,
     // ofstream 吃 fs::path 就没这个问题：MSVC 上它走宽字符那条路。
     std::ofstream out(req.out, std::ios::binary | std::ios::trunc);
     if (!out) {
-        why = SAYF("写不了 %1", paths::to_utf8(req.out));
+        why = SAYF("无法写入 %1", paths::to_utf8(req.out));
         return false;
     }
     out.write(data, static_cast<std::streamsize>(len));
@@ -403,7 +403,7 @@ bool llama_tts_available() { return false; }
 LlamaTtsProbe probe_llama_tts() {
     LlamaTtsProbe out;
     out.ok = true;  // 没编进来不算故障，配音走外部后端
-    out.detail = SAY("没编进来（CHANGJI_LLAMA=OFF），配音走外部后端");
+    out.detail = SAY("程序未包含内置配音（CHANGJI_LLAMA=OFF），配音使用外部服务");
     return out;
 }
 
@@ -415,12 +415,12 @@ int LlamaTts::sample_rate() const { return 0; }
 std::unique_ptr<LlamaTts> LlamaTts::load(const std::filesystem::path&,
                                          const std::filesystem::path&, bool,
                                          std::string& why) {
-    why = SAY("这个二进制没编进程内配音（CHANGJI_LLAMA=OFF）");
+    why = SAY("当前程序未包含内置配音（CHANGJI_LLAMA=OFF）");
     return nullptr;
 }
 
 bool LlamaTts::synthesize(const LlamaTtsRequest&, double&, std::string& why) {
-    why = SAY("这个二进制没编进程内配音（CHANGJI_LLAMA=OFF）");
+    why = SAY("当前程序未包含内置配音（CHANGJI_LLAMA=OFF）");
     return false;
 }
 

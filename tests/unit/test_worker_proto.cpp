@@ -8,6 +8,8 @@
 
 #include <doctest/doctest.h>
 
+#include <filesystem>
+#include <fstream>
 #include <set>
 
 #include <string>
@@ -484,4 +486,31 @@ TEST_CASE("同样的活算出同一把钥匙，落盘路径不算数") {
     infer::Task d = a;
     d.prompts.positive = "晴天天台";
     CHECK(infer::task_key(a) != infer::task_key(d));
+}
+
+TEST_CASE("同机那条路：输入图原地换了，钥匙跟着变，不拿旧的顶替") {
+    // 2026-09-25 审出来：本机多卡时参考图、首帧是路径不是 blob:。人把参考图
+    // 原地换掉、镜头重置（种子不变）后重出，任务 JSON 逐字节一样——子进程回
+    // 「做过了」，旧脸那张首帧原样留着。
+    namespace fs = std::filesystem;
+    const fs::path img = fs::temp_directory_path() / "changji_key_start.png";
+    { std::ofstream(img, std::ios::binary) << "old face"; }
+    infer::Task a;
+    a.kind = infer::TaskKind::Video;
+    a.shot_id = "ep01_sh003";
+    a.seed = 42;
+    a.start_image = img.string();
+    const std::string before = infer::task_key(a);
+    CHECK(infer::task_key(a) == before);   // 没动过就还是同一把
+
+    { std::ofstream(img, std::ios::binary | std::ios::trunc) << "a brand new face"; }
+    CHECK(infer::task_key(a) != before);
+
+    // blob: 那种本来就是按内容算的，照字面
+    infer::Task b = a;
+    b.start_image = "blob:0123456789abcdef";
+    infer::Task c = b;
+    CHECK(infer::task_key(b) == infer::task_key(c));
+    std::error_code ec;
+    fs::remove(img, ec);
 }

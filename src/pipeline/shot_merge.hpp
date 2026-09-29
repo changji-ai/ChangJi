@@ -17,6 +17,11 @@
 //
 // 镜头的**名单**归这一轮：拆出来的新镜头、重排过的 order 照手里这份写。
 // 盘上有而手里没有的镜头（这一轮里被拆掉或合并的）不回来。
+//
+// ⚠️ **名单被别人换掉了就不写**（`replaced`）：盘上这一章的镜头号和自己上一次
+// 写下去的不是同一批，说明整张表被重拆了（拆分镜、重写剧本并重拆）。这时候
+// 逐栏比没有意义——新表的 sh001 和旧表的 sh001 是两个镜头，照上面那套合出来
+// 是新文字配旧片子，旧表多出来的镜头还会回来。出片那头见到它就停下这一章。
 
 #include <map>
 #include <set>
@@ -37,6 +42,17 @@ public:
         for (const auto& s : on_disk) written_[s.shot_id] = nlohmann::json(s);
     }
 
+    /// 盘上这一章的镜头名单和自己上一次写下去的不是同一批——整张表被别人换掉了。
+    bool replaced(const std::vector<models::Shot>& disk) const {
+        std::set<std::string> on_disk;
+        for (const auto& s : disk) on_disk.insert(s.shot_id);
+        if (on_disk.size() != written_.size()) return true;
+        for (const auto& [id, _] : written_) {
+            if (!on_disk.count(id)) return true;
+        }
+        return false;
+    }
+
     /// 拿手里这份 `ours` 和盘上刚读的 `disk` 合出要写下去的那份。
     /// 每调一次就把结果记成"自己上一次写下去的"。
     std::vector<models::Shot> merge(const std::vector<models::Shot>& ours,
@@ -46,6 +62,9 @@ public:
 
         std::vector<models::Shot> out;
         out.reserve(ours.size());
+        // 「上一次写下去的」只留这一次真写下去的那几镜：这一轮里合并、拆掉的
+        // 镜头不在名单上了，留着的话 `replaced` 下一次就把自己的改动认成别人的。
+        std::map<std::string, nlohmann::json> next;
         for (const auto& mine : ours) {
             nlohmann::json j = mine;
             const auto d = by_id.find(mine.shot_id);
@@ -69,9 +88,10 @@ public:
                 for (const auto& [k, v] : o->second) j[k] = v;
                 if (!o->second.empty()) edited_.insert(mine.shot_id);
             }
-            written_[mine.shot_id] = j;
+            next[mine.shot_id] = j;
             out.push_back(j.get<models::Shot>());
         }
+        written_ = std::move(next);
         return out;
     }
 

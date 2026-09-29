@@ -193,7 +193,7 @@ json render_into(const ProjectStore& store, const fs::path& dest,
 
     // 顶栏那本账要看得见：摇一段要借配音槽，而那一槽和大模型抢同一张卡。
     pipeline::Activity act{"say", paths::to_utf8(store.root()), "",
-                           SAY("正在摇音色")};
+                           SAY("正在随机生成音色")};
 
     double seconds = 0;
     try {

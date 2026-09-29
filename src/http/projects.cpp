@@ -194,10 +194,10 @@ void guard_not_running(const fs::path& canon, What what) {
     const auto whole = [what](bool this_one) {
         if (what == What::Delete) {
             return this_one ? SAY("这个项目正在跑，删了会把跑到一半的东西弄坏")
-                            : SAY("正在跑，删了会把跑到一半的东西弄坏");
+                            : SAY("任务正在运行，删除会损坏进行中的内容");
         }
         return this_one ? SAY("这个项目正在跑，改了会把跑到一半的东西弄坏")
-                        : SAY("正在跑，改了会把跑到一半的东西弄坏");
+                        : SAY("任务正在运行，修改会损坏进行中的内容");
     };
     // **每一件在跑的都要看**：写作按「片子 + 谁派的」分道，同时可能有好几件，
     // 只看"最近那一件"的话，删 B 时恰好 A 是最近的那件，B 的就漏过去了。
@@ -281,20 +281,28 @@ ApiResult post_project_premise(const json& body) {
     const std::string premise = need_str(body, "premise");
 
     ProjectStore store(paths::from_utf8(path));
-    // 读→改→存在一把锁里（CLAUDE.md 第十四条）。
-    const auto guard = store.lock();
-    Project project;
     try {
-        project = store.load_project();
+        (void)store.load_project();
     } catch (const std::exception& e) {
         throw ApiError(400, e.what());
     }
-    project.premise = text::truncate_utf8(text::strip_ws(premise), 2000);
-    store.save_project(project);
+    return {200, {{"premise", store_premise(store, premise)}}};
+}
+
+std::string store_premise(const ProjectStore& store, const std::string& premise) {
+    // 读→改→存在一把锁里（CLAUDE.md 第十四条）。
+    const auto guard = store.lock();
+    Project project = store.load_project();
+    const std::string want = text::truncate_utf8(text::strip_ws(premise), 2000);
+    if (project.premise != want) {
+        project.premise = want;
+        store.save_project(project);
+    }
     // **梗概在盘上有两份，两份一起改。** story.json 里那份是写大纲、故事页读的，
-    // project.json 里那份是写剧本的提示词读的。原来这儿只改后一份——故事页上
-    // 还是旧那句，下一次从故事页存一下又把旧的写回 project.json，一声不响
-    //（post_story 上那段说的是同一件事的另一头）。还没有故事就不凭空建一份。
+    // project.json 里那份是写剧本的提示词读的。只改后一份的话故事页上还是旧那句，
+    // 下一次从故事页存一下又把旧的写回 project.json，一声不响（post_story 上那段
+    // 说的是同一件事的另一头）。原来剧本那两条（写这一章、整部连着写）就只改了
+    // 后一份。还没有故事就不凭空建一份。
     if (fs::is_regular_file(store.paths().story_file())) {
         models::Story story = store.load_story();
         if (story.premise != project.premise) {
@@ -302,7 +310,7 @@ ApiResult post_project_premise(const json& body) {
             store.save_story(story);
         }
     }
-    return {200, {{"premise", project.premise}}};
+    return project.premise;
 }
 
 ApiResult post_project_rename(const json& body) {

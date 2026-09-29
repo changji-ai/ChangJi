@@ -129,6 +129,20 @@ TEST_CASE("静音 wav 写出来能读回时长") {
     }
 }
 
+TEST_CASE("wav 的 data 块报的长度比文件还长（流式写的占位 0xFFFFFFFF）：按文件里真有的算") {
+    const auto paths = make_paths("占位长度");
+    const fs::path p = paths.audio() / paths::from_utf8("流式.wav");
+    stages::write_silence(p, 1.0, 24000);
+    // 把 data 块的长度改成占位的 0xFFFFFFFF（标准 44 字节头里在偏移 40）
+    {
+        std::fstream f(p, std::ios::in | std::ios::out | std::ios::binary);
+        f.seekp(40);
+        const char ff[4] = {'\xff', '\xff', '\xff', '\xff'};
+        f.write(ff, 4);
+    }
+    CHECK(stages::probe_wav_duration(p) == doctest::Approx(1.0).epsilon(0.02));
+}
+
 TEST_CASE("wav 的块要逐个走，不能假定固定偏移") {
     // 很多 TTS 引擎会插一个 LIST 块写元数据。按固定偏移读的话拿到的是
     // 垃圾数，而垃圾数会变成一个荒唐的时长，然后镜头按它锁定。

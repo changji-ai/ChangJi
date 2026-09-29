@@ -56,6 +56,15 @@ bool blob_present(const std::filesystem::path& cache_root,
 std::string blob_store(const std::filesystem::path& cache_root,
                        const std::string& id, const std::string& bytes);
 
+/// 扔掉 `max_age` 里没人碰过的 blob（按修改时间；`blob_present` / `blob_store`
+/// 碰到已有的会把它的时间刷新）。回扔了几个。
+///
+/// **原来这个仓库只进不出**：每一件别的机器派来的活，输入和产物都落一份在这儿，
+/// 一台常年开着的节点盘迟早被它吃满（2026-09-25 审出来）。输入是按内容存的，
+/// 派活方重派时"我有了"那一问答"没有"，它就再传一次——扔掉的代价只是多传一趟。
+std::size_t blob_prune(const std::filesystem::path& cache_root,
+                       std::filesystem::file_time_type::duration max_age);
+
 /// 任务里的输入路径可以写成 `blob:<40 位指纹>`。
 ///
 /// **为什么用前缀而不是加一组新字段。** 输入现在是一串路径

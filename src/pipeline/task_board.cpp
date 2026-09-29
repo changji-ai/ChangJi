@@ -1,4 +1,5 @@
 #include "pipeline/task_board.hpp"
+#include "util/paths.hpp"
 
 #include "util/task_slot.hpp"
 #include "util/writer.hpp"
@@ -308,6 +309,9 @@ void Task::set_output(std::string all) {
         ++row.output_ver;)
 }
 void Task::fail(std::string why) { CHANGJI_TASK_MUTATE(row.error = std::move(why);) }
+void Task::fail_if_clean(std::string why) {
+    CHANGJI_TASK_MUTATE(if (row.error.empty()) row.error = std::move(why);)
+}
 void Task::mark_long_job() { CHANGJI_TASK_MUTATE(row.long_job = true;) }
 void Task::set_progress(int current, int total) {
     // **自己报进度就是"真在干"了**（CLAUDE.md 第九条那条判据）。
@@ -467,6 +471,10 @@ nlohmann::json running_activities() {
             {"id", row->id},
             {"kind", row->kind},
             {"project", row->project},
+            // **哪一条对话派的**（`chat:<编号>`；空 = 人按的钮）。同一部片子开着几条对话时，
+            // 对话底下那几行只摆自己派的——不带的话 B 那条对话里照样摆着 A 在想什么、写到
+            // 哪儿了（2026-09-27 用户报的）。长跑那份（`JobTable::running_jobs`）早就带着。
+            {"lane", row->lane},
             {"episode_id", row->episode_id},
             {"slot", row->slot},
             // stage 这一格短活没有，但形状要和长跑任务那边一样——
@@ -517,8 +525,11 @@ nlohmann::json task_board(const std::string& project) {
     nlohmann::json running = nlohmann::json::array();
     nlohmann::json queued = nlohmann::json::array();
     nlohmann::json done = nlohmann::json::array();
+    // 路径规范化再比（CLAUDE.md 第十一条）：账上记的和问的那头给的可能是同一个
+    // 地方的两种写法（软链、结尾斜杠），直接比串就是"问了等于没问"。
     const auto mine = [&project](const Row& r) {
-        return project.empty() || r.project.empty() || r.project == project;
+        return project.empty() || r.project.empty() || r.project == project ||
+               paths::same_dir(r.project, project);
     };
     for (const auto& [id, row] : b.live) {
         if (!mine(*row)) continue;

@@ -82,32 +82,30 @@ TEST_CASE("小图标：一个实例只造用得着的那一个，而且每个都
         }
     }
 
-    // 一个都没找着就是这条用例自己不认路了，不是"全都合规"。
-    REQUIRE_MESSAGE(models.size() >= 10,
+    // ⚠️ **2026-09-27 起图标是字体里的字**（见 SlotIcon.qml 头上）：模子只剩两个——
+    // 字体那一个（g_font）和自己画的那盏灯（g_sense）。「一个实例只造用得着的那一个」
+    // 照旧：还是 `Loader` 挑一个造，只是挑的是"字"还是"灯"。
+    REQUIRE_MESSAGE(models.size() >= 2,
                     "只找着 " << models.size() << " 个图标模子——这条用例八成是自己不认路了");
+    CHECK(models.count("font"));
+    CHECK(models.count("sense"));
+    // 再多出来的模子就是又有人把一个形状画回来了：那一个两边长得不一样（网页走字体）。
+    CHECK_MESSAGE(models.size() == 2, "SlotIcon 里又多了自己画的图标模子——图标一律加进 "
+                                      "brand/icons/icons.json 走字体，网页和桌面端才是同一个形状");
 
     for (const int ln : old_style) {
         CHECK_MESSAGE(false,
                       "SlotIcon.qml:" << ln
                       << " 还写着 `visible: root.slotKey ===`——那是老写法："
-                      "十七个形状全造出来只露一个。加新图标要写成 "
-                      "`Component { id: g_那个键 … }`，再在 `glyph()` 里加一行 `case`");
+                      "形状全造出来只露一个");
     }
     CHECK(old_style.empty());
 
-    // 两边一一对上。
-    std::vector<std::string> only_model, only_case;
-    std::set_difference(models.begin(), models.end(), wired.begin(), wired.end(),
-                        std::back_inserter(only_model));
-    std::set_difference(wired.begin(), wired.end(), models.begin(), models.end(),
-                        std::back_inserter(only_case));
-    for (const auto& k : only_model) {
-        CHECK_MESSAGE(false, "图标 `" << k << "` 有模子，`glyph()` 里却没有那一行 `case`"
-                                        "——它什么都不会画，而且一声不响");
-    }
-    for (const auto& k : only_case) {
-        CHECK_MESSAGE(false, "`glyph()` 里认得 `" << k << "`，却找不到它的模子");
-    }
-    CHECK(only_model.empty());
-    CHECK(only_case.empty());
+    std::string all;
+    for (const auto& l : lines) all += l + "\n";
+    // 挑的那一下：sense 自己画，别的看字体表里有没有这个名字。
+    CHECK(all.find("return g_sense") != std::string::npos);
+    CHECK(all.find("? g_font : null") != std::string::npos);
+    CHECK(all.find("Loader") != std::string::npos);
+    (void)wired;
 }

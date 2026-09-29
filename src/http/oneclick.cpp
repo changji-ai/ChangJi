@@ -2,7 +2,9 @@
 
 #include <chrono>
 #include <set>
+#include <algorithm>
 #include <string>
+#include <map>
 #include <thread>
 #include <vector>
 
@@ -68,38 +70,21 @@ void say(pipeline::JobProgress& p, int step, const std::string& extra = "") {
     p.set_done(step - 1);
 }
 
-/// 等这一批参考图画完。
-///
-/// **问引擎那本队列**（ref_gen.cpp 的 RefQueue），不是定时器猜——它自己
-/// 知道还剩几张。和 EpShots 里 `waitRefs` 同一条规矩：读砸了不当成画完了，
-/// 当成画完了的话下一步会在图还没出齐时发出去，又被那道闸挡回来。
-///
-/// 返回假 = 人按了停。
-bool wait_refs(const std::string& root, pipeline::JobProgress& p) {
-    for (;;) {
-        if (p.cancelled()) return false;
-        try {
-            const ApiResult r = get_references_queue(root);
-            if (!r.body.value("active", false)) return true;
-            const int done = r.body.value("done", 0);
-            const int total = r.body.value("total", 0);
-            if (total > 0) {
-                say(p, 5,
-                    SAYF("还剩 %1 张（共 %2）", std::to_string(total - done),
-                         std::to_string(total)));
-            }
-        } catch (const std::exception&) {
-            // 引擎自己打嗝那几拍。不当成画完了。
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(1200));
-    }
-}
-
 }  // namespace
 
 ApiResult post_oneclick(const json& body, std::shared_ptr<llm::Client> client,
                         const RunDeps& deps) {
-    if (!body.is_object()) throw ApiError(400, SAY("请求体要是一个对象"));
+    if (!body.is_object()) throw ApiError(400, SAY("请求体须为 JSON 对象"));
+    // 下面那几句 `body.value(...)` 类型不对是抛 type_error 的，落出去就是 500
+    // 而不是一句人话。进门先挡（同 post_run）。
+    for (const char* k : {"project", "premise", "keywords", "lane"}) {
+        if (const auto it = body.find(k); it != body.end() && !it->is_string()) {
+            throw ApiError(400, SAYF("%1 要是字符串", k));
+        }
+    }
+    if (const auto it = body.find("preview_s"); it != body.end() && !it->is_number()) {
+        throw ApiError(400, SAYF("%1 要是数字", "preview_s"));
+    }
     ProjectStore store = open_project(body);
     Project project;
     try {
@@ -119,9 +104,9 @@ ApiResult post_oneclick(const json& body, std::shared_ptr<llm::Client> client,
     // 出片那道闸拿掉了：它是 RunQueue 之前的东西（那时候第六步撞上别的片子
     // 在出片就是一个 409）。现在第二件出片进队列排着，轮到了自己开始。
     {
-        const std::string lane = body.value("lane", std::string{});
+        const std::string lane = field_str(body, "lane");
         if (pipeline::jobs().running(pipeline::JobKind::Write,
-                                     body.value("project", std::string{}), lane)) {
+                                     field_str(body, "project"), lane)) {
             throw ApiError(409, SAY("剧本那边还在忙"));
         }
     }
@@ -129,11 +114,11 @@ ApiResult post_oneclick(const json& body, std::shared_ptr<llm::Client> client,
     refuse_to_clobber(story_or_empty(store), body);
 
     const std::string root = paths::to_utf8(store.root());
-    std::string premise = text::strip_ws(body.value("premise", std::string{}));
+    std::string premise = text::strip_ws(field_str(body, "premise"));
     if (premise.empty()) premise = text::strip_ws(project.premise);
-    const std::string keywords = body.value("keywords", std::string{});
+    const std::string keywords = field_str(body, "keywords");
     // 长度不给就用这部电影自己的设置——分镜页那颗按钮改的是同一个值。
-    double preview_s = body.value("preview_s", 0.0);
+    double preview_s = field_num(body, "preview_s", 0.0);
     if (!(preview_s > 0.0)) {
         preview_s = config::load_settings(store.root()).preview.seconds;
     }
@@ -182,6 +167,20 @@ ApiResult post_oneclick(const json& body, std::shared_ptr<llm::Client> client,
             //
             // 步骤号交给它那句 message 去说——它自己会写「写剧本 · 第一章」
             // 「拆分镜 · 第一章」，比这儿印一个笼统的"第 3 步"准。
+            // **这一轮之前每一章的剧本和分镜长什么样**，记一个指纹。理解那一步逐章写
+            // 剧本、拆分镜，**哪一章砸了只记一句、不抛**；而拿 overwrite 重来的老片子里
+            // ep01 本来就挂着上一个故事的剧本和镜头——原来第 6 步挑「挂着这一章、有镜头
+            // 能用」的那一章，挑中的正是那份老分镜，出的是上一个故事的片子，还报成功。
+            std::map<std::string, std::string> board_before;
+            for (const auto& ep : store.load_project().episodes) {
+                board_before[ep.episode_id] = ep.script + "\n" + json(ep.shots).dump();
+            }
+            const auto rebuilt = [&board_before](const Episode& ep) {
+                const auto it = board_before.find(ep.episode_id);
+                return it == board_before.end() ||
+                       it->second != ep.script + "\n" + json(ep.shots).dump();
+            };
+
             say(p, 3);
             const Story now = story_or_empty(store);
             run_understand_work(store, client, p, /*overwrite=*/true,
@@ -195,20 +194,18 @@ ApiResult post_oneclick(const json& body, std::shared_ptr<llm::Client> client,
 
             // ---- 5. 把缺的参考图画齐 ----
             //
-            // 不画的话第 6 步会被 400 挡回来，而那句话是"去设定页按两个
-            // 按钮再回来"——一颗一键把人支去别的页面，正是要治的那个形状。
+            // 出片那一件开头自己也会补画（`post_run`），这儿先画是为了进度条上
+            // 这一步说得清「还剩几张」，而不是出片那一步卡着不动。
             say(p, 5);
-            try {
-                const ApiResult r = post_references_generate_all(
-                    json{{"project", root}, {"force", false}});
-                if (r.body.value("started", false)) {
-                    if (!wait_refs(root, p)) return;
-                }
-            } catch (const std::exception& e) {
-                // 画不出来不在这儿断：出片那道闸会把"哪几镜拿不到参考图"
-                // 说得比这儿准（它按真要跑的那几镜判）。
-                p.set_message(
-                    SAYF("参考图这一步没跑成：%1。接着试出片", e.what()));
+            // **已经有一批在画（409）不算「这一步过了」**：原来接着就去出片，参考图还在
+            // 画着——换图模型当场 400「缺参考图」，别的走没参考图的就出一章没长相的片子。
+            // 这部片子自己那一批（人按了按钮、对话里起的）可能不包括这次新写出来的角色，
+            // 所以等它画完再补一遍；别的片子那一批就等它空出来再来。最多来三遍。
+            // 画、等、409 重来那一套和出片那一件开头是同一个（`ensure_refs`，ref_gen.hpp）。
+            if (!ensure_refs(
+                    root, p.lane(), [&p] { return p.cancelled(); },
+                    [&p](const std::string& extra) { say(p, 5, extra); })) {
+                return;
             }
             if (p.cancelled()) return;
 
@@ -217,12 +214,23 @@ ApiResult post_oneclick(const json& body, std::shared_ptr<llm::Client> client,
             // **起起来就收手。** 出片在另一个槽（JobKind::Run），跑一个
             // 钟头；在这儿等的话「写」这个槽被占着，期间任何写作都 409。
             const Project final_project = store.load_project();
+            // **挑刚写的那一章**（挂着这一章的那条记录），不是"第一个有镜头
+            // 的"：片子里原来就有老章的话，原来挑中的是它——一键成片出的是
+            // 一章老片子。判据也是正面的「有一镜能用」（CLAUDE.md 第四条），
+            // 空壳章不算。挂不上的（老项目那种）才退回第一章能用的。
             std::string episode_id;
+            // **只认这一轮重拆过的**（rebuilt）：没重拆成的那一章挂着的是老分镜。
             for (const auto& ep : final_project.episodes) {
-                if (!ep.shots.empty()) {
+                if (ep.has_usable_shots() && rebuilt(ep) &&
+                    std::find(ep.chapter_refs.begin(), ep.chapter_refs.end(),
+                              chapter_id) != ep.chapter_refs.end()) {
                     episode_id = ep.episode_id;
                     break;
                 }
+            }
+            for (const auto& ep : final_project.episodes) {
+                if (!episode_id.empty()) break;
+                if (ep.has_usable_shots() && rebuilt(ep)) episode_id = ep.episode_id;
             }
             if (episode_id.empty()) {
                 throw std::runtime_error(
@@ -243,7 +251,7 @@ ApiResult post_oneclick(const json& body, std::shared_ptr<llm::Client> client,
         },
         SAY("已手动停止。已经写出来的故事、剧本、分镜都留着。"), root,
         SAYF("一键成片 · 前 %1", util::human_time(preview_s)),
-        body.value("lane", std::string{}));
+        field_str(body, "lane"));
     if (!started) throw ApiError(409, SAY("剧本那边还在忙"));
     return {202,
             {{"started", true},

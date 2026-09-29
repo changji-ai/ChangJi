@@ -9,7 +9,7 @@
 //
 // 这儿是那半截的机制。用法：
 //
-//     return {SAY("中文字体"), Level::WARN, SAY("没找到") + " " + name, ""};
+//     return {SAY("中文字体"), Level::WARN, SAY("未找到") + " " + name, ""};
 //
 // ---
 //

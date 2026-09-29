@@ -46,11 +46,38 @@ std::string blob_id_of(const fs::path& file) {
     return text::sha1_hex(read_all(file));
 }
 
+namespace {
+/// 碰一下：刷新修改时间，blob_prune 按它判"多久没人用"。
+void touch(const fs::path& p) {
+    std::error_code ec;
+    fs::last_write_time(p, fs::file_time_type::clock::now(), ec);
+}
+}  // namespace
+
 bool blob_present(const fs::path& cache_root, const std::string& id) {
     const auto p = blob_path(cache_root, id);
     if (p.empty()) return false;
     std::error_code ec;
-    return fs::is_regular_file(p, ec);
+    if (!fs::is_regular_file(p, ec)) return false;
+    touch(p);   // 派活方问"你有没有"，就是它还要用
+    return true;
+}
+
+std::size_t blob_prune(const fs::path& cache_root, fs::file_time_type::duration max_age) {
+    const fs::path root = cache_root / "blobs";
+    std::error_code ec;
+    if (!fs::is_directory(root, ec)) return 0;
+    const auto cutoff = fs::file_time_type::clock::now() - max_age;
+    std::size_t gone = 0;
+    for (auto it = fs::recursive_directory_iterator(root, ec);
+         !ec && it != fs::recursive_directory_iterator(); it.increment(ec)) {
+        std::error_code e2;
+        if (!it->is_regular_file(e2)) continue;
+        if (it->last_write_time(e2) < cutoff && !e2) {
+            if (fs::remove(it->path(), e2)) ++gone;
+        }
+    }
+    return gone;
 }
 
 std::string blob_store(const fs::path& cache_root, const std::string& id,
@@ -70,7 +97,10 @@ std::string blob_store(const fs::path& cache_root, const std::string& id,
 
     const auto dest = blob_path(cache_root, id);
     std::error_code ec;
-    if (fs::is_regular_file(dest, ec)) return {};   // 本来就有
+    if (fs::is_regular_file(dest, ec)) {   // 本来就有
+        touch(dest);
+        return {};
+    }
 
     fs::create_directories(dest.parent_path(), ec);
     if (ec) {

@@ -16,6 +16,8 @@ namespace changji::proc {
 struct Result {
     int exit_code = -1;
     std::string out;   ///< stdout 和 stderr 合并。ffmpeg 习惯把版本信息写到 stderr
+    /// `split_stderr` 时 stderr 单独在这儿，`out` 只剩 stdout。
+    std::string err;
     /// 进程有没有起来。区分「跑了但失败」和「根本没这个程序」。
     ///
     /// **靠先查一遍 PATH 得出，不是靠 popen 的返回值**——popen 只要
@@ -51,7 +53,25 @@ std::optional<std::string> which_in(const std::string& name, const std::string& 
 /// 带空格的路径切成两截，而那种错只在某个参数长得特别时才露出来。
 std::string quote_arg(const std::string& s);
 
+/// 经 cmd.exe 起批处理时给一个参数加引号（BatBadBut 那一套，见 proc.cpp 里那段）。
+/// **跟 `quote_arg` 不是一套规矩**：批处理一定过 cmd.exe，`\"` 在它眼里是开关。
+/// `force` = 不管长什么样都引上（程序路径那一段）。
+std::string cmd_quote_arg(const std::string& s, bool force = false);
+
+/// 这个程序是不是批处理（`.bat` / `.cmd`，不分大小写）。Windows 上 `which` 按
+/// PATHEXT 找得到它们，而它们要经 cmd.exe 起。
+bool is_batch_file(const std::string& path);
+
+/// 经 cmd.exe 起一个批处理的整行命令（UTF-8）：`cmd.exe /e:ON /v:OFF /d /s /c "…"`。
+/// 参数里有换行或 NUL 回空——cmd 的一行命令装不下它们，硬塞就是在那儿断成
+/// 两条命令。`run`、`spawn`、`Child` 三处共用这一份。
+std::optional<std::string> batch_command_line(const std::string& exe,
+                                              const std::vector<std::string>& args);
+
 #ifdef _WIN32
+/// （Windows）系统目录里那个 cmd.exe 的全路径。不读 COMSPEC。
+std::wstring cmd_exe_path();
+
 /// （Windows）CreateProcessW，子进程**只**继承给它的那几个标准句柄。
 ///
 /// 这个进程是多线程的服务：`run`、`spawn`、`Child` 随时在不同线程上起子进程。
@@ -94,10 +114,15 @@ unsigned long create_process_std(const wchar_t* app, wchar_t* cmdline, unsigned 
 /// ⚠️ **喂和读必须并行**：管道缓冲区只有几 KB，父进程闷头写完再去读的话，
 /// 一旦子进程先把 stdout 写满就双方互等——两边都不动，最后靠超时才收场。
 /// 所以下面是写一条线程、读一条线程。
+///
+/// `split_stderr`：stderr 不并进 `out`，另收进 `Result::err`。给那种**只有
+/// stdout 是正文**的用法（大模型命令行后端：`codex exec` 把横幅和进度写
+/// stderr，并进来就混进了模型的回话）。
 Result run(const std::string& exe,
            const std::vector<std::string>& args,
            int timeout_ms = 15000,
-           const std::string& stdin_data = {});
+           const std::string& stdin_data = {},
+           bool split_stderr = false);
 
 /// 起一个**不等它结束**的子进程，返回一个能用来杀它的句柄。
 ///

@@ -123,6 +123,17 @@ struct SlotSpec {
     /// 默认按"重新加载有多贵"排：视频模型最贵所以最后驱逐。
     int evict_priority = 0;
 
+    /// **闲多久就卸**（2026-09-27，用户问「本地模型显存什么时候释放」）。
+    ///
+    /// 空函数或者回空 = 一直留着，显存不够时才被驱逐（原来所有槽都是这样）。
+    /// 回 0 = 最后一个借用还回来就卸（同 Ephemeral）。回 N 秒 = 最后一次还回来之后
+    /// 闲满 N 秒就卸（`Scheduler::reap_idle`，引擎那条两秒一拍的循环在叫）。
+    ///
+    /// 为什么要有：本地编剧模型装上之后原来**一直占着显存**——写完一章、这条对话换成
+    /// 了云端那一家，它还在卡上；6 GB 的卡上那就是一大半。是个函数，每次现问：人在
+    /// 设置里改了分钟数，下一拍就按新的算。
+    std::function<std::optional<std::chrono::seconds>()> keep_alive;
+
     /// 加载。抛异常表示加载失败，调度器会把槽留在未加载状态。
     std::function<void()> load;
     /// 卸载。不允许抛异常——卸载路径上抛异常会让调度器的账对不上。
@@ -335,6 +346,19 @@ public:
     /// 卸载一个槽。正在被借用时返回 false，不强卸。
     bool evict(Slot slot);
 
+    /// 闲够了的槽卸掉（见 `SlotSpec::keep_alive`）。回卸了几个。**正借着的不卸。**
+    int reap_idle(std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now());
+
+    /// 某个槽这会儿什么样：装没装、有几个在用、闲着的话还有几秒就卸（没有闲卸 / 正在用
+    /// 时是空）。给界面那一行「本地模型占着显存 · 还有 3 分钟释放」用。
+    struct SlotState {
+        bool loaded = false;
+        int leases = 0;
+        std::optional<double> release_in_s;
+    };
+    SlotState slot_state(Slot slot,
+                         std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now()) const;
+
     /// 卸载所有没被借用的槽。跑完一章、或者要交出显存时用。
     ///
     /// **顺带把"上一次腾地方的判断"也清掉**：什么都没装着了，那条结论
@@ -358,6 +382,8 @@ private:
         int leases = 0;
         /// 单调递增的使用序号，同优先级时用它做 LRU。
         std::uint64_t last_used = 0;
+        /// 最后一个借用还回来的那一刻（闲卸从这儿算起，见 `SlotSpec::keep_alive`）。
+        std::chrono::steady_clock::time_point idle_since{};
     };
 
     void give_back(Slot slot);

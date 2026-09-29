@@ -1,5 +1,9 @@
 #include "infer/worker_proto.hpp"
 
+#include <filesystem>
+
+#include "util/paths.hpp"
+
 #include <stdexcept>
 
 #include "util/say.hpp"
@@ -244,12 +248,50 @@ bool room_freed(const std::string& wait_body, std::uint64_t asked_seq,
     return free_now > 0 || seq != asked_seq;
 }
 
+namespace {
+
+/// 把 JSON 里每一个**指向本机现存文件的路径**换成"路径@大小:修改时间"。
+///
+/// ⚠️ 同机子进程（本机多卡）收到的任务里，参考图、首帧、尾帧都是**路径**，
+/// 不是 `blob:<内容指纹>`。只按字面算指纹的话，人把角色参考图**原地换掉**、
+/// 镜头重置（种子不变）之后重出首帧，任务 JSON 和上一次逐字节一样、dest 也在
+/// ——子进程回一句「做过了」，旧脸那张首帧原样留着，一个字的报错都没有
+///（2026-09-25 审出来）。把文件本身的样子折进来，换了图就是另一件活。
+/// `blob:` 那种本来就是按内容算的，不动。
+void fold_file_stamps(nlohmann::json& j) {
+    if (j.is_object() || j.is_array()) {
+        for (auto& v : j) fold_file_stamps(v);
+        return;
+    }
+    if (!j.is_string()) return;
+    const std::string& s = j.get_ref<const std::string&>();
+    if (s.size() < 2 || s.rfind("blob:", 0) == 0) return;
+    const bool abs = s[0] == '/' || s[0] == '\\' || (s.size() > 2 && s[1] == ':');
+    if (!abs) return;
+    std::error_code ec;
+    const auto p = paths::from_utf8(s);
+    if (!std::filesystem::is_regular_file(p, ec)) return;
+    const auto size = std::filesystem::file_size(p, ec);
+    if (ec) return;
+    // ⚠️ **转成 long long 再交给 to_string。** macOS 的 libc++ 里 file_clock 的计数是
+    // `__int128`，`std::to_string` 没有那一档，六个重载一个都不比另一个好——编不过
+    // （2026-09-26 macOS 打包实撞：「call to 'to_string' is ambiguous」）。只拿来当键，
+    // 截到 64 位不丢东西。
+    const auto mtime = static_cast<long long>(
+        std::filesystem::last_write_time(p, ec).time_since_epoch().count());
+    if (ec) return;
+    j = s + "@" + std::to_string(size) + ":" + std::to_string(mtime);
+}
+
+}  // namespace
+
 std::string task_key(const Task& t) {
     nlohmann::json j = to_json(t);
     // 派活方本机的落盘路径，和内容无关。见头文件。
     j.erase("dest");
     // 要不要把产物传回来，是"怎么取"不是"是什么"。
     j.erase("return_artifact");
+    fold_file_stamps(j);
     return text::sha1_hex(j.dump());
 }
 

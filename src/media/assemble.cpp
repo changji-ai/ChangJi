@@ -126,6 +126,7 @@ Timeline build_timeline(const std::vector<models::Shot>& shots,
             const double dur = line.actual_duration_s.value_or(0.0);
             if (line.audio_path.has_value() && !line.audio_path->empty()) {
                 entry.audio_paths.push_back(paths.abs(*line.audio_path));
+                entry.audio_starts.push_back(speech_cursor);
             }
             const std::string t = text::strip_ws(line.text);
             if (!t.empty() && dur > 0.0) {
@@ -174,7 +175,7 @@ std::vector<std::string> normalize_args(const fs::path& src, int target_w,
     const std::string h = std::to_string(target_h);
     // 先按比例缩到框内，再补边到目标尺寸。直接 scale 到目标尺寸会拉伸，
     // 而竖屏的电影里混进一个横屏镜头时，拉伸出来的人脸一眼就不对。
-    std::string vf = "scale=" + w + ":" + h +
+    std::string vf = (opt.pre_vf.empty() ? std::string() : opt.pre_vf + ",") + "scale=" + w + ":" + h +
                      ":force_original_aspect_ratio=decrease,"
                      "pad=" + w + ":" + h + ":(ow-iw)/2:(oh-ih)/2,"
                      "setsar=1,fps=" + std::to_string(config.fps);
@@ -222,17 +223,26 @@ std::vector<std::string> normalize_args(const fs::path& src, int target_w,
     return args;
 }
 
+/// 遮幅裁掉之后剩多高（偶数）；**不裁就回 0**。竖屏不遮；比例比画面本身还"方"的
+///（1.66 放在 16:9 上）算出来比原高还高，也不裁。装配那一层要不要补水印问的是同一个
+/// 数（见 assembly_watermark_upscale）——两处各判一遍的话，一个说裁了一个说没裁，就是
+/// 一边白补一层、画面上两个角标。
+int letterbox_height(const config::LookConfig& look, int target_w, int target_h) {
+    if (!look.enabled() || look.letterbox <= 0.0 || target_w <= target_h) return 0;
+    int lb = static_cast<int>(std::lround(target_w / look.letterbox));
+    lb -= lb % 2;
+    return (lb > 0 && lb < target_h) ? lb : 0;
+}
+
 std::string look_filters(const config::LookConfig& look, int target_w,
                          int target_h, const fs::path& project_root) {
     if (!look.enabled()) return {};
 
     // 调色前的线性一段：遮幅、柔化。
     std::vector<std::string> pre;
-    if (look.letterbox > 0.0 && target_w > target_h) {
-        // 横屏才遮。裁到比例再补回原高，容器还是 16:9，上下是黑边。
-        int lb = static_cast<int>(std::lround(target_w / look.letterbox));
-        lb -= lb % 2;
-        if (lb > 0 && lb < target_h) {
+    // 横屏才遮。裁到比例再补回原高，容器还是 16:9，上下是黑边。
+    if (const int lb = letterbox_height(look, target_w, target_h); lb > 0) {
+        {
             const std::string W = std::to_string(target_w);
             const std::string H = std::to_string(target_h);
             const std::string L = std::to_string(lb);
@@ -505,7 +515,9 @@ std::vector<std::string> burn_args(const fs::path& video,
     return {
         "-y",
         "-i", paths::to_utf8(video),
-        "-vf", "subtitles='" + escape_filter_path(ass_path) + "'",
+        // **键写明（filename=）**：不写的话第一个参数按位置认，而路径里带 `=`
+        // 时它被拆成「键=值」——movie 那边实测报 Option not found。
+        "-vf", "subtitles=filename='" + escape_filter_path(ass_path) + "'",
         "-c:v", config.video_codec,
         "-crf", std::to_string(config.crf),
         "-pix_fmt", config.pix_fmt,
@@ -520,7 +532,10 @@ std::vector<std::string> burn_args(const fs::path& video,
 int assembly_watermark_upscale(const config::LookConfig& look,
                                const config::UpscaleConfig& upscale,
                                int target_w, int target_h) {
-    if (look.enabled() && look.letterbox > 0.0 && target_w > target_h) return 1;
+    // 遮幅**真裁了**才补：比例没比画面窄的时候什么都没裁，烧好的那个角标还在，再补
+    // 一层就是两个（2026-09-26 审出来：letterbox = 1.66 放在 16:9 上）。没裁的话照常往下
+    // 看放大那一档。
+    if (letterbox_height(look, target_w, target_h) > 0) return 1;
     if (upscale.enabled()) return std::max(1, upscale.scale);
     return 0;
 }
@@ -546,9 +561,17 @@ std::string escape_filter_path(const fs::path& path) {
         // **Python 已经删了，那个前提到了**。而且 concat 清单那边刚补过
         // 同样的转义（见 concat_quote），两处不一致本身也是个坑。
         //
-        // 规矩和 concat 那边一样：收掉引用、贴一个转义的单引号、再开回引用。
+        // 收掉引用、贴一个转义的单引号、再开回引用。
+        //
+        // ⚠️ **转义要过两层，不是一层**（2026-09-25 拿真 ffmpeg 撞出来的）：
+        // 滤镜图先解一遍（引用、反斜杠），每个滤镜解自己的参数时**再解一遍**。
+        // 原来写的是 concat 那边的 `'\''`——第一层过完剩一个光秃秃的 `'`，
+        // 第二层把它当成开引用吞掉：`Bob's drama` 变成 `Bobs drama`，
+        // 找不到文件。因为水印那条 `movie=` 每一镜都走，**片子目录里带一个
+        // 撇号，一镜都出不来**。第一层之后要剩 `\'`，所以写成 `'\\\''`。
+        // 用例拿真 ffmpeg 验（test_assemble.cpp「滤镜路径真交给 ffmpeg」）。
         if (c == '\'') {
-            out += "'\\''";
+            out += "'\\\\\\''";
             continue;
         }
         out += c;
@@ -573,10 +596,19 @@ Assembler::Assembler(const FFmpeg& ff, config::AssemblyConfig config,
       max_true_peak_db_(max_true_peak_db) {}
 
 std::pair<int, int> Assembler::target_size(const Timeline& timeline) const {
+    std::vector<std::pair<int, int>> sizes;
+    return target_size(timeline, sizes);
+}
+
+std::pair<int, int> Assembler::target_size(const Timeline& timeline,
+                                           std::vector<std::pair<int, int>>& sizes) const {
     int bw = 0, bh = 0;
-    for (const auto& e : timeline.entries) {
+    sizes.assign(timeline.entries.size(), {0, 0});
+    for (std::size_t i = 0; i < timeline.entries.size(); ++i) {
+        const auto& e = timeline.entries[i];
         try {
             const MediaInfo info = ff_.probe(e.video_path);
+            sizes[i] = {info.width, info.height};
             if (info.width * info.height > bw * bh) {
                 bw = info.width;
                 bh = info.height;
@@ -591,6 +623,22 @@ std::pair<int, int> Assembler::target_size(const Timeline& timeline) const {
     // 必须是偶数，否则 yuv420p 编不了——而报错是编码器内部的，很难懂。
     return {bw - bw % 2, bh - bh % 2};
 }
+
+
+namespace {
+/// 做好的那一份换到成片的位置上。先 rename（同一个盘上是原子的），跨盘（output 做成了
+/// 链接）退回复制。
+void move_into_place(const fs::path& from, const fs::path& to) {
+    std::error_code ec;
+    fs::remove(to, ec);
+    fs::rename(from, to, ec);
+    if (!ec) return;
+    fs::copy_file(from, to, fs::copy_options::overwrite_existing, ec);
+    if (ec) {
+        throw AssemblyError(SAYF("成片挪不到 %1：%2", paths::to_utf8(to), ec.message()));
+    }
+}
+}  // namespace
 
 fs::path Assembler::assemble(const Timeline& timeline,
                              const std::string& out_name, bool burn_subtitles) {
@@ -612,7 +660,12 @@ fs::path Assembler::assemble(const Timeline& timeline,
         }
     } cleanup{work};
 
-    auto [tw, th] = target_size(timeline);
+    std::vector<std::pair<int, int>> shot_sizes;
+    auto [tw, th] = target_size(timeline, shot_sizes);
+    // 放大、遮幅之前的整章尺寸：每一镜自己烧的角标是按它自己的尺寸算的，
+    // 和这个一样的那几镜缩放倍数是 1，角标原样。
+    const int base_w = tw;
+    const int base_h = th;
 
     const auto warn = [this](const std::string& msg) {
         if (finish_ && finish_->warn) finish_->warn(msg);
@@ -649,6 +702,28 @@ fs::path Assembler::assemble(const Timeline& timeline,
         }
     }
 
+    // ---- 尺寸和整章不一样的那几镜：先抹、再补 ----
+    //
+    // 装配要把它缩放到整章的尺寸（取的是全章最大的那个），它自己烧的角标跟着
+    // 缩放——一部片子里角标忽大忽小（原来 CLAUDE.md 六½ 记着「还没堵」）。
+    // 半透明的角标拿一层别的尺寸盖不住（叠出重影），所以先按烧的时候那套算法
+    // 算出它在哪、`delogo` 抹掉，缩放完按整章的尺寸补一个——和别的镜头上那个
+    // 一模一样。
+    //
+    // 代价：旧角标比新的大时（小镜头放大上来），角上留一圈抹过的痕迹。这比
+    // 角标忽大忽小强，而且只落在尺寸对不上的那几镜上（同一章镜头通常同规格）。
+    // 补的那一层：已经有全章补的（遮幅 / 放大那两种）就用它，没有就另解一张
+    // 标准尺寸的，只给这几镜。
+    WatermarkPlan fix_mark;
+    const auto fix_plan = [&]() -> const WatermarkPlan& {
+        if (!watermark.empty()) return watermark;
+        if (fix_mark.empty()) {
+            fix_mark = stage_watermark(work / "cj_watermark_fix.png", tw, th,
+                                       upscaling ? finish_->upscale.scale : 1);
+        }
+        return fix_mark;
+    };
+
     std::vector<fs::path> normalized;
     for (std::size_t i = 0; i < timeline.entries.size(); ++i) {
         char name[32];
@@ -684,6 +759,38 @@ fs::path Assembler::assemble(const Timeline& timeline,
 
         NormalizeOptions opt;
         opt.watermark = watermark;      // 平时是空的，见上
+        const auto [sw, sh] = shot_sizes[i];
+        if (sw > 0 && sh > 0 && (sw != base_w || sh != base_h)) {
+            WatermarkRect r = burned_watermark_rect(sw, sh);
+            // 过了放大命令的那一镜，角标跟着放大了。**按放大出来的真实尺寸算**，别按配置里
+            // 那个倍数：放大命令拿到的是整章的目标尺寸（{width}/{height}/{short}，文档里的
+            // 例子就是 --resolution {short}），尺寸对不上的这一镜实际放大的倍数不是 scale——
+            // 按 scale 算的话抹的框落在别处，旧角标留着、新的又补上去，重影
+            //（2026-09-26 审出来：640×352 放到 1745×960，实际 2.73 倍）。量不到才退回 scale。
+            if (upscaling && src != entry.video_path && !r.empty()) {
+                int uw = 0, uh = 0;
+                try {
+                    const MediaInfo mi = ff_.probe(src);
+                    uw = mi.width;
+                    uh = mi.height;
+                } catch (const FFmpegError&) {
+                }
+                if (uw > 0 && uh > 0) {
+                    const double fx = static_cast<double>(uw) / sw;
+                    const double fy = static_cast<double>(uh) / sh;
+                    r = {static_cast<int>(std::lround(r.x * fx)), static_cast<int>(std::lround(r.y * fy)),
+                         static_cast<int>(std::lround(r.w * fx)), static_cast<int>(std::lround(r.h * fy))};
+                } else {
+                    const int k = std::max(1, finish_->upscale.scale);
+                    r = {r.x * k, r.y * k, r.w * k, r.h * k};
+                }
+            }
+            const std::string erase = delogo_filter(r);
+            if (!erase.empty()) {
+                opt.pre_vf = erase;
+                opt.watermark = fix_plan();
+            }
+        }
         if (finish_) {
             opt.extra_vf = extra_vf;
             opt.keep_audio = finish_->sound.ambient;
@@ -719,10 +826,12 @@ fs::path Assembler::assemble(const Timeline& timeline,
     // 每条配音落在时间线上的位置。
     std::vector<AudioSegment> segments;
     for (const auto& entry : timeline.entries) {
-        double cursor = entry.start_s;
+        // 每一条自己记着从哪儿起（见 TimelineEntry::audio_starts），**不按下标
+        // 拿字幕的时长往后推**——两张表不是一一对应的。
         for (std::size_t i = 0; i < entry.audio_paths.size(); ++i) {
-            segments.push_back({entry.audio_paths[i], cursor});
-            cursor += i < entry.cues.size() ? entry.cues[i].duration_s() : 0.0;
+            const double at = i < entry.audio_starts.size() ? entry.audio_starts[i]
+                                                            : entry.start_s;
+            segments.push_back({entry.audio_paths[i], at});
         }
     }
 
@@ -788,25 +897,20 @@ fs::path Assembler::assemble(const Timeline& timeline,
         fs::create_directories(ass.parent_path(), ec);
         write_ass(ass, cues, opt);
         if (burn_subtitles) {
-            ff_.run(burn_args(with_audio, ass, config_, final_path));
+            // **烧到工作目录里，成了再换过去。** 原来 ffmpeg 直接 `-y` 写成片：它一打开就把
+            // 上一版好好的成片清空了，烧到一半失败、超时、人关了程序，留下的是一个没有索引的
+            // 半截 mp4——整部电影拼接照样把它当这一章的片子，项目库也照样算「已出片」
+            //（2026-09-26 审出来）。
+            const fs::path burned = work / "burned.mp4";
+            fs::remove(burned, ec);
+            ff_.run(burn_args(with_audio, ass, config_, burned));
             burn = true;
+            move_into_place(burned, final_path);
         }
     }
     if (!burn) {
         // 没字幕就直接搬过去，不重编码一遍——那是白白多一次有损压缩。
-        fs::remove(final_path, ec);
-        fs::rename(with_audio, final_path, ec);
-        if (ec) {
-            // 跨盘 rename 会失败（工作目录和输出目录理论上同在项目里，
-            // 但用户可能把 output 做成了符号链接）。退回复制。
-            fs::copy_file(with_audio, final_path,
-                          fs::copy_options::overwrite_existing, ec);
-            if (ec) {
-                throw AssemblyError(SAYF("成片挪不到 %1：%2",
-                                         paths::to_utf8(final_path),
-                                         ec.message()));
-            }
-        }
+        move_into_place(with_audio, final_path);
     }
     return final_path;
 }

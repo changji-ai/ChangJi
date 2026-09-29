@@ -23,22 +23,28 @@ mkdir -p "$DIR/llm"
 
 command -v aria2c >/dev/null || { echo "先装 aria2：apt-get install -y aria2"; exit 1; }
 
-# 下一个文件。已经下完（大小对得上）就跳过。
+# 下砸了几个。**最后照实退非零**：原来一个文件下失败、大小不对，只印一行 ✗，
+# 然后照样印配置、退出 0——一眼扫过去是「跑完了」，而配置指着的那个文件是半截的。
+FAILED=0
+
+# 下一个文件。已经下完（大小对得上、而且 aria2 的控制文件不在）就跳过。
 dl() {
   local out="$1" url="$2" want="$3"
   local path="$DIR/$out"
   if [ -f "$path" ]; then
     local have; have=$(stat -c%s "$path" 2>/dev/null || echo 0)
-    if [ "$have" = "$want" ]; then echo "  ✓ $out（已有）"; return 0; fi
+    # **只比大小不够**：八连接各写各的一段，最后一段先写完的话文件当场就是全长
+    #（中间是洞）。aria2 还在记账（.aria2 在）就是没下完，接着续。
+    if [ "$have" = "$want" ] && [ ! -e "$path.aria2" ]; then echo "  ✓ $out（已有）"; return 0; fi
     echo "  ↻ $out（$have / $want，续传）"
   else
     echo "  ↓ $out（$(( want / 1024 / 1024 )) MB）"
   fi
   aria2c -x 8 -s 8 -k 4M --file-allocation=none --auto-file-renaming=false \
          --continue=true -d "$(dirname "$path")" -o "$(basename "$path")" \
-         "$url" >/dev/null 2>&1 || { echo "    ✗ 下失败：$out"; return 1; }
+         "$url" >/dev/null 2>&1 || { echo "    ✗ 下失败：$out"; FAILED=$((FAILED + 1)); return 1; }
   local now; now=$(stat -c%s "$path" 2>/dev/null || echo 0)
-  [ "$now" = "$want" ] || { echo "    ✗ 大小对不上：$now ≠ $want"; return 1; }
+  [ "$now" = "$want" ] || { echo "    ✗ 大小对不上：$now ≠ $want"; FAILED=$((FAILED + 1)); return 1; }
   echo "    ✓ 完成"
 }
 
@@ -135,3 +141,9 @@ fi
 # **这一行不能漏**：2509 不带视觉塔就是"参考图只进去一半"，而且不报错。
 echo '  image_text_encoder_vision = "Qwen2.5-VL-7B-Instruct-mmproj-BF16.gguf"'
 echo '  image_vae = "qwen_image_vae.safetensors"' 
+
+if [ "$FAILED" -gt 0 ]; then
+  echo
+  echo "✗ 有 $FAILED 个文件没下好（见上面的 ✗）。再跑一遍会接着续；配好之前别起服务。"
+  exit 1
+fi

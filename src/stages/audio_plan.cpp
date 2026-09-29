@@ -289,8 +289,33 @@ std::vector<models::Shot> split_overlong_shots(std::vector<models::Shot> shots,
         const std::vector<std::string> motions =
             split_motion(shot.motion_prompt, weights);
 
+        // 这几句已经配好音了没有（每一句都有文件、有时长）。
+        const auto voiced = [](const std::vector<models::DialogueLine>& g) {
+            return !g.empty() && std::all_of(g.begin(), g.end(), [](const auto& l) {
+                return l.audio_path.has_value() && !l.audio_path->empty() &&
+                       l.actual_duration_s.value_or(0.0) > 0.0;
+            });
+        };
+        // 按手上这几句的配音重新锁时长（同 AudioStage::lock_duration 的吸附：
+        // 向上取到能生成的档位，尾巴留一点）。**拆过的镜头不走那条「长镜头
+        // 不许压短」**：它原来锁的是**整镜所有台词**的长度，而运动描述已经按
+        // 各份台词分过了，留着就是一镜只剩一句话却占着十几秒。
+        const auto relock = [&](models::Shot& s2, const std::vector<models::DialogueLine>& g) {
+            double speech = 0.0;
+            for (const auto& line : g) speech += dur_of(line);
+            s2.duration_s = ceil_duration(speech + kTailS);
+            s2.duration_locked = true;
+            if (!s2.motion_prompt.empty()) {
+                s2.motion_prompt = motion_covering(s2.motion_prompt, s2.duration_s);
+            }
+        };
+
         shot.dialogue = groups[0];
         if (!motions.empty()) shot.motion_prompt = motions[0];
+        // 已经出过片的那一镜时长不动（片子是按原来那个长度出的）。
+        if (shot.duration_locked && !shot.video_path && voiced(groups[0])) {
+            relock(shot, groups[0]);
+        }
         out.push_back(shot);
 
         for (std::size_t g = 1; g < groups.size(); ++g) {
@@ -308,6 +333,15 @@ std::vector<models::Shot> split_overlong_shots(std::vector<models::Shot> shots,
             extra.gate_notes.clear();
             extra.status = models::ShotStatus::PLANNED;
             extra.duration_locked = false;
+            // ⚠️ **台词挪过来时音频是现成的**（配音之后才拆）。原来一律标 PLANNED，
+            // 而整章出片（run_episode）接下来的首帧只挑配好音的、出片也不认
+            // PLANNED——拆出来的几镜这一轮既没首帧也没片子，成片里那几句台词
+            // 整个没了，只在「没进去的」提示里提一句（2026-09-25 审出来；只做
+            // 前 n 分钟那条有重挑，所以没露出来）。音频齐的直接当配好了。
+            if (voiced(groups[g])) {
+                extra.status = models::ShotStatus::AUDIO_DONE;
+                relock(extra, groups[g]);
+            }
             out.push_back(extra);
         }
     }

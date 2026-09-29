@@ -26,6 +26,10 @@
 #include "util/paths.hpp"
 #include "util/text.hpp"
 
+#ifdef _WIN32
+#include <windows.h>   // SetConsoleOutputCP，见 main() 头一行
+#endif
+
 namespace {
 
 /// 解析 --port 的参数。
@@ -77,8 +81,8 @@ void print_usage() {
         "\n"
         "  --port <n>            监听端口，默认 8080\n"
         "  --host <addr>         监听地址，默认 127.0.0.1（只有本机连得上）\n"
-        "                        要让局域网连进来才填 0.0.0.0——这套接口没有\n"
-        "                        鉴权，连上就能读项目、改分镜、起流水线\n"
+        "                        要让局域网连进来才填 0.0.0.0——那时进来要口令，\n"
+        "                        带口令的地址打在启动日志里\n"
         "  --project <目录>      默认打开的项目。这个项目里的 changji.toml\n"
         "                        也会一并读进来，盖过全局配置——不给就只有全局的\n"
         "  --doctor              跑一遍环境体检然后退出\n"
@@ -325,8 +329,14 @@ namespace {
 /// 搞崩了"，其实是 CPU 不支持。
 ///
 /// 检查本身不能用 AVX2——`__builtin_cpu_supports` 走的是 CPUID，安全。
+///
+/// **只在真按 AVX2 基线编的构建里查**（CMake 里 `CHANGJI_NEEDS_AVX2`：编进了
+/// ggml、GGML_NATIVE=OFF、又没关 GGML_AVX2）。2026-09-27 之前这儿不分：照它
+/// 下面那句话「自己编一份 -DGGML_AVX2=OFF」在一台 QEMU 通用 CPU 的虚拟机上
+/// 编出来的，起步照样被这儿拦下——检查说"你没有 AVX2"，而那份二进制根本
+/// 没用 AVX2。
 bool cpu_ok(std::string& missing) {
-#if defined(__x86_64__) || defined(_M_X64)
+#if defined(CHANGJI_NEEDS_AVX2) && (defined(__x86_64__) || defined(_M_X64))
 #if defined(_MSC_VER)
     // **MSVC 没有 __builtin_cpu_supports，得自己问 CPUID。**
     // windows-x64 那个包正是 MSVC 编的，而 Windows 上老 CPU 最常见——
@@ -384,6 +394,12 @@ void speak_as_env_says() {
 }
 
 int main(int argc, char** argv) {
+#ifdef _WIN32
+    // **控制台按 UTF-8 显示。** 引擎打的字全是 UTF-8，而中文 Windows 的控制台默认是 936（GBK）
+    // ——不设的话 --help、体检报告、起来之后那块「在浏览器里打开」（带着口令）全是乱码，新用户
+    // 连口令都抄不下来。exe 上那份清单的 activeCodePage=UTF-8 管的是 ANSI 代码页，管不到控制台。
+    ::SetConsoleOutputCP(CP_UTF8);
+#endif
     speak_as_env_says();
 
     // **--version 和 --help 要放行。**

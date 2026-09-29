@@ -55,6 +55,27 @@ struct WatermarkPlan {
 WatermarkPlan stage_watermark(const std::filesystem::path& image_path,
                               int target_w, int target_h, int upscale = 1);
 
+/// 单镜出片那一步烧进去的角标，落在一幅 `w×h` 的画面上的哪一块（像素）。
+///
+/// 和 `stage_watermark(…, w, h)` 是同一套算法（同一个函数算的），所以是**确切**
+/// 位置，不是估的。往外多留 2px（缩放、编码会把边缘糊开一点）；贴不进画面
+/// 里面的（delogo 要求四边都离画面边至少 1px）回 `w = 0`。
+struct WatermarkRect {
+    int x = 0;
+    int y = 0;
+    int w = 0;
+    int h = 0;
+    bool empty() const { return w <= 0 || h <= 0; }
+};
+WatermarkRect burned_watermark_rect(int frame_w, int frame_h);
+
+/// 把那一块抹掉的滤镜（ffmpeg `delogo`，按四周插值填回去）。空的回空串。
+///
+/// **只给装配那一处用**：一镜的尺寸和整章不一样时，装配要把它缩放到整章的
+/// 尺寸，烧好的角标跟着缩放——一部片子里角标忽大忽小。半透明的角标拿一层
+/// 别的尺寸盖不住（会叠出重影），只能先抹掉、再按整章的尺寸补一个。
+std::string delogo_filter(const WatermarkRect& r);
+
 /// 把水印叠在一条滤镜链后面。`plan` 空就原样返回 `chain`（一个字都不多，
 /// 这样"没水印"和改动前逐字节一样）。
 ///

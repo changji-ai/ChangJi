@@ -1,6 +1,7 @@
 #include "util/say.hpp"
 #include "models/project.hpp"
 
+#include <iostream>
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -14,6 +15,10 @@
 #include <set>
 #include <sstream>
 #include <stdexcept>
+#ifndef _WIN32
+#include <fcntl.h>
+#include <unistd.h>
+#endif
 #include <thread>
 
 // 只为了新项目那份画幅：`create` 要把内置默认的比例钉进 assets.json，
@@ -70,7 +75,8 @@ J read_json_file(const fs::path& path) {
 ///
 /// 与 Python 侧一致的关键点是 rename 必须在**同一个文件系统**上，
 /// 所以临时文件放在目标文件的同目录，不能用系统临时目录。
-void write_json_atomic(const fs::path& path, const json& data) {
+template <class J>   // json 或 ordered_json（设定库要留住角色、场景的先后）
+void write_json_atomic(const fs::path& path, const J& data) {
     std::error_code ec;
     fs::create_directories(path.parent_path(), ec);
 
@@ -94,7 +100,10 @@ void write_json_atomic(const fs::path& path, const json& data) {
         }
         // ensure_ascii=False + indent=2，与 Python 侧的 json.dump 对齐。
         // nlohmann 默认就不转义非 ASCII，中文原样写出。
-        out << data.dump(2);
+        // **坏字节换成 U+FFFD，不抛。** 一段劈开半个字的报错（外部命令的输出尾巴）
+        // 混进哪一镜的闸门理由里，默认的 dump 就抛 type_error.316：这一回存不上，
+        // 之后每一回也存不上——整部片子卡死在那一个字节上，还留一个 .tmp。
+        out << data.dump(2, ' ', false, nlohmann::json::error_handler_t::replace);
         out.flush();
         if (!out) {
             out.close();
@@ -102,6 +111,7 @@ void write_json_atomic(const fs::path& path, const json& data) {
             throw std::runtime_error(SAY("写临时文件时出错：") + paths::to_utf8(tmp));
         }
     }
+    paths::sync_to_disk(tmp, /*dir=*/false);
 
     // fs::rename 在标准里要求目标存在时替换掉它（POSIX 语义），
     // MSVC 底层走的是 MoveFileEx 加 MOVEFILE_REPLACE_EXISTING。
@@ -123,6 +133,8 @@ void write_json_atomic(const fs::path& path, const json& data) {
         fs::remove(tmp, ec);
         throw std::runtime_error(SAY("替换文件失败：") + paths::to_utf8(path));
     }
+    // 换名那一笔记在目录里，目录也落一次，断电回来新名字才一定在。
+    paths::sync_to_disk(path.parent_path(), /*dir=*/true);
 }
 
 /// 一部片子一把存盘锁（可重入：`commit_story` 里面还要调 `sync_…`，同一条
@@ -399,13 +411,33 @@ Project ProjectStore::load_project() const {
             SAYF("这里不是一个项目目录：%1\n先建一部，或者换一个目录",
                  paths::to_utf8(root())));
     }
-    const json raw = read_json_file<json>(paths_.project_file());
+    json raw = read_json_file<json>(paths_.project_file());
+    drop_nulls(raw);   // 一栏 null 别让整部片子打不开，见 json_compat.hpp
     const int version = raw.value("schema_version", 0);
     if (version > kSchemaVersion) {
         throw std::runtime_error(
             SAYF("项目是用更新版本的场记创建的（格式版本 %1，本机支持到 %2）。"
                  "请升级后再打开",
                  std::to_string(version), std::to_string(kSchemaVersion)));
+    }
+    // **认不出的镜头枚举当没填过**（models::drop_unknown_shot_enums）。不洗的话 nlohmann 把它
+    // 悄悄读成表里第一项：一份手改过、或者别的版本写的 project.json 里 shot_size 是 "WS"，
+    // 这一镜就成了大特写，镜头墙上照样摆、出片照样按大特写拼提示词，全程不报错。
+    // 洗掉走结构体默认值（中景、平视……），并且往日志里说一句是哪一镜哪一栏。
+    if (auto eps = raw.find("episodes"); eps != raw.end() && eps->is_array()) {
+        for (auto& ep : *eps) {
+            auto shots = ep.find("shots");
+            if (shots == ep.end() || !shots->is_array()) continue;
+            for (auto& sh : *shots) {
+                const auto dropped = drop_unknown_shot_enums(sh);
+                if (dropped.empty()) continue;
+                std::string what;
+                for (const auto& d : dropped) what += (what.empty() ? "" : ", ") + d;
+                std::cerr << "[project] " << paths::to_utf8(paths_.project_file()) << " 里镜头 "
+                          << sh.value("shot_id", std::string("?"))
+                          << " 有认不出的取值，按没填过读（默认值）：" << what << std::endl;
+            }
+        }
     }
     return raw.get<Project>();
 }
@@ -416,7 +448,8 @@ AssetLibrary ProjectStore::load_assets() const {
         return AssetLibrary{};
     }
     // 用 ordered_json 而不是 json：见 read_json_file 的注释。
-    const auto raw = read_json_file<nlohmann::ordered_json>(paths_.assets_file());
+    auto raw = read_json_file<nlohmann::ordered_json>(paths_.assets_file());
+    drop_nulls(raw);   // 同 load_project
 
     // ⚠️ **形状不对不能当成"这个项目还没有角色"。**
     //
@@ -466,7 +499,9 @@ Story ProjectStore::load_story() const {
     if (!fs::is_regular_file(paths_.story_file(), ec)) {
         return Story{};
     }
-    return read_json_file<json>(paths_.story_file()).get<Story>();
+    json raw = read_json_file<json>(paths_.story_file());
+    drop_nulls(raw);   // 同 load_project
+    return raw.get<Story>();
 }
 
 std::unique_lock<std::recursive_mutex> ProjectStore::lock() const {
@@ -503,7 +538,12 @@ void ProjectStore::save_project(Project& project) const {
 
 void ProjectStore::save_assets(const AssetLibrary& assets) const {
     const auto g = lock();
-    write_json_atomic(paths_.assets_file(), json(assets));
+    // **按先后写**：`OrderedMap` 和读盘那一头（ordered_json）费劲留住的顺序，原来拿普通的
+    // json 一转就按键名排了——改一处设定，界面上角色、场景的顺序就变成字母序
+    //（2026-09-26 审出来）。
+    nlohmann::ordered_json oj;
+    to_json(oj, assets);
+    write_json_atomic(paths_.assets_file(), oj);
 }
 
 void ProjectStore::save_story(const Story& story) const {
@@ -722,10 +762,62 @@ std::vector<Overwrite> read_overwrites(const fs::path& root) {
     return out;
 }
 
-void write_overwrites(const fs::path& root, const std::vector<Overwrite>& all) {
+/// 办完了的覆盖最多留这么多条（还没办的一条不删）。
+constexpr std::size_t kSettledKeep = 200;
+/// 每一块（一章正文、一章分镜……）的留底最多留这么多份。
+constexpr std::size_t kStashKeep = 20;
+
+void write_overwrites(const fs::path& root, std::vector<Overwrite> all) {
+    // **办完了的只留最近那些**：原来一条不删，overwrites.json 跟着片子的年头一直长，
+    // 每次存盘读一遍、写一遍。
+    std::size_t settled = 0;
+    for (auto it = all.rbegin(); it != all.rend(); ++it) {
+        if (it->state != "open") ++settled;
+    }
     json arr = json::array();
-    for (const auto& o : all) arr.push_back(o);
+    for (const auto& o : all) {
+        if (o.state != "open" && settled > kSettledKeep) {
+            --settled;   // 最老的那几条办完了的
+            continue;
+        }
+        arr.push_back(o);
+    }
     write_json_atomic(versions_dir(root) / "overwrites.json", arr);
+}
+
+/// 这一块的留底只留最近 `kStashKeep` 份。**还没办的覆盖指着的那份不删**：场记问人
+/// 「恢复你写的吗」，人说恢复，读的就是它。原来一份不删——一章在对话和人手之间来回
+/// 改，每换一次作者整块存一份（分镜那块是整个镜头数组），片子目录一直长。
+void prune_stash(const fs::path& root, const std::string& key) {
+    const std::string rel_dir = "versions/" + safe_unit_path(key);
+    const fs::path dir = root / paths::from_utf8(rel_dir);
+    std::error_code ec;
+    std::vector<std::string> names;
+    for (const auto& e : fs::directory_iterator(dir, ec)) {
+        if (e.is_regular_file(ec) && e.path().extension() == ".json") {
+            names.push_back(paths::to_utf8(e.path().filename()));
+        }
+    }
+    if (names.size() <= kStashKeep) return;
+    std::set<std::string> pinned;
+    for (const auto& o : read_overwrites(root)) {
+        if (o.state == "open") pinned.insert(o.stash);
+    }
+    // 文件名是「毫秒-编号.json」，毫秒定长 13 位：按字面倒排就是新的在前。
+    std::sort(names.begin(), names.end(), std::greater<>());
+    for (std::size_t i = kStashKeep; i < names.size(); ++i) {
+        const std::string rel = rel_dir + "/" + names[i];
+        if (pinned.count(rel) != 0) continue;
+        fs::remove(dir / paths::from_utf8(names[i]), ec);
+    }
+}
+
+/// 账上一栏的字。**不是字串就当没有**：owners.json 是盘上的文件，人手改过、以后
+/// 换了格式，`value()` 遇到 null 抛 type_error——正文已经写下去了，异常却一路抛给
+/// 调用方，而且这份账不会被改写，之后每一次存盘都这样。
+std::string str_in(const json& o, const char* key) {
+    const auto it = o.find(key);
+    return it != o.end() && it->is_string() ? it->get<std::string>() : std::string();
 }
 
 }  // namespace
@@ -737,9 +829,11 @@ void set_overwrite_sink(OverwriteSink sink) {
 
 namespace detail {
 
-std::vector<Overwrite> note_overwrites(const ProjectPaths& paths,
-                                       const std::string& file,
-                                       const json& before, const json& after) {
+namespace {
+
+std::vector<Overwrite> note_overwrites_unguarded(const ProjectPaths& paths,
+                                                 const std::string& file,
+                                                 const json& before, const json& after) {
     const util::Writer& w = util::current_writer();
     const Units a = units_of(file, before);
     const Units b = units_of(file, after);
@@ -772,7 +866,7 @@ std::vector<Overwrite> note_overwrites(const ProjectPaths& paths,
         // 别的路改过它（老版本写的、账还没记上的），硬认一个作者会问错人。
         const auto own = units.find(key);
         const bool own_matches = own != units.end() && own->is_object() &&
-                                 !ofp.empty() && own->value("fp", std::string()) == ofp;
+                                 !ofp.empty() && str_in(*own, "fp") == ofp;
 
         if (w.derived) {
             // 出片这类：不换作者，只把指纹跟上（拆镜、锁时长之后还是那个人的分镜）。
@@ -788,7 +882,7 @@ std::vector<Overwrite> note_overwrites(const ProjectPaths& paths,
         }
 
         if (own_matches) {
-            const std::string owner = own->value("lane", std::string());
+            const std::string owner = str_in(*own, "lane");
             if (owner != w.lane) {
                 // **换掉的是别人写的：旧的那份整块留底。** 人改的、按钮派的也
                 // 留（回头能找），只是不因此去问谁（见下面那个判据）。
@@ -810,6 +904,7 @@ std::vector<Overwrite> note_overwrites(const ProjectPaths& paths,
                                            {"by_title", w.title},
                                            {"at", now},
                                            {"payload", ia->second.payload}});
+                    prune_stash(root, key);
                     // **两头都是对话、而且不是在按人的决定写回**，才算一件要问的覆盖。
                     // 人手改的、页面按钮派的：人怎么改是人的事（用户原话「用户怎么做
                     // 是用户的事」）。
@@ -842,6 +937,21 @@ std::vector<Overwrite> note_overwrites(const ProjectPaths& paths,
         // 账记不下同上：正文已经存了，不因为账拖垮这一次写。
     }
     return found;
+}
+
+}  // namespace
+
+std::vector<Overwrite> note_overwrites(const ProjectPaths& paths,
+                                       const std::string& file,
+                                       const json& before, const json& after) {
+    // **记账这一步整个不许抛**：它在正文写下去之后才跑，抛出去调用方看到的是「没存上」，
+    // 而盘上明明存了——出片那一轮、对话的工具都照这句报失败。账本身是盘上的文件，
+    // 坏了（人手改过、老格式）的那一下只是这一次不记。
+    try {
+        return note_overwrites_unguarded(paths, file, before, after);
+    } catch (const std::exception&) {
+        return {};
+    }
 }
 
 void report_overwrites(const std::string& root, const std::vector<Overwrite>& found) {

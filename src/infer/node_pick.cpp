@@ -54,7 +54,7 @@ std::optional<std::string> pick_for(const std::vector<NodeState>& nodes,
 std::string why_no_node(const std::vector<NodeState>& nodes, Capability c) {
     const std::string what = label_of(c);
     if (nodes.empty()) {
-        return SAYF("没有任何一台机器登记在案，%1 这一步没地方派", what);
+        return SAYF("未登记任何机器，「%1」步骤无法分派", what);
     }
 
     int offline = 0, turned_off = 0, cannot = 0;
@@ -71,7 +71,7 @@ std::string why_no_node(const std::vector<NodeState>& nodes, Capability c) {
     // **要说清是哪一层拦的。** 只说"没有可用节点"的话，用户唯一能做的
     // 就是挨个去翻配置——而这三种情况要做的事完全不同：等一等／去表上
     // 打开／去装模型。
-    std::string out = SAYF("%1 这一步一台都派不出去：", what);
+    std::string out = SAYF("「%1」步骤无法分派给任何机器：", what);
     bool first = true;
     const auto add = [&](int n, const std::string& one) {
         if (n <= 0) return;
@@ -87,10 +87,11 @@ std::string why_no_node(const std::vector<NodeState>& nodes, Capability c) {
     //
     // 这正是 `util/say.hpp` 上那条"别拿 + 拼"：碎片翻不了，也改不动语序，
     // 更管不了跟着数变的那几个词。一句话一个键。
-    add(offline, SAYN("%n 台连不上", offline));
-    add(turned_off, SAYN("%n 台被你在表上关掉了", turned_off));
+    add(offline, SAYN("%n 台无法连接", offline));
+    add(turned_off, SAYN("%n 台已在列表中关闭此步骤", turned_off));
     add(cannot,
-        SAYN("%n 台自己说干不了（缺模型或者没编进去，看那台的状态）", cannot));
+        SAYN("%n 台报告无法执行（缺少模型或程序未包含相应组件，"
+             "请查看该机器的状态）", cannot));
     return out;
 }
 

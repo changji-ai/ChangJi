@@ -35,12 +35,12 @@ std::optional<Capability> capability_from(const std::string& s) {
 /// 「某某没配，或者文件不在」。**一句话一个键**：这句话本来在五处各写
 /// 一遍，只有中间那个键名不同——翻译要翻五遍，而改一个字得改五处。
 std::string kMissing(const char* key) {
-    return SAYF("%1 没配，或者文件不在", key);
+    return SAYF("%1 未配置或文件不存在", key);
 }
 
 const std::string& label_of(Capability c) {
     switch (c) {
-        case Capability::Llm: return SAY("写文");
+        case Capability::Llm: return SAY("写作");
         case Capability::Tts: return SAY("配音");
         case Capability::Frame: return SAY("首帧");
         case Capability::Video: return SAY("出片");
@@ -71,18 +71,18 @@ std::string missing_for(Capability c, const NodeFacts& f) {
             // 配，只会一直查不出来为什么写不动。
             if (f.llm_local) {
                 if (!f.built_with_llama_chat) {
-                    return SAY("配的是进程内写文，但这个二进制没编进 llama.cpp"
-                               "（构建时要 CHANGJI_LLAMA=ON）");
+                    return SAY("已配置为本地写作，"
+                               "但当前程序未包含 llama.cpp（构建时需 CHANGJI_LLAMA=ON）");
                 }
                 return {};
             }
-            return SAY("写文要指到远端服务（[llm].backend = remote 加地址），"
-                       "或者在本机装一份编剧模型（backend = local 加 [models].llm）");
+            return SAY("写作需要连接远端服务（[llm].backend = remote 并填写地址），"
+                       "或在本机安装编剧模型（backend = local 并填写 [models].llm）");
 
         case Capability::Tts:
             if (f.tts_remote) return {};
             if (!f.built_with_llama_tts) {
-                return SAY("这个二进制没编 llama.cpp，配音只能指到外部服务");
+                return SAY("当前程序未包含 llama.cpp，配音只能使用外部服务");
             }
             // 两个都要：骨干和解码器分开放，缺一个出不了声。
             // **缺了不会报错**，只会退回估算后端出一段静音——所以这里
@@ -95,33 +95,32 @@ std::string missing_for(Capability c, const NodeFacts& f) {
 
         case Capability::Frame:
             if (!f.built_with_sd) {
-                return SAY("这个二进制没编 sd.cpp，出不了图");
+                return SAY("当前程序未包含 sd.cpp，无法出图");
             }
             if (!has(f, "image")) return kMissing("[models].image");
             // VAE 两个键都认：图像专用的没配就退回视频那份，
             // 和 cannot_do 那边的规矩一致。
             if (!has(f, "image_vae") && !has(f, "video_vae")) {
-                return SAY("VAE 没配，或者文件不在（[models].image_vae "
-                           "不填就退回 video_vae）");
+                return SAY("VAE 未配置或文件不存在（[models].image_vae 为空时使用 video_vae）");
             }
             return {};
 
         case Capability::Video:
             if (!f.built_with_sd) {
-                return SAY("这个二进制没编 sd.cpp，出不了片");
+                return SAY("当前程序未包含 sd.cpp，无法出片");
             }
             if (!has(f, "video")) return kMissing("[models].video");
             if (!has(f, "video_vae")) return kMissing("[models].video_vae");
             // **出片要 ffmpeg 把帧编成 mp4。** 这一条是实机烧出来的：
             // 扩散 8 步全跑完，到最后编码那一步才报找不到 ffmpeg。
-            if (!f.ffmpeg_ok) return SAY("没有 ffmpeg，出的帧编不成 mp4");
+            if (!f.ffmpeg_ok) return SAY("未找到 ffmpeg，无法将帧编码为 mp4");
             return {};
 
         case Capability::Assemble:
-            if (!f.ffmpeg_ok) return SAY("没有 ffmpeg，装配和烧字幕都做不了");
+            if (!f.ffmpeg_ok) return SAY("未找到 ffmpeg，无法装配和烧录字幕");
             return {};
     }
-    return SAY("认不出这个能力");
+    return SAY("无法识别的能力");
 }
 
 std::vector<CapabilityReport> capabilities_of(const NodeFacts& f) {

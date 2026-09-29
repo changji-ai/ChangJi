@@ -292,3 +292,26 @@ TEST_CASE("UTF-8 截断不会切出半个汉字") {
     // 中英混排
     CHECK(text::truncate_utf8("ab林c", 3) == "ab林");
 }
+
+TEST_CASE("两个角色拼音撞了（王磊、王蕾）：两个都在，不互相覆盖") {
+    // key 是模型照中文名写的拼音。原来后一个直接把前一个盖掉——少一个人，照故事
+    // 定妆那条还会因为「名单不一致」每次重试都砸。
+    const std::string raw = R"({
+      "characters": [
+        {"key": "wang_lei", "name": "王磊", "identity": "三十岁男人", "face": "方脸", "body": "高", "attire": "灰夹克"},
+        {"key": "wang_lei", "name": "王蕾", "identity": "二十岁女人", "face": "圆脸", "body": "瘦", "attire": "白裙"},
+        {"key": "wang_lei", "name": "王磊", "identity": "重复的一份", "face": "重复", "body": "重复", "attire": "重复"}
+      ],
+      "locations": [
+        {"key": "cafe", "name": "街角咖啡馆", "space": "小", "lighting": "暖", "palette": "棕"},
+        {"key": "cafe", "name": "车站咖啡馆", "space": "大", "lighting": "冷", "palette": "灰"}
+      ]
+    })";
+    const auto lib = stages::parse_bible(raw, models::StyleLine::REALISTIC, "16:9");
+    REQUIRE(lib.characters.size() == 2);
+    CHECK(lib.characters.at("c_wang_lei").name == "王磊");
+    CHECK(lib.characters.at("c_wang_lei").appearance.identity == "三十岁男人");   // 同名留第一份
+    CHECK(lib.characters.at("c_wang_lei_2").name == "王蕾");
+    REQUIRE(lib.locations.size() == 2);
+    CHECK(lib.locations.at("loc_cafe_2").name == "车站咖啡馆");
+}

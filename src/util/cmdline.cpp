@@ -3,6 +3,7 @@
 #include <cmath>
 
 #include "util/proc.hpp"
+#include "util/text.hpp"
 
 namespace changji::util {
 
@@ -88,10 +89,10 @@ CommandOutcome run_command(const std::vector<std::string>& argv,
         out.error = "退出码 " + std::to_string(r.exit_code);
         if (!r.out.empty()) {
             // 只留尾巴：Python 的栈是最后几行有用。
-            const std::size_t keep = 1200;
-            out.error += "：" + (r.out.size() > keep
-                                     ? "…" + r.out.substr(r.out.size() - keep)
-                                     : r.out);
+            // 截在字的边界上（按字节截会劈开一个字，见 media/ffmpeg.cpp 那段）。
+            std::string tail = r.out;
+            const bool cut = text::keep_tail_utf8(tail, 1200) > 0;
+            out.error += "：" + (cut ? "…" + tail : tail);
         }
         return out;
     }

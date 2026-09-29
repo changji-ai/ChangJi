@@ -1,10 +1,21 @@
 #include "pipeline/storyboard_run.hpp"
 
 #include <algorithm>
+#include <cstdio>
+#include <fstream>
+#include <map>
+#include <mutex>
+#include <system_error>
+
+#include <nlohmann/json.hpp>
 
 #include "config/runtime.hpp"
 #include "llm/call_log.hpp"
+#include "models/story.hpp"
+#include "stages/limits.hpp"
 #include "stages/storyboard.hpp"
+#include "util/atomic_file.hpp"
+#include "util/paths.hpp"
 #include "util/say.hpp"
 #include "util/text.hpp"
 
@@ -45,7 +56,84 @@ std::vector<Shot> parse_and_note(const std::string& raw,
     }
 }
 
+// ---- 按场拆的中途草稿（见 StoryboardRunOptions::parts_file） ----
+
+namespace fs = std::filesystem;
+using json = nlohmann::json;
+
+/// 草稿是读一份、加一场、整份写回。同一章两条对话同时拆时别互相把对方那一场冲掉。
+std::mutex& parts_mutex() {
+    static std::mutex m;
+    return m;
+}
+
+/// 草稿认不认：这几样任何一样变了，上回拆的镜头就对不上这一回了。
+std::string parts_key(const std::string& script, const std::string& episode_id,
+                      const AssetLibrary& assets) {
+    std::string s = "ep:" + episode_id + "\n";
+    for (const auto& [id, c] : assets.characters) s += "c:" + id + "\n";
+    for (const auto& [id, l] : assets.locations) s += "l:" + id + "\n";
+    char cap[32];
+    std::snprintf(cap, sizeof cap, "%.3f", stages::max_shot_duration_s());
+    s += "max_shot_s:" + std::string(cap) + "\n";
+    return chapter_text_fingerprint(s + script);
+}
+
+json read_parts(const fs::path& f) {
+    std::ifstream in(f, std::ios::binary);
+    if (!in) return json();
+    json j = json::parse(in, nullptr, /*allow_exceptions=*/false);
+    return j.is_object() ? j : json();
+}
+
+/// 上回拆好的那几场：第几场（从 0 数，和 split_scenes 的次序一致）→ 那一场的镜头。
+/// 认不上、读不动、哪一场坏了的，那一场当没有——大不了重拆，不拿坏的凑。
+std::map<std::size_t, std::vector<Shot>> load_parts(const fs::path& f, const std::string& key) {
+    std::map<std::size_t, std::vector<Shot>> out;
+    std::lock_guard lg(parts_mutex());
+    const json j = read_parts(f);
+    if (!j.is_object() || j.value("key", std::string()) != key) return out;
+    const auto it = j.find("scenes");
+    if (it == j.end() || !it->is_object()) return out;
+    for (const auto& [k, v] : it->items()) {
+        try {
+            std::vector<Shot> shots = v.get<std::vector<Shot>>();
+            if (!shots.empty()) out[static_cast<std::size_t>(std::stoul(k))] = std::move(shots);
+        } catch (const std::exception&) {
+        }
+    }
+    return out;
+}
+
+/// 这一场拆好了，记进草稿。**存不下不拦着拆**：只是下回不能接着用。
+void save_part(const fs::path& f, const std::string& key, std::size_t nth,
+               const std::vector<Shot>& shots) {
+    std::lock_guard lg(parts_mutex());
+    json j = read_parts(f);
+    if (!j.is_object() || j.value("key", std::string()) != key) {
+        j = json{{"key", key}, {"scenes", json::object()}};
+    }
+    j["scenes"][std::to_string(nth)] = shots;
+    try {
+        std::error_code ec;
+        fs::create_directories(f.parent_path(), ec);
+        util::write_file_atomic(f, j.dump(1, ' ', false, json::error_handler_t::replace),
+                                /*private_only=*/false);
+    } catch (const std::exception&) {
+    }
+}
+
+void drop_parts(const fs::path& f) {
+    std::lock_guard lg(parts_mutex());
+    std::error_code ec;
+    fs::remove(f, ec);
+}
+
 }  // namespace
+
+fs::path storyboard_parts_path(const fs::path& project_root, const std::string& episode_id) {
+    return project_root / ".changji" / "storyboard" / paths::from_utf8(episode_id + ".json");
+}
 
 StoryboardRunResult run_storyboard(const StoryboardRunOptions& opts,
                                    llm::Client& client, CancelToken& tok) {
@@ -55,6 +143,9 @@ StoryboardRunResult run_storyboard(const StoryboardRunOptions& opts,
 
     std::vector<stages::SceneBlock> scenes = stages::split_scenes(script, assets);
     std::vector<Shot> shots;
+    // 中途草稿：只在真去问模型的那条路上留（只看不发没有镜头，粘回来的不花钱）。
+    const bool keep_parts = !opts.parts_file.empty() && !opts.peek && opts.pasted.empty();
+    const std::string parts_key_now = keep_parts ? parts_key(script, opts.episode_id, assets) : "";
     // **目标量按剧本估，不按名义时长。** 估不出来（剧本是空的、全是场次头）
     // 才退回 duration_s。
     const double estimated = stages::estimate_script_seconds(script);
@@ -95,17 +186,25 @@ StoryboardRunResult run_storyboard(const StoryboardRunOptions& opts,
         // ---- 按场拆 ----
         stages::assign_scene_seconds(scenes, target_s);
         result.scenes = static_cast<int>(scenes.size());
+        // 上回拆好的那几场（认得上才有）。
+        const std::map<std::size_t, std::vector<Shot>> earlier =
+            keep_parts ? load_parts(opts.parts_file, parts_key_now)
+                       : std::map<std::size_t, std::vector<Shot>>{};
         std::string prev_tail;
         int running_order = 0;
         for (std::size_t i = 0; i < scenes.size(); ++i) {
             const stages::SceneBlock& scene = scenes[i];
-            if (opts.on_progress) {
+            const auto reuse = earlier.find(i);
+            if (opts.on_progress && reuse != earlier.end()) {
+                opts.on_progress(SAYF("第 %1/%2 场上回已经拆好，接着用",
+                                      std::to_string(scene.index), std::to_string(scenes.size())));
+            } else if (opts.on_progress) {
                 const std::string nth = std::to_string(scene.index);
                 const std::string all = std::to_string(scenes.size());
                 opts.on_progress(
                     scene.body.empty()
-                        ? SAYF("正在拆第 %1/%2 场", nth, all)
-                        : SAYF("正在拆第 %1/%2 场：%3", nth, all, scene.body));
+                        ? SAYF("正在拆分第 %1/%2 场", nth, all)
+                        : SAYF("正在拆分第 %1/%2 场：%3", nth, all, scene.body));
             }
             const stages::DurationQuota quota =
                 stages::DurationQuota::for_duration(scene.seconds);
@@ -138,24 +237,34 @@ StoryboardRunResult run_storyboard(const StoryboardRunOptions& opts,
                 continue;
             }
 
-            // 粘回来的那一段，或者去问模型。**数量在进来之前就核过**
-            //（见 post_plan）：少一段的话后面几场整体错位一场，而错位
-            // 出来的分镜表看着是合法的，没有任何报错。
-            const std::string raw = opts.pasted.empty()
-                                        ? client.complete(req, tok)
-                                        : opts.pasted.at(i);
-            std::vector<Shot> part = parse_and_note(
-                raw, assets,
-                SAYF("%1 · 第 %2 场",
-                     opts.episode_id.empty() ? SAY("整章") : opts.episode_id,
-                     std::to_string(scene.index)));
-            stages::stamp_scene(part, scene);
-            // 各场的 order 都从 0 起，合起来之前先排成全章的次序，
-            // 不然最后重编号那一步按 order 稳定排序会把几场交错在一起。
-            std::stable_sort(part.begin(), part.end(),
-                             [](const Shot& a, const Shot& b) {
-                                 return a.order < b.order;
-                             });
+            std::vector<Shot> part;
+            if (reuse != earlier.end()) {
+                // 上回拆好的：盖过场景的印、排过序，原样接上（order 下面重排）。
+                part = reuse->second;
+                ++result.reused_scenes;
+            } else {
+                // 粘回来的那一段，或者去问模型。**数量在进来之前就核过**
+                //（见 post_plan）：少一段的话后面几场整体错位一场，而错位
+                // 出来的分镜表看着是合法的，没有任何报错。
+                const std::string raw = opts.pasted.empty()
+                                            ? client.complete(req, tok)
+                                            : opts.pasted.at(i);
+                part = parse_and_note(
+                    raw, assets,
+                    SAYF("%1 · 第 %2 场",
+                         opts.episode_id.empty() ? SAY("整章") : opts.episode_id,
+                         std::to_string(scene.index)));
+                stages::stamp_scene(part, scene);
+                // 各场的 order 都从 0 起，合起来之前先排成全章的次序，
+                // 不然最后重编号那一步按 order 稳定排序会把几场交错在一起。
+                std::stable_sort(part.begin(), part.end(),
+                                 [](const Shot& a, const Shot& b) {
+                                     return a.order < b.order;
+                                 });
+                // **这一场一拆好就落进草稿**：后面哪一场断了、被闸门打回、被人停了，
+                // 这一场都不用再花一次模型。
+                if (keep_parts) save_part(opts.parts_file, parts_key_now, i, part);
+            }
             for (Shot& s : part) s.order = running_order++;
             const Shot& last = part.back();
             prev_tail = !text::strip_ws(last.visual_desc).empty()
@@ -186,6 +295,9 @@ StoryboardRunResult run_storyboard(const StoryboardRunOptions& opts,
         const std::string msg = SAYF(
             "分镜表不完整：%1\n\n换一个更强的模型，或者手工补齐这些字段后再跑。",
             joined);
+        // **草稿一起扔掉。** 这是几场合起来之后的章级判定：留着的话下回每一场都
+        // 接着用，拼出来还是这张缺东西的表，重拆一百遍都过不去。
+        if (keep_parts) drop_parts(opts.parts_file);
         // 代号给着，虽然这一条现在还不进 gates.jsonl（章级判定，见
         // `parse_and_note` 上那段）。不给的话将来接上时又要回来找一遍。
         throw stages::StoryboardError(msg, "coverage_gap");
@@ -198,6 +310,9 @@ StoryboardRunResult run_storyboard(const StoryboardRunOptions& opts,
     // rebalance_durations，只在按时长切的那条路上跑——那条路当天删了，
     // 这一道跟着没了。
     result.shots = std::move(shots);
+    // 整章拆完了，草稿没用了。写进 project.json 是调用方的事（它要在锁里重读再存）；
+    // 万一它没存成，大不了下回整章重拆——而留着的话，剧本没改就会一直"接着用"。
+    if (keep_parts) drop_parts(opts.parts_file);
     return result;
 }
 

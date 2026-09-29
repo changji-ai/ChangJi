@@ -26,13 +26,18 @@ namespace changji::http {
 
 /// 一个 Crow 请求里这道门要看的那几样。
 inline RequestFacts facts_of(const crow::request& req, const std::string& method) {
+    const char* token = req.url_params.get("token");
     return RequestFacts{method,
                         req.url,
                         req.get_header_value("Content-Type"),
                         req.get_header_value("Origin"),
                         req.get_header_value("Host"),
                         req.get_header_value("Sec-Fetch-Site"),
-                        req.get_header_value("Sec-Fetch-Mode")};
+                        req.get_header_value("Sec-Fetch-Mode"),
+                        req.get_header_value("Authorization"),
+                        req.get_header_value("Cookie"),
+                        token != nullptr ? std::string_view(token) : std::string_view(),
+                        req.get_header_value("X-Changji-Lan-Ticket")};
 }
 
 struct SameSiteGuard {
@@ -44,8 +49,35 @@ struct SameSiteGuard {
 
     void before_handle(crow::request& req, crow::response& res, context&) {
         const std::string method = crow::method_name(req.method);
+        const bool page = (req.method == crow::HTTPMethod::Get || req.method == crow::HTTPMethod::Head) &&
+                          !is_api_path(req.url);
+        // **网页登录**（对外监听时）：带着对的 `?token=` 打开界面那几页，种一个 cookie、
+        // 跳回不带口令的地址——口令不留在地址栏、历史记录、截图里。
+        if (!policy.loopback_bind && page) {
+            const char* t = req.url_params.get("token");
+            if (t != nullptr && token_matches(t, policy)) {
+                res.code = 303;
+                // 只跳站内：`//evil.example` 这种路径会被浏览器当成别的网站。
+                const bool local = !req.url.empty() && req.url[0] == '/' &&
+                                   (req.url.size() < 2 || (req.url[1] != '/' && req.url[1] != '\\'));
+                res.set_header("Location", local ? req.url : std::string("/"));
+                res.set_header("Set-Cookie", std::string(kUiCookie) + "=" + std::string(t) +
+                                                 "; Path=/; HttpOnly; SameSite=Strict; Max-Age=2592000");
+                res.set_header("Cache-Control", "no-store");
+                res.end();
+                return;
+            }
+        }
         const GuardVerdict v = judge_request(facts_of(req, method), policy);
         if (v.ok()) return;
+        if (v.refusal == Refusal::auth && page) {
+            res.code = 401;
+            res.set_header("Content-Type", "text/html; charset=utf-8");
+            res.set_header("Cache-Control", "no-store");
+            res.body = login_page();
+            res.end();
+            return;
+        }
         res.code = refusal_status(v);
         res.set_header("Content-Type", "application/json");
         res.body = nlohmann::json{{"detail", refusal_message(v)}}.dump(

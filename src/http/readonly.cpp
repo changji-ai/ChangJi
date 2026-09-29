@@ -14,6 +14,7 @@
 #include "models/hardware.hpp"
 #include "models/project.hpp"
 #include "stages/storyboard.hpp"
+#include "util/chapter_word.hpp"
 #include "util/fs_time.hpp"
 #include "util/paths.hpp"
 #include "util/say.hpp"
@@ -336,6 +337,10 @@ ApiResult get_shots(const std::string& path, const std::string& episode_id) {
 
         shots.push_back({
             {"shot_id", s.shot_id},
+            // 给人看、塞进输入框的那个镜号（`ep01_sh007` → `sh007`、拆出来的
+            // `sh003_b` 照旧）。**只在这儿算**：util::short_shot_id 是唯一那份，
+            // 网页那头原样用，不在 JS 里再写一遍正则（CLAUDE.md 第八条）。
+            {"short_id", util::short_shot_id(s.shot_id)},
             {"order", s.order},
             {"scene_id", s.scene_id},
             // 这一章用到哪几个场景，界面靠它算。缺了的话设定页的
@@ -440,7 +445,7 @@ ApiResult get_dirs(const std::string& path, const config::Settings& settings) {
         roots.push_back(dir_entry(ws, SAY("项目库")));
     }
     if (fs::is_directory(models, ec) && models != ws && models != home) {
-        roots.push_back(dir_entry(models, SAY("现在的模型目录")));
+        roots.push_back(dir_entry(models, SAY("当前模型目录")));
     }
     // **每一块盘也是一个起点。** 只有上面三条的话，它们全在系统盘上——从用户目录
     // 一级级往上翻能翻到 `C:\`，却翻不到 `D:\`，模型就只能放在最挤的那块盘上
@@ -459,8 +464,8 @@ ApiResult get_dirs(const std::string& path, const config::Settings& settings) {
         // 一个文件，两种要做的事不一样。
         throw ApiError(
             400, fs::exists(here, ec)
-                     ? SAYF("这不是一个目录：%1", paths::to_utf8(here))
-                     : SAYF("这个目录不在：%1", paths::to_utf8(here)));
+                     ? SAYF("该路径不是目录：%1", paths::to_utf8(here))
+                     : SAYF("目录不存在：%1", paths::to_utf8(here)));
     }
 
     json entries = json::array();
@@ -603,15 +608,15 @@ ApiResult get_assets(const std::string& path) {
         // 基础版出来的是参考图的翻版——settings.hpp 那段记着实见的那一镜。）
         {"reference_hint", refs_honored ? std::string() :
             SAY(
-            "参考图会传给出图模型，但当前这个是纯文生图的，它不会照着画——"
-            "画面靠的是下面那段拼出来的提示词。要让参考图真生效，"
-            // 项目页上那是**一行**（`line__k` 写着「模型」，后面四个名字
-            // 各是一个按钮），不是一节；而且要换的是四个里的哪一个也得说
-            // 出来——参考图归首帧那一组。只说"那一节"的人会在项目页上找
-            // 一个不存在的小标题。
-            "去项目页「模型」那一行点开首帧那一个，挑一档 Qwen-Image-Edit "
-            "2509 下下来（视觉塔会跟着一起下）。⚠️ 引擎是按**文件名**认的，"
-            "名字里带 edit 才算——官方那几份自带，改过名就认不出来。")},
+            "参考图会传给出图模型，但当前模型仅支持文生图，不会参照参考图生成，"
+            "画面完全取决于下方拼接的提示词。如需参考图生效，"
+            // 要换的是哪一组也得说出来——参考图归首帧那一组。项目页 2026-09-26
+            // 删了，下模型在「设置 ▸ 模型文件」，组名照那一页上写的（引擎给的
+            // `g.title`），人照着找得到那一行。
+            "请在「设置 ▸ 模型文件」中下载「首帧模型（图像编辑）」的 "
+            "Qwen-Image-Edit 2509 版本（视觉模块会一并下载）。"
+            "⚠️ 引擎按文件名识别，文件名中包含 edit 才能识别；"
+            "官方文件自带该字样，重命名后将无法识别。")},
         {"characters", characters},
         {"locations", locations},
         {"style", {

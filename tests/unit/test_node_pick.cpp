@@ -87,28 +87,28 @@ TEST_CASE("钉死某台 = 把别台关掉，走的是同一套代码") {
 TEST_CASE("派不出去时说清是哪一层拦的") {
     SUBCASE("一台都没登记") {
         const std::string why = why_no_node({}, Capability::Video);
-        CHECK(why.find("没有任何一台") != std::string::npos);
+        CHECK(why.find("未登记任何机器") != std::string::npos);
     }
     SUBCASE("连不上") {
         const std::vector<NodeState> nodes = {
             node("a", false, {Capability::Video}),
         };
         const std::string why = why_no_node(nodes, Capability::Video);
-        CHECK(why.find("连不上") != std::string::npos);
+        CHECK(why.find("无法连接") != std::string::npos);
     }
     SUBCASE("你自己关的") {
         const std::vector<NodeState> nodes = {
             node("a", true, {Capability::Video}, {Capability::Video}),
         };
         const std::string why = why_no_node(nodes, Capability::Video);
-        CHECK(why.find("关掉") != std::string::npos);
+        CHECK(why.find("关闭此步骤") != std::string::npos);
     }
     SUBCASE("它自己说干不了") {
         const std::vector<NodeState> nodes = {
             node("a", true, {Capability::Llm}),
         };
         const std::string why = why_no_node(nodes, Capability::Video);
-        CHECK(why.find("干不了") != std::string::npos);
+        CHECK(why.find("无法执行") != std::string::npos);
     }
     SUBCASE("三种都有就三种都说") {
         const std::vector<NodeState> nodes = {
@@ -117,9 +117,9 @@ TEST_CASE("派不出去时说清是哪一层拦的") {
             node("c", true, {Capability::Llm}),
         };
         const std::string why = why_no_node(nodes, Capability::Video);
-        CHECK(why.find("连不上") != std::string::npos);
-        CHECK(why.find("关掉") != std::string::npos);
-        CHECK(why.find("干不了") != std::string::npos);
+        CHECK(why.find("无法连接") != std::string::npos);
+        CHECK(why.find("关闭此步骤") != std::string::npos);
+        CHECK(why.find("无法执行") != std::string::npos);
     }
 }
 
@@ -213,15 +213,15 @@ TEST_CASE("派不出去那句话：一台的时候动词也得跟着变") {
         const std::vector<NodeState> nodes = {node("a", true, {Capability::Llm})};
         const std::string why = why_no_node(nodes, Capability::Video);
         CAPTURE(why);
-        CHECK(why.find("1 machine says it can’t do it") != std::string::npos);
-        CHECK(why.find("say they") == std::string::npos);
+        CHECK(why.find("1 machine reports it can’t do this") != std::string::npos);
+        CHECK(why.find("report they") == std::string::npos);
     }
     SUBCASE("两台自己说干不了：say they") {
         const std::vector<NodeState> nodes = {node("a", true, {Capability::Llm}),
                                               node("b", true, {Capability::Llm})};
         const std::string why = why_no_node(nodes, Capability::Video);
         CAPTURE(why);
-        CHECK(why.find("2 machines say they can’t do it") != std::string::npos);
+        CHECK(why.find("2 machines report they can’t do this") != std::string::npos);
     }
     SUBCASE("一台连不上：is，两台：are") {
         const std::vector<NodeState> one = {node("a", false, {Capability::Video})};
@@ -237,7 +237,7 @@ TEST_CASE("派不出去那句话：一台的时候动词也得跟着变") {
             node("a", true, {Capability::Video}, {Capability::Video})};
         const std::string why = why_no_node(nodes, Capability::Video);
         CAPTURE(why);
-        CHECK(why.find("1 machine is turned off") != std::string::npos);
-        CHECK(why.find("machines are turned off") == std::string::npos);
+        CHECK(why.find("1 machine has this step turned off") != std::string::npos);
+        CHECK(why.find("machines have this step turned off") == std::string::npos);
     }
 }

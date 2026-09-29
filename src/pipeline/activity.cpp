@@ -1,5 +1,7 @@
 #include "pipeline/activity.hpp"
 
+#include <exception>
+
 #include "pipeline/jobs.hpp"
 #include "pipeline/task_board.hpp"
 #include "util/say.hpp"
@@ -38,6 +40,8 @@ struct Activity::Impl {
     std::optional<Task> owned;
     /// 真正操作的那一件。指向 `owned`，或者别人那件。
     Task* task = nullptr;
+    /// 开这件活时手上已经有几个异常在飞（见 ~Activity）。
+    int unwinding_at_start = std::uncaught_exceptions();
 
     Impl(std::string kind, std::string project, std::string episode_id,
          std::string message, std::string slot) {
@@ -63,6 +67,15 @@ Activity::Activity(Task& existing) : impl_(std::make_unique<Impl>(existing)) {
 }
 
 Activity::~Activity() {
+    // **抛着异常离开的，记成没做成。** Task 析构时没有报错、令牌也没立，就记「做完」
+    // ——而出大纲那种一抛 502 就走的，账上原来是绿的「做完了」：拿假模型回一句不是
+    // JSON 的话试出来的，故事一章没出，任务页、对话里场记读到的都是「正在出大纲 · 做完」。
+    // 具体哪儿错了在抛出去的那个异常里（作业那一层照实报），这儿只把这一行标红。
+    // 自己开的才管：接管别人那件的，账由开的那头结。
+    if (impl_->owned && std::uncaught_exceptions() > impl_->unwinding_at_start &&
+        !impl_->task->token().cancelled()) {
+        impl_->task->fail_if_clean(SAY("做到一半出错了，没做完"));
+    }
     // **按值找，不是直接 pop_back。** 正常用法下这就是最后一个，但万一
     // 有人把 Activity 放在成员里、析构顺序不是倒着来，pop_back 会把别人
     // 的那件活从栈上抹掉，而症状是"排队中"写到了另一件活头上。

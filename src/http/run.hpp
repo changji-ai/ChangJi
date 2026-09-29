@@ -53,6 +53,10 @@ struct RunDeps {
     /// 链 httplib，进不了测试目标。**空 = 这台上不了网**，工具照实说，不假装
     /// 查过。
     llm::HttpGet web_get;
+    /// 场记上网那三个工具（读网页、搜、热榜）用的：**不自己跟跳转**，由工具一跳一跳
+    /// 地跟、每跳重判是不是指着内网（stages::web_tools）。空就退回 `web_get`（用例里
+    /// 塞的那个不跳转）。装技能照旧走 `web_get`——GitHub 的 raw 地址要跟跳转。
+    llm::HttpGet web_page_get;
     /// 发 POST（带回响应头）。远程 MCP 扩展用它（2026-09-24）；同 `web_get`，
     /// 真的那个链 httplib，进不了测试目标。**空 = 发不了**，那几个扩展照实说连不上。
     llm::HttpPost http_post;
@@ -146,6 +150,20 @@ ApiResult post_run_stop(const nlohmann::json& body);
 /// 对话那头守着自己派的活时要问它：排着的那件不在任何账上（还没开跑），
 /// 只看账的话守望六秒就报「跑完了」，而片子一个钟头后才开始出。
 bool run_queued_for(const std::string& project, const std::string& lane);
+
+/// **不管哪部片子、哪一道，有没有排着没轮到的出片。** 循环「机器空着时」那一种问它
+///（外层 agent/recur.hpp）：排着的不在任何账上，只看账会在两件之间把机器当成空的。
+bool run_queued_any();
+
+/// 这部片子的这一章此刻正在出片的话，抛 409。
+///
+/// **整张分镜表换掉的那几条路（拆分镜、重写剧本并重拆、批量补分镜）动手前问它。**
+/// 出片那一轮手里握着开跑时那张表，每次存盘把它写回去（`pipeline/shot_merge.hpp`）
+/// ——原来这期间重拆的新表会被整张冲回旧的：旧镜头回来、新镜头少了、新文字配
+/// 上旧片子，而且不留底、不问人（出片算 `Writer::derived`）。出片那头也防着
+/// （表被换掉就停下这一章），这儿是在花几分钟调大模型之前先说清。
+void refuse_replan_while_rendering(const std::string& project,
+                                   const std::string& episode_id);
 
 /// GET /api/outputs —— 列出已经出好的成片。审片时直接在界面里播。
 ApiResult get_outputs(const std::string& path);

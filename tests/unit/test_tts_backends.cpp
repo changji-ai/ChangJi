@@ -376,12 +376,12 @@ TEST_CASE("进程内配音：缺模型路径时分别点名") {
     std::string why;
     CHECK_FALSE(stages::local_tts_backend("", "b.gguf", false, std::nullopt, why)
                     .has_value());
-    CHECK(why.find("[models].tts 没填") != std::string::npos);
+    CHECK(why.find("[models].tts 未填写") != std::string::npos);
 
     why.clear();
     CHECK_FALSE(stages::local_tts_backend("a.gguf", "", false, std::nullopt, why)
                     .has_value());
-    CHECK(why.find("[models].tts_decoder 没填") != std::string::npos);
+    CHECK(why.find("[models].tts_decoder 未填写") != std::string::npos);
 }
 
 TEST_CASE("tts.backend 认 local，另外两个取值一个字没变") {

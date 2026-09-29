@@ -65,6 +65,10 @@ std::string build_understand_prompt(const Story& story, StyleLine style_line) {
     out += style_line == StyleLine::ANIME ? prompt::story_understand::kHintAnime
                                           : prompt::story_understand::kHintRealistic;
     out += prompt::story_understand::kSeg1;
+    // 已有的人物、地方名单（大纲那条路上有），让它照名单上的名字写；
+    // 没名单（粘贴导入）就一个字不加。理由见 story_analyze.cpp 的 render_known_names。
+    out += render_known_names(story);
+    out += prompt::story_understand::kChaptersHead;
     out += render_chapters_for_analysis(story);
     out += prompt::story_understand::kTail;
     return out;

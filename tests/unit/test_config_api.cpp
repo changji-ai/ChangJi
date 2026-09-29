@@ -185,7 +185,7 @@ TEST_CASE("一项都没给要报错") {
                                       fake_doctor());
     });
     CHECK(r.status == 400);
-    CHECK(r.body.at("detail") == "没有要改的项");
+    CHECK(r.body.at("detail") == "没有需要修改的项");
 
     SUBCASE("全填 null 也算没给") {
         // 对应 pydantic 的 exclude_none=True
@@ -212,7 +212,7 @@ TEST_CASE("配音后端的两条约束") {
     // 而那时候前面几十分钟的渲染已经跑完了。
     const auto r = try_tts(json{{"tts_backend", "http"}});
     CHECK(r.status == 400);
-    CHECK(r.body.at("detail") == "配音后端选 http 就必须填地址");
+    CHECK(r.body.at("detail") == "配音方式为 http 时必须填写服务地址");
 
     CHECK(try_tts(json{{"tts_backend", "http"},
                        {"tts_base_url", "http://tts:9000"}}).status == 200);
@@ -311,14 +311,14 @@ TEST_CASE("正在跑的时候不让换机器") {
             json{{"patch", {{"llm_model", "x"}}}}, fake_doctor());
     });
     CHECK(r.status == 409);
-    CHECK(r.body.at("detail") == "正在跑，这时候换机器会把这一章跑坏");
+    CHECK(r.body.at("detail") == "正在出片，此时更换机器会导致本章出错");
 
     SUBCASE("改参数也不让") {
         const auto r2 = http::guard([] {
             return http::post_settings(json{{"fps", 30}});
         });
         CHECK(r2.status == 409);
-        CHECK(r2.body.at("detail") == "正在跑，改参数会让这一章前后不一致");
+        CHECK(r2.body.at("detail") == "正在出片，此时修改参数会导致本章前后不一致");
     }
 
     release = true;
@@ -423,6 +423,33 @@ TEST_CASE("画质档位真的生效，这是有意和 Python 不一样") {
         const auto back = config::runtime().profile();
         CHECK(back.tiers.at(models::Tier::DRAFT).width == bit->second.width);
     }
+}
+
+TEST_CASE("档位：被拒的请求一项都不生效，填 0 是回到按显存推") {
+    // 原来档位那几项在循环里当场 set_tier_override 进进程，校验在后头：
+    // -64（-64 % 32 == 0）回 400，引擎却已经按 -64 出图；同一请求里别的项
+    // 类型不对回 422，档位照样留在进程里；填 0 被原样抄进覆盖，按 0 出图。
+    reset_runtime();
+    const auto draft_w = [] {
+        return config::runtime().profile().tiers.at(models::Tier::DRAFT).width;
+    };
+    const int auto_w = draft_w();
+    REQUIRE(auto_w > 0);
+
+    const auto neg = http::guard([] { return http::post_settings(json{{"final_width", -64}}); });
+    CHECK(neg.status == 400);
+    CHECK(config::runtime().profile().tiers.at(models::Tier::FINAL).width > 0);
+
+    const auto mixed = http::guard([] {
+        return http::post_settings(json{{"draft_width", 640}, {"crf", "x"}});
+    });
+    CHECK(mixed.status >= 400);
+    CHECK(draft_w() == auto_w);
+
+    REQUIRE(http::guard([] { return http::post_settings(json{{"draft_width", 640}}); }).status == 200);
+    CHECK(draft_w() == 640);
+    REQUIRE(http::guard([] { return http::post_settings(json{{"draft_width", 0}}); }).status == 200);
+    CHECK(draft_w() == auto_w);
 }
 
 TEST_CASE("档位要写回配置文件——设完重启不能丢") {

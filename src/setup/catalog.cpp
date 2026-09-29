@@ -63,23 +63,23 @@ double llm_vram(double model_gb) {
 /// 而且互相打架。
 std::string quant_note(const std::string& q) {
     if (q == "bf16" || q == "fp16" || q == "BF16" || q == "F16") {
-        return "原始精度，不损失任何东西。体积也是最大的。";
+        return "原始精度，无任何损失，体积最大。";
     }
-    if (q == "fp8") return "半精度再对折，画质接近原始精度。";
+    if (q == "fp8") return "8 位浮点，画质接近原始精度。";
     if (q == "int8_convrot") {
-        return "八比特整数（ComfyUI 那套 int8_tensorwise + convrot）。体积和 "
-               "Q8_0 一档，画质接近原始精度。";
+        return "8 位整数（ComfyUI 的 int8_tensorwise + convrot 格式），"
+               "体积与 Q8_0 相当，画质接近原始精度。";
     }
     if (q == "fp8_scaled") {
-        return "八比特浮点带缩放（ComfyUI 那套）。体积和 Q8_0 一档。";
+        return "带缩放的 8 位浮点（ComfyUI 格式），体积与 Q8_0 相当。";
     }
-    if (q == "Q8_0") return "最接近原始精度的一档量化，几乎看不出差别。";
-    if (q == "Q6_K") return "画质和体积最平衡的一档，多数机器挑它。";
-    if (q.rfind("Q5", 0) == 0) return "比 Q6_K 再小一点，差别要仔细看才看得出。";
-    if (q == "Q4_K_M") return "常见的折中档。细节开始少，构图和动作还在。";
-    if (q.rfind("Q4", 0) == 0) return "和 Q4_K_M 同一档，体积略有出入。";
-    if (q.rfind("Q3", 0) == 0) return "明显退化，小卡兜底用。";
-    if (q.rfind("Q2", 0) == 0) return "退化很重，只建议拿来验流程。";
+    if (q == "Q8_0") return "最接近原始精度的量化版本，差异几乎无法察觉。";
+    if (q == "Q6_K") return "画质与体积最均衡的版本，适合大多数设备。";
+    if (q.rfind("Q5", 0) == 0) return "比 Q6_K 略小，差异需仔细对比才能察觉。";
+    if (q == "Q4_K_M") return "常用的折中版本，细节有所减少，构图和动作基本保持。";
+    if (q.rfind("Q4", 0) == 0) return "与 Q4_K_M 同级，体积略有差异。";
+    if (q.rfind("Q3", 0) == 0) return "画质明显下降，仅建议在显存较小时使用。";
+    if (q.rfind("Q2", 0) == 0) return "画质严重下降，仅建议用于流程测试。";
     return "";
 }
 
@@ -150,17 +150,19 @@ int llm_rank(const std::string& size, const std::string& quant) {
 
 std::string llm_family_note(const std::string& family) {
     if (family == "Qwen3-32B") {
-        return "本机能跑的里写得最好的一档。代价是它和出图模型抢显存：40 GB 以下"
-               "的卡每次写正文都要把出图那套整个卸掉再装回来。";
+        return "本机可运行的版本中写作质量最高。它与出图模型共用显存："
+               "显存低于 40 GB 时，每次写正文都需要先卸载出图模型，"
+               "完成后再重新加载。";
     }
     if (family == "Qwen3-14B") {
-        return "5090 上实测的一档：Q4_K_M 载进显存 15.4 GB；出片时被驱逐，"
-               "重载多花 4.6 秒。写正文时守卫打回得比云端多，改稿那一轮会把大半救回来。";
+        return "已在 RTX 5090 上实测：Q4_K_M 占用显存 15.4 GB；出片时会被卸载，"
+               "重新加载约需 4.6 秒。写正文时被质量检查退回的次数多于云端模型，"
+               "多数可在修改稿中修正。";
     }
     if (family == "Qwen3-8B") {
-        return "小卡上的折中。正文会短一些，人物关系容易写扁。";
+        return "适合显存较小的设备。正文篇幅偏短，人物关系刻画较弱。";
     }
-    return "什么卡都跑得动。只建议拿来验流程，写不出能用的正文。";
+    return "对显卡几乎没有要求。仅建议用于流程测试，无法写出可用的正文。";
 }
 
 // ---------------------------------------------------------------------------
@@ -184,9 +186,9 @@ constexpr const char* kH3LoraRepo = "larryvrh/MiniMax-H3-Turbo-Lora";
 constexpr const char* kH3FullQuantRepo = "Abiray/MiniMax-H3-GGUF";
 
 constexpr const char* kH3FamilyNote =
-    "画面和立体声一起生成，动作真实感这一档里最好，用户 2026-09-10 选定的"
-    "就是它。两处代价：整套下载量最小也要 31 GB；授权禁止美国、欧盟、英国、"
-    "韩国的创作者分发用它生成的视频。";
+    "画面与立体声同时生成，动作真实感在同级模型中最佳。注意："
+    "无论选择哪个版本，整套文件都至少需要下载 31 GB；"
+    "许可协议禁止美国、欧盟、英国、韩国的创作者分发用它生成的视频。";
 
 // **「完整」和「精简」不是高配低配，是"能不能拿去继续训练"。**
 //
@@ -201,13 +203,16 @@ constexpr const char* kH3FamilyNote =
 // 对得上：完整 bf16 66.28 GB、精简 bf16 40.23 GB，比值 0.607；
 // 20B/33B = 0.606。
 constexpr const char* kH3FullNote =
-    "⚠️ 出片不需要这一支。「完整」比「精简」多出来的那 13B 参数在 AdaLN "
-    "分支上，官方说明里写着只做推理的部署不需要载入它们——出片挑它只是多占"
-    "二十多 GB。要拿这个模型继续训练（微调、练 LoRA）才用得上完整权重。";
+    "⚠️ 出片不需要此版本。「完整」比「精简」"
+    "多出的 13B 参数位于 AdaLN 分支，"
+    "官方说明指出仅用于推理的部署无需加载这部分参数，"
+    "选择此版本只会多占用二十多 GB。仅在继续训练该模型（微调、"
+    "训练 LoRA）时才需要完整权重。";
 
 constexpr const char* kH3PrunedNote =
-    "出片就挑这一支：官方的只做推理版，33B 里去掉 13B 只在微调时"
-    "才用到的 AdaLN 分支，剩 20B，体积小四成，出片该有的都在。";
+    "出片推荐此版本：官方的仅推理版本，"
+    "从 33B 中移除了仅在微调时使用的 13B AdaLN 分支，剩余 20B，"
+    "体积减少约四成，出片所需的功能完整。";
 
 struct H3Spec {
     const char* id;
@@ -301,12 +306,14 @@ constexpr H3Spec kH3[] = {
 // ---------------------------------------------------------------------------
 
 constexpr const char* kQwenImageFamilyNote =
-    "首帧是跨镜头一致性的锚点，也是喂给出片那一步的起始图——糊了后面每一镜"
-    "都糊，而且全程不报错。所以这一组值得往高了挑：5090 上实测 Q6_K 权重"
-    "常驻显存是 35 秒一张，同一台机器上放内存慢五倍。"
-    "这一族是**图像编辑**模型：角色三视图和空景图会当参考图一起喂进去，"
-    "同一个人在几十镜里才是同一张脸。没有任何参考图的镜头会退化成文生图，"
-    "那时候它出的东西不能看——所以定妆和参考图要先铺开。";
+    "首帧是跨镜头一致性的基准，也是出片的起始画面："
+    "首帧模糊会导致后续每一镜都模糊，且不会报错。"
+    "因此建议选择较高的版本：在 RTX 5090 上实测，"
+    "Q6_K 权重常驻显存时每张约 35 秒，放在内存中则慢约五倍。"
+    "此系列为图像编辑模型：角色三视图和空景图会作为参考图一同输入，"
+    "以保证同一角色在各镜头中外貌一致。"
+    "没有任何参考图的镜头会退化为文生图，效果无法使用，"
+    "因此需要先生成定妆照和参考图。";
 
 /// 首帧那一族的仓库。**2509 版**：多参考图是它加的，而这套流水线一镜要喂
 /// 好几张（在场的每个角色一张三视图 + 这个场景的空景图，见
@@ -372,12 +379,12 @@ constexpr ImageSpec kImageBase[] = {
 };
 
 constexpr const char* kQwenImageBaseFamilyNote =
-    "角色三视图和空景图是从一句话画出来的，没有任何参考图可编辑——那是"
-    "**文生图**，要基础权重。首帧那一族是图像编辑模型，拿它做这一步会"
-    "落在它自己说明里写的那条退化路径上。"
-    "这一族和首帧那一族共用 VAE 和文本编码器（同一个 Qwen2.5-VL），"
-    "所以只多下一份扩散权重。"
-    "留空不下也能跑：那时定妆和空景仍旧用首帧那一份，也就是老行为。";
+    "角色三视图和空景图由文字描述直接生成，没有可供编辑的参考图，"
+    "属于文生图，需要基础权重。首帧系列为图像编辑模型，"
+    "用它执行此步骤会出现其说明中所述的退化情况。"
+    "此系列与首帧系列共用 VAE 和文本编码器（同为 Qwen2.5-VL），"
+    "只需额外下载一份扩散权重。不下载也可以运行："
+    "定妆和空景将沿用首帧模型。";
 
 /// Qwen-Image 的文本编码器（Qwen2.5-VL-7B）按扩散模型那一档配。
 ///
@@ -411,8 +418,8 @@ FileSpec image_encoder(double diff_gb) {
 
 constexpr const char* kTtsRepo = "ggml-org/Qwen3-TTS-12Hz-1.7B-Base-GGUF";
 constexpr const char* kTtsFamilyNote =
-    "进程内跑，不用另起服务。这一组是四组里最小的，而且几乎不占显存"
-    "——1.7B 的模型，什么卡都放得下。";
+    "在引擎进程内运行，无需另外启动服务。此组是四组中体积最小的，"
+    "几乎不占用显存（1.7B 模型，任何显卡均可容纳）。";
 
 struct TtsSpec {
     const char* quant;
@@ -444,7 +451,7 @@ std::vector<Group> build() {
         Group g;
         g.key = "llm";
         g.title = "编剧模型";
-        g.purpose = "写剧本大纲、拆分镜、提角色。整条流水线的第一步。";
+        g.purpose = "用于编写剧本大纲、拆分分镜和提取角色，是整条流水线的第一步。";
         g.required = true;
         g.owned_roles = {"llm"};
 
@@ -469,7 +476,7 @@ std::vector<Group> build() {
             o.min_vram_gb = llm_vram(gb(spec.bytes));
             o.rank = llm_rank(size, quant);
             o.files.push_back({"llm/" + file, "Qwen/Qwen3-" + size + "-GGUF", file,
-                               spec.bytes, "llm", "编剧模型本体"});
+                               spec.bytes, "llm", "编剧模型权重"});
             // 下了模型就该用进程内那条路，否则下完还得自己去模型窗里切一下，
             // 而不切的表现是「写正文」按钮报连不上 127.0.0.1:11434。
             o.settings.push_back({"llm.backend", "local"});
@@ -486,7 +493,7 @@ std::vector<Group> build() {
         {
             Option o;
             o.id = "zhipu-free";
-            o.family = "智谱 GLM（云端 · 免费档）";
+            o.family = "智谱 GLM（云端 · 免费版）";
             o.label = "智谱 · glm-4.7-flash（免费）";
             // **要紧的话写在 note 里，不是 family_note。** 界面上只显示
             // 选中那一档的 note（ModelPicker.vue 里那一句「家族那段话不
@@ -501,9 +508,9 @@ std::vector<Group> build() {
             // 现在挂在模型下拉每一项后面（llm::known_models 那本小抄），
             // 挑的时候一眼看得到，不用记。
             o.note =
-                "不下权重，剧本交给云端。国内直连，不用自备网络。"
-                "好处是整张卡全留给出图出片；代价是本子要发到云上，"
-                "断网就不能编剧。密钥去 bigmodel.cn 控制台领。";
+                "无需下载权重，剧本由云端生成，国内可直接访问。"
+                "优点是显卡可全部用于出图和出片；缺点是剧本内容需上传至云端，"
+                "断网时无法编剧。密钥可在 bigmodel.cn 控制台申请。";
             o.family_note = o.note;
             o.min_vram_gb = 0.0;
             o.rank = 50;
@@ -515,9 +522,10 @@ std::vector<Group> build() {
         }
 
         g.options.push_back(none_option(
-            "不下载 · 用别的外接服务",
-            "剧本交给别的机器或者云端（Ollama、vLLM、DeepSeek 之类）。"
-            "选它之后在下面填地址、挑模型、填密钥。",
+            "不下载 · 使用其他外部服务",
+            "剧本由其他机器或云端服务生成（如 Ollama、vLLM、DeepSeek）。"
+            "请在「设置 ▸ 大模型」中添加服务并填写地址和密钥，"
+            "再通过该服务的「选择模型…」选择模型。",
             {{"llm.backend", "remote"}}));
 
         gs.push_back(std::move(g));
@@ -528,7 +536,7 @@ std::vector<Group> build() {
         Group g;
         g.key = "video";
         g.title = "出片模型（图生视频）";
-        g.purpose = "把每一镜的首帧变成一段视频。这一组最大，也最花时间。";
+        g.purpose = "将每一镜的首帧生成为视频。此组体积最大，耗时也最长。";
         g.required = true;
         // **八个键一起管。** 换家族时没用到的必须清空，尤其是 video_lora——
         // 它的默认值指着 H3 的 Turbo LoRA，留着的话会被挂到 Wan 上。
@@ -558,7 +566,7 @@ std::vector<Group> build() {
             const std::string file =
                 slash == std::string::npos ? path : path.substr(slash + 1);
             o.files.push_back({file, spec.repo, path, spec.bytes, "video",
-                               "扩散模型。画面和立体声一起生成"});
+                               "扩散模型，画面与立体声同时生成"});
             // ---- 编码器：**这一项一个人就占四成多，所以给选** ----
             //
             // 43.6 GB 那一档里，编码器 18.2 GB、扩散模型 18.8 GB——两边
@@ -572,13 +580,13 @@ std::vector<Group> build() {
                 "qwen3vl_32b_minimax_h3-Q4_K_M.gguf", kH3GgufRepo,
                 "qwen3vl_32b_minimax_h3-Q4_K_M.gguf", 18218065024ULL,
                 "video_llm",
-                "文本编码器 Q4_K_M（裁过的 Qwen3-VL-32B）。每镜只跑一次，"
+                "文本编码器 Q4_K_M（精简版 Qwen3-VL-32B），每镜只运行一次，"
                 "权重常驻内存"};
             const FileSpec enc_small{
                 "qwen3vl_32b_minimax_h3-Q2_K_M.gguf", kH3GgufRepo,
                 "qwen3vl_32b_minimax_h3-Q2_K_M.gguf", 13102161024ULL,
                 "video_llm",
-                "文本编码器 Q2_K_M。比 Q4_K_M 省五个 G，读提示词的细腻度差一档"};
+                "文本编码器 Q2_K_M，比 Q4_K_M 节省约 5 GB，对提示词的理解精度稍低"};
             o.files.push_back(big ? enc_big : enc_small);
             o.alts.push_back({"video_llm", "文本编码器",
                               big ? std::vector<FileSpec>{enc_big, enc_small}
@@ -596,19 +604,20 @@ std::vector<Group> build() {
                 "minimax_h3_video_vae_int8_convrot.safetensors", kH3ComfyRepo,
                 "vae/minimax_h3_video_vae_int8_convrot.safetensors",
                 2811065184ULL, "video_vae",
-                "视频 VAE（int8_convrot）。省两个多 G，解码出来的画面略糙"};
+                "视频 VAE（int8_convrot），节省 2 GB 以上，解码画面略显粗糙"};
             o.files.push_back(vae_fp16);
             o.alts.push_back({"video_vae", "视频 VAE", {vae_fp16, vae_int8}});
             o.files.push_back({"minimax_h3_audio_vae_fp32.safetensors",
                                kH3ComfyRepo,
                                "vae/minimax_h3_audio_vae_fp32.safetensors",
                                605254808ULL, "video_audio_vae",
-                               "音频 VAE。不下这份，出来的电影是没有音轨的"});
+                               "音频 VAE，缺少此文件时生成的影片没有音轨"});
             o.files.push_back(
                 {"loras/minimax_h3_turbo_v4_step600_ema.safetensors", kH3LoraRepo,
                  "minimax_h3_turbo_v4_step600_ema.safetensors",
                  779849816ULL, "video_lora",
-                 "Turbo 蒸馏。采样从 28 步压到 6 步，实测一镜 242 秒降到 124 秒"});
+                 "Turbo 蒸馏：采样步数从 28 步降至 6 步，"
+                 "实测单镜耗时从 242 秒降至 124 秒"});
 
             // H3 的四个旋钮和 Wan 完全不同，**填错了四处都不报错**：
             // 编码器走 video_llm 不是 video_text_encoder（上面已经这么填了）、
@@ -640,8 +649,8 @@ std::vector<Group> build() {
         }
 
         g.options.push_back(none_option(
-            "不下载 · 之后再说",
-            "跳过这一组的话出不了片，只能走到分镜为止。"));
+            "暂不下载",
+            "跳过此组将无法出片，流程只能进行到分镜。"));
 
         gs.push_back(std::move(g));
     }
@@ -652,9 +661,10 @@ std::vector<Group> build() {
         g.key = "image";
         g.title = "首帧模型（图像编辑）";
         g.purpose =
-            "每一镜先出一张首帧，再由它生成视频。首帧是跨镜头一致性的锚点，"
-            "糊了后面每一镜都糊。这一族收参考图：在场角色的三视图和这个场景"
-            "的空景图一起喂进去，脸和地方才跨镜头对得上。";
+            "每一镜先生成一张首帧，再由首帧生成视频。"
+            "首帧是跨镜头一致性的基准，首帧模糊会导致后续每一镜都模糊。"
+            "此系列支持参考图：出场角色的三视图和场景的空景图会一同输入，"
+            "使人物和场景在各镜头中保持一致。";
         g.required = true;
         g.owned_roles = {"image", "image_vae", "image_text_encoder",
                          "image_text_encoder_vision"};
@@ -663,8 +673,8 @@ std::vector<Group> build() {
             "qwen_image_vae.safetensors", "Comfy-Org/Qwen-Image_ComfyUI",
             "split_files/vae/qwen_image_vae.safetensors",
             253806246ULL, "image_vae",
-            "VAE。不能复用视频那份——Wan 的 VAE 和 Qwen-Image 的不是一回事，"
-            "喂错了不报错，只是出一张和提示词没关系的图"};
+            "VAE，不能与视频模型共用：Wan 与 Qwen-Image 的 VAE 不同，"
+            "误用时不会报错，但生成的图像与提示词无关"};
 
         /// 文本编码器的视觉塔。
         ///
@@ -681,8 +691,8 @@ std::vector<Group> build() {
             "QuantStack/Qwen-Image-Edit-GGUF",
             "mmproj/Qwen2.5-VL-7B-Instruct-mmproj-BF16.gguf",
             1354163040ULL, "image_text_encoder_vision",
-            "文本编码器的视觉塔（mmproj）。没有它，参考图只有一半进得去，"
-            "而且不报错"};
+            "文本编码器的视觉模块（mmproj），缺少时参考图只能部分生效，"
+            "且不会报错"};
 
         for (const auto& spec : kImage) {
             Option o;
@@ -707,8 +717,8 @@ std::vector<Group> build() {
         }
 
         g.options.push_back(none_option(
-            "不下载 · 之后再说",
-            "跳过这一组的话出不了首帧，出片那一步也就没有起始图。"));
+            "暂不下载",
+            "跳过此组将无法生成首帧，出片也将缺少起始画面。"));
 
         gs.push_back(std::move(g));
     }
@@ -724,8 +734,8 @@ std::vector<Group> build() {
         g.key = "image_base";
         g.title = "定妆和空景模型（文生图）";
         g.purpose =
-            "角色三视图和空景图从一句话画出来。它们是首帧那一步的参考图，"
-            "脸和地方跨镜头对不对得上，全看这一步。";
+            "根据文字描述生成角色三视图和空景图。它们是生成首帧时的参考图，"
+            "决定人物和场景能否在各镜头中保持一致。";
         g.required = false;
         g.owned_roles = {"image_base"};
 
@@ -747,9 +757,10 @@ std::vector<Group> build() {
         }
 
         g.options.push_back(none_option(
-            "不下载 · 用首帧那一份顶着",
-            "定妆和空景会拿图像编辑模型做文生图——能出图，但那一族的说明"
-            "自己写着这条路出来的东西不能看。省一份权重，代价在画质上。"));
+            "不下载 · 使用首帧模型代替",
+            "定妆和空景将使用图像编辑模型进行文生图。可以出图，"
+            "但按照该系列的说明，这种方式的效果无法使用。可节省一份权重，"
+            "但会牺牲画质。"));
 
         gs.push_back(std::move(g));
     }
@@ -759,7 +770,7 @@ std::vector<Group> build() {
         Group g;
         g.key = "tts";
         g.title = "配音模型";
-        g.purpose = "把台词念出来。装配成片时按台词时长对齐镜头。";
+        g.purpose = "为台词生成语音。装配成片时按台词时长对齐镜头。";
         // **非必需**：没有它整集是静音的，但剧本、分镜、画面这条路照样走得通。
         // 卡在这儿不让人进首页，等于因为一个 4 GB 的模型把整个程序锁住。
         g.required = false;
@@ -776,17 +787,19 @@ std::vector<Group> build() {
             o.min_vram_gb = llm_vram(gb(spec.backbone_bytes));
             o.rank = spec.rank;
             o.files.push_back({spec.backbone, kTtsRepo, spec.backbone,
-                               spec.backbone_bytes, "tts", "骨干（talker）"});
+                               spec.backbone_bytes, "tts", "主干模型（talker）"});
             o.files.push_back({spec.mmproj, kTtsRepo, spec.mmproj,
                                spec.mmproj_bytes, "tts_decoder",
-                               "解码器，把码本还原成波形"});
+                               "解码器，将码本还原为波形"});
             o.settings.push_back({"tts.backend", "local"});
             g.options.push_back(std::move(o));
         }
 
         g.options.push_back(none_option(
-            "不下载 · 整章先没有人声",
-            "剧本、分镜、画面照常出，只是没有配音。之后随时可以回到设置页补下。"));
+            "不下载 · 暂不配音",
+            // 补下的地方指到那一类（2026-09-28 起设置分九类，下模型在「模型文件」里）
+            "剧本、分镜和画面正常生成，但没有配音。"
+            "可随时在「设置 ▸ 模型文件」中下载。"));
 
         gs.push_back(std::move(g));
     }

@@ -9,7 +9,7 @@
 # ⚠️ **但它只抓得到"真求过值"的那些。** 一条只在窄窗那一支里求值的表达式，
 # 在宽窗上一辈子不响；一格没开过，它里头的绑定一次都不会跑。所以光跑一趟
 # 默认状态等于没跑——这个脚本的全部意义就是**把每一档都摆出来一次**：
-# 五格 × 明暗 × 宽窄、两格摞着、最大化、拉出去、设置那四类、收起侧栏、关窗。
+# 五格 × 明暗 × 宽窄、两格摞着、最大化、拉出去、设置的每一类、收起侧栏、关窗。
 #
 # 用法（第二个参数是给它当 HOME 的目录，里头要有配好的项目库）：
 #
@@ -103,7 +103,7 @@ run 最大化 CHANGJI_DESKTOP_SHOT_MS=7000 CHANGJI_DESKTOP_SHOT_OPEN=shots CHANG
 run 拉出去 CHANGJI_DESKTOP_SHOT_MS=7000 CHANGJI_DESKTOP_SHOT_OPEN=shots CHANGJI_DESKTOP_TAP=新窗口 CHANGJI_DESKTOP_TAP_MS=4500 CHANGJI_DESKTOP_SHOT_WIN=2
 run 设置   CHANGJI_DESKTOP_SHOT_MS=6500 CHANGJI_DESKTOP_TAP=齿轮 CHANGJI_DESKTOP_TAP_MS=3800
 run 设置暗 CHANGJI_DESKTOP_SHOT_MS=6500 CHANGJI_DESKTOP_TAP=齿轮 CHANGJI_DESKTOP_TAP_MS=3800 CHANGJI_DESKTOP_SCHEME=dark
-run 设置每类 CHANGJI_DESKTOP_SHOT_MS=15500 CHANGJI_DESKTOP_TAP=齿轮,设置类·film,设置类·gate,设置类·tts,设置类·look,设置类·box,设置类·gguf,设置类·peer,设置类·llm,设置类·mem CHANGJI_DESKTOP_TAP_MS=3500
+run 设置每类 CHANGJI_DESKTOP_SHOT_MS=15500 CHANGJI_DESKTOP_TAP=齿轮,设置类·film,设置类·box,设置类·gguf,设置类·peer,设置类·llm,设置类·mem,设置类·skills,设置类·mcp CHANGJI_DESKTOP_TAP_MS=3500
 # **收了要再打开**：这一下是落盘的，不扳回去下一趟就从"收着"开始（见上面）。
 run 收侧栏 CHANGJI_DESKTOP_SHOT_MS=7000 CHANGJI_DESKTOP_TAP=收侧栏,开侧栏 CHANGJI_DESKTOP_TAP_MS=3800
 run 上下文条 CHANGJI_DESKTOP_SHOT_MS=6500 CHANGJI_DESKTOP_TAP=上下文条 CHANGJI_DESKTOP_TAP_MS=3800
@@ -147,11 +147,11 @@ run 我这段底下 CHANGJI_DESKTOP_SHOT_MS=8000 CHANGJI_DESKTOP_TAP='~复制我
 # 那条的唯一一次求值（别的档里那个框都是空的）。
 run 写Markdown CHANGJI_DESKTOP_SHOT_MS=11000 CHANGJI_DESKTOP_SAY='# 第三章要改的\n\n- 第 5 场那段对白**删掉两句**\n- 把 `shots_read` 那一步跳过\n\n> 钩子在第 2 场，别动它\n' CHANGJI_DESKTOP_SAY_MS=5000
 
-# 局域网感知：设置里那个开关 + 输入框底下那盏灯。
+# 局域网发现：设置 ▸ 互联里那个开关（objectName 照旧叫「局域网感知」）+ 输入框底下那盏灯。
 #
 # **真拨一次**：那一下会去 POST /api/lan、把 mDNS 转起来，而这条路上
 # 一个平台没接上时接口回 501——拨完再拨回去，不给别的档留下一个开着的感知。
-run 局域网 CHANGJI_DESKTOP_SHOT_MS=17000 CHANGJI_DESKTOP_TAP='齿轮,设置类·box,局域网感知,局域网感知,关设置,~局域网灯' CHANGJI_DESKTOP_TAP_MS=5000
+run 局域网 CHANGJI_DESKTOP_SHOT_MS=17000 CHANGJI_DESKTOP_TAP='齿轮,设置类·peer,局域网感知,局域网感知,关设置,~局域网灯' CHANGJI_DESKTOP_TAP_MS=5000
 
 # 一条对话右边那颗「⋯」：点开是置顶和删掉。
 #

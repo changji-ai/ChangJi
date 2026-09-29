@@ -1,11 +1,14 @@
 #include "stages/web_tools.hpp"
 
 #include <cctype>
+#include <cstdint>
 
 #include <cstdio>
-#include <regex>
+#include <cstring>
 #include <set>
+#include <vector>
 
+#include "util/net_inward.hpp"
 #include "util/say.hpp"
 #include "util/text.hpp"
 
@@ -26,10 +29,79 @@ std::map<std::string, std::string> browser_headers() {
             {"Accept-Language", "zh-CN,zh;q=0.9"}};
 }
 
-std::string strip_tags(const std::string& s) {
-    static const std::regex tag("<[^>]*>");
-    return std::regex_replace(s, tag, "");
+// ---- 拆 HTML：**一律手写线性扫描，不用 std::regex** ----
+//
+// libstdc++ 的 std::regex 匹配时**每吃一个字符递归一层**：`<script[\s\S]*?</script>`
+// 碰上一段 100 KB 的内联脚本（新闻站、Next.js 页面里那一大块 JSON 很常见），8 MB 的栈
+// 当场溢出——整个引擎进程 SIGSEGV，手上所有的活连同界面一起没了；macOS 上副线程的栈
+// 只有 512 KB，4 KB 就够了（审查 2026-09-25 拿 g++ 实测）。一个 `<img src="data:…">`
+// 就能让 `<[^>]*>` 崩掉。网页是模型挑的、外面来的，长什么样都有可能。
+
+/// 不分大小写地找（needle 给小写 ASCII）。
+std::size_t ifind(const std::string& s, const char* needle, std::size_t from = 0) {
+    const std::size_t n = std::strlen(needle);
+    if (n == 0 || s.size() < n) return std::string::npos;
+    for (std::size_t i = from; i + n <= s.size(); ++i) {
+        std::size_t k = 0;
+        while (k < n && std::tolower(static_cast<unsigned char>(s[i + k])) == needle[k]) ++k;
+        if (k == n) return i;
+    }
+    return std::string::npos;
 }
+
+/// 整段整段地删：从 `open` 到下一个 `close`（含）。没有收尾的删到末尾。
+std::string drop_blocks(const std::string& s, const char* open, const char* close) {
+    std::string out;
+    out.reserve(s.size());
+    std::size_t at = 0;
+    for (;;) {
+        const std::size_t b = ifind(s, open, at);
+        if (b == std::string::npos) {
+            out.append(s, at, std::string::npos);
+            return out;
+        }
+        out.append(s, at, b - at);
+        const std::size_t e = ifind(s, close, b + std::strlen(open));
+        if (e == std::string::npos) return out;
+        at = e + std::strlen(close);
+    }
+}
+
+/// 标签全去掉；`breaks` 为真时，换行那一族（br、p、div、li、h1-6、tr、section、
+/// article，开的收的都算）换成一个换行。没收尾的 `<` 原样留着（同原来的 `<[^>]*>`）。
+std::string drop_tags(const std::string& s, bool breaks) {
+    static const std::set<std::string> kBreaks = {"br", "p",  "div", "li", "h1", "h2",
+                                                  "h3", "h4", "h5",  "h6", "tr", "section",
+                                                  "article"};
+    std::string out;
+    out.reserve(s.size());
+    std::size_t i = 0;
+    while (i < s.size()) {
+        if (s[i] != '<') {
+            out += s[i++];
+            continue;
+        }
+        const std::size_t gt = s.find('>', i + 1);
+        if (gt == std::string::npos) {
+            out.append(s, i, std::string::npos);
+            break;
+        }
+        if (breaks) {
+            std::size_t k = i + 1;
+            if (k < gt && s[k] == '/') ++k;
+            std::string name;
+            while (k < gt && std::isalnum(static_cast<unsigned char>(s[k]))) {
+                name += static_cast<char>(std::tolower(static_cast<unsigned char>(s[k])));
+                ++k;
+            }
+            if (kBreaks.count(name) != 0) out += '\n';
+        }
+        i = gt + 1;
+    }
+    return out;
+}
+
+std::string strip_tags(const std::string& s) { return drop_tags(s, false); }
 
 std::string decode_entities(std::string s) {
     for (const auto& [from, to] : std::vector<std::pair<const char*, const char*>>{
@@ -65,21 +137,49 @@ std::string collapse(std::string s) {
     return text::strip_ws(out);
 }
 
+bool points_inward(const std::string& url);
+
 std::string fetch(const WebTools& web, const std::string& url, std::string* err) {
     if (!web.get) {
         if (err) *err = "这台没配上网的那一层";
         return {};
     }
-    const llm::HttpResponse r = web.get(url, browser_headers(), web.timeout_s);
-    if (r.transport_error.has_value()) {
-        if (err) *err = "连不上：" + *r.transport_error;
-        return {};
+    // **跳转自己跟，每一跳重新判一遍。** 让 httplib 自己跟的话，公网上一个页面回
+    // `302 Location: http://169.254.169.254/…` 或者 `http://127.0.0.1:8080/api/…`，
+    // 请求就到了元数据口子、引擎自己的接口上——头一个网址判过没用。
+    std::string at = url;
+    for (int hop = 0; hop <= 5; ++hop) {
+        const llm::HttpResponse r = web.get(at, browser_headers(), web.timeout_s);
+        if (r.transport_error.has_value()) {
+            if (err) *err = "连不上：" + *r.transport_error;
+            return {};
+        }
+        if (r.status >= 300 && r.status < 400) {
+            const auto loc = r.headers.find("location");
+            if (loc == r.headers.end() || loc->second.empty()) {
+                if (err) *err = "打不开（HTTP " + std::to_string(r.status) + "，没说跳去哪儿）";
+                return {};
+            }
+            const std::string next = llm::redirect_target(at, text::strip_ws(loc->second));
+            if (next.rfind("http://", 0) != 0 && next.rfind("https://", 0) != 0) {
+                if (err) *err = "跳到了一个不是网页的地址，不跟：" + next;
+                return {};
+            }
+            if (points_inward(next)) {
+                if (err) *err = "跳到了本机或者内网的地址，不跟：" + next;
+                return {};
+            }
+            at = next;
+            continue;
+        }
+        if (r.status >= 400) {
+            if (err) *err = "打不开（HTTP " + std::to_string(r.status) + "）";
+            return {};
+        }
+        return r.body;
     }
-    if (r.status >= 400) {
-        if (err) *err = "打不开（HTTP " + std::to_string(r.status) + "）";
-        return {};
-    }
-    return r.body;
+    if (err) *err = "跳转太多次了";
+    return {};
 }
 
 std::string render_hot(const std::vector<HotItem>& items) {
@@ -157,9 +257,10 @@ std::string tool_web_search(const WebTools& web, const std::string& query) {
 /// 这台跑在哪儿很要紧：租来的 GPU 机上 `169.254.169.254` 是云厂商的元数据
 /// 口子（密钥在那儿），而引擎自己就在 127.0.0.1 上听着。
 ///
-/// **只认字面上的地址**，不去解析域名——解析要等一次 DNS，而且解析完到真
-/// 连上之间还能再变（经典的 TOCTOU）。字面这一档挡住的正是"页面里塞一个
-/// 内网地址"这件事，而那正是这条路上会发生的。
+/// **这儿只判字面**，挡在发请求之前、给模型一句清楚的话。域名解析到里面的那一种
+/// 由取网页那一层挡（`llm::default_http_get(..., public_only=true)`：先解析、每个
+/// 地址都判、再钉住判过的地址去连——见 util/net_inward.hpp）。原来只有字面这一层，
+/// 一个解析到 127.0.0.1 的域名就绕过去了（2026-09-26 审查）。
 bool points_inward(const std::string& url) {
     // 取出 host：`scheme://host[:port]/…`，也认 `user@host`。
     const auto after = url.find("://");
@@ -179,27 +280,17 @@ bool points_inward(const std::string& url) {
     low.reserve(host.size());
     for (char c : host) low += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     if (low.empty()) return true;   // 说不清就当指着里面
+    if (low.back() == '.') low.pop_back();   // "localhost." 也是 localhost
 
     if (low == "localhost" || low.size() > 10 &&
                                   low.compare(low.size() - 10, 10, ".localhost") == 0) {
         return true;
     }
-    if (low == "::1" || low.rfind("fc", 0) == 0 || low.rfind("fd", 0) == 0 ||
-        low.rfind("fe80:", 0) == 0) {
-        return true;
-    }
 
-    // IPv4 字面量。不是四段数字就当域名放过。
-    unsigned a = 0, b = 0, c = 0, d = 0;
-    char tail = 0;
-    if (std::sscanf(low.c_str(), "%u.%u.%u.%u%c", &a, &b, &c, &d, &tail) != 4) return false;
-    if (a > 255 || b > 255 || c > 255 || d > 255) return false;
-    if (a == 127 || a == 10 || a == 0) return true;               // 本机 / 内网 / 0.0.0.0
-    if (a == 172 && b >= 16 && b <= 31) return true;              // 172.16/12
-    if (a == 192 && b == 168) return true;                        // 192.168/16
-    if (a == 169 && b == 254) return true;                        // 云厂商的元数据口子
-    if (a == 100 && b >= 64 && b <= 127) return true;             // 运营商级 NAT
-    return false;
+    // 字面地址（IPv6 按字节判；IPv4 按 inet_aton 那套宽松写法读——`127.1`、
+    // `2130706433`、`0x7f000001`、`0177.0.0.1` 全是本机）。见 util/net_inward.hpp。
+    bool literal = false;
+    return util::literal_inward(low, literal);
 }
 
 std::string tool_fetch_page(const WebTools& web, const std::string& url) {
@@ -252,15 +343,26 @@ std::string run_web_tool(const WebTools& web, const std::string& name,
         }
         if (!args.is_object()) args = json::object();
     }
-    if (name == "hot_topics") return tool_hot_topics(web);
-    if (name == "web_search") return tool_web_search(web, args.value("query", std::string()));
-    if (name == "fetch_page") return tool_fetch_page(web, args.value("url", std::string()));
-    return "没有叫 " + name + " 的工具。有的是 hot_topics、web_search、fetch_page。";
+    const auto str_arg = [&args](const char* k) {
+        const auto it = args.find(k);
+        return it != args.end() && it->is_string() ? it->get<std::string>() : std::string();
+    };
+    // **交回去的字一律洗成合法 UTF-8。** GBK / GB2312 的中文站原样进来是一串非法字节：
+    // 下一次把对话发给模型（payload.dump）、往对话记录里写（append_turn）都当场抛
+    // type_error.316——上网写一章写了几分钟，整轮在这儿断掉。
+    std::string out;
+    if (name == "hot_topics") out = tool_hot_topics(web);
+    else if (name == "web_search") out = tool_web_search(web, str_arg("query"));
+    else if (name == "fetch_page") out = tool_fetch_page(web, str_arg("url"));
+    else return "没有叫 " + name + " 的工具。有的是 hot_topics、web_search、fetch_page。";
+    if (text::is_valid_utf8(out)) return out;
+    return text::sanitize_utf8(out) +
+           "\n（这一页不是 UTF-8 编码的，上面有些字读乱了；换一个页面、或者搜别的说法试试。）";
 }
 
 std::string web_tool_label(const std::string& name, const std::string& arguments_json) {
-    if (name == "hot_topics") return SAY("在看网上什么热");
-    if (name == "fetch_page") return SAY("在读网页");
+    if (name == "hot_topics") return SAY("正在查看网络热点");
+    if (name == "fetch_page") return SAY("正在读取网页");
     if (name != "web_search") return {};
     // 搜的是什么要说出来：一轮里连搜三次，三行都是「在网上搜」等于没说。
     // 参数读不动就只说动作，不瞎猜（同 `agent::tool_ask`）。
@@ -269,7 +371,7 @@ std::string web_tool_label(const std::string& name, const std::string& arguments
     if (a.is_object() && a.contains("query") && a.at("query").is_string()) {
         q = text::strip_ws(a.at("query").get<std::string>());
     }
-    return q.empty() ? SAY("在网上搜") : SAYF("在网上搜「%1」", q);
+    return q.empty() ? SAY("正在联网搜索") : SAYF("正在联网搜索「%1」", q);
 }
 
 std::vector<HotItem> parse_baidu_hot(const std::string& body) {
@@ -320,21 +422,48 @@ std::vector<HotItem> parse_weibo_hot(const std::string& body) {
 
 std::vector<SearchHit> parse_bing_results(const std::string& html) {
     // 每条结果：<li class="b_algo"> … <h2><a href="URL">标题</a></h2> … <p>摘要</p>
+    // 手写扫描，不用 std::regex（见上面拆 HTML 那一段）。
     std::vector<SearchHit> out;
-    static const std::regex block("<li class=\"b_algo\"[\\s\\S]*?</li>");
-    static const std::regex link("<h2[^>]*>\\s*<a[^>]*href=\"([^\"]+)\"[^>]*>([\\s\\S]*?)</a>");
-    static const std::regex para("<p[^>]*>([\\s\\S]*?)</p>");
-    for (auto it = std::sregex_iterator(html.begin(), html.end(), block);
-         it != std::sregex_iterator(); ++it) {
-        const std::string b = it->str();
-        std::smatch m;
-        if (!std::regex_search(b, m, link)) continue;
+    std::size_t at = 0;
+    for (;;) {
+        const std::size_t b = html.find("<li class=\"b_algo\"", at);
+        if (b == std::string::npos) break;
+        const std::size_t e = html.find("</li>", b);
+        if (e == std::string::npos) break;
+        const std::string block = html.substr(b, e - b);
+        at = e + 5;
+
+        // <h2 …> 后面（隔着空白）紧跟 <a … href="URL" …>标题</a>
+        const std::size_t h2 = block.find("<h2");
+        if (h2 == std::string::npos) continue;
+        std::size_t k = block.find('>', h2);
+        if (k == std::string::npos) continue;
+        ++k;
+        while (k < block.size() && std::isspace(static_cast<unsigned char>(block[k]))) ++k;
+        if (block.compare(k, 2, "<a") != 0) continue;
+        const std::size_t a_end = block.find('>', k);
+        if (a_end == std::string::npos) continue;
+        const std::string a_tag = block.substr(k, a_end - k);
+        const std::size_t href = a_tag.find("href=\"");
+        if (href == std::string::npos) continue;
+        const std::size_t q = a_tag.find('"', href + 6);
+        if (q == std::string::npos) continue;
+        const std::size_t close_a = block.find("</a>", a_end);
+        if (close_a == std::string::npos) continue;
+
         SearchHit h;
-        h.url = m[1].str();
-        h.title = collapse(decode_entities(strip_tags(m[2].str())));
-        std::smatch p;
-        if (std::regex_search(b, p, para)) {
-            h.snippet = collapse(decode_entities(strip_tags(p[1].str())));
+        h.url = a_tag.substr(href + 6, q - href - 6);
+        h.title = collapse(decode_entities(strip_tags(block.substr(a_end + 1, close_a - a_end - 1))));
+        // 摘要：第一个 <p …>…</p>
+        for (std::size_t p = block.find("<p", close_a); p != std::string::npos;
+             p = block.find("<p", p + 2)) {
+            const char nx = p + 2 < block.size() ? block[p + 2] : '\0';
+            if (nx != '>' && !std::isspace(static_cast<unsigned char>(nx))) continue;
+            const std::size_t pg = block.find('>', p);
+            const std::size_t pe = pg == std::string::npos ? pg : block.find("</p>", pg);
+            if (pe == std::string::npos) break;
+            h.snippet = collapse(decode_entities(strip_tags(block.substr(pg + 1, pe - pg - 1))));
+            break;
         }
         if (!h.title.empty() && !h.url.empty()) out.push_back(std::move(h));
     }
@@ -342,16 +471,10 @@ std::vector<SearchHit> parse_bing_results(const std::string& html) {
 }
 
 std::string html_to_text(const std::string& html) {
-    static const std::regex script("<script[\\s\\S]*?</script>", std::regex::icase);
-    static const std::regex style("<style[\\s\\S]*?</style>", std::regex::icase);
-    static const std::regex comment("<!--[\\s\\S]*?-->");
-    static const std::regex breaks("</?(br|p|div|li|h[1-6]|tr|section|article)[^>]*>",
-                                   std::regex::icase);
-    std::string s = std::regex_replace(html, script, "");
-    s = std::regex_replace(s, style, "");
-    s = std::regex_replace(s, comment, "");
-    s = std::regex_replace(s, breaks, "\n");
-    s = strip_tags(s);
+    std::string s = drop_blocks(html, "<script", "</script>");
+    s = drop_blocks(s, "<style", "</style>");
+    s = drop_blocks(s, "<!--", "-->");
+    s = drop_tags(s, /*breaks=*/true);
     return collapse(decode_entities(s));
 }
 

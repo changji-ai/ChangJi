@@ -129,7 +129,7 @@ std::string can_produce_line(const NodeFacts& f) {
         if (!out.empty()) out += SAY("、");
         out += label_of(r.cap);
     }
-    return out.empty() ? SAY("什么都产不了") : out;
+    return out.empty() ? SAY("无可用功能") : out;
 }
 
 json node_status_json(const config::Settings& s,

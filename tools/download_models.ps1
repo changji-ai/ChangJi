@@ -30,19 +30,19 @@ $ErrorActionPreference = 'Stop'
 $files = @(
     @{ n='扩散主模型 Wan2.2-TI2V-5B Q4_K_M'; mb=3274
        u='https://huggingface.co/QuantStack/Wan2.2-TI2V-5B-GGUF/resolve/main/Wan2.2-TI2V-5B-Q4_K_M.gguf'
-       f='Wan2.2-TI2V-5B-Q4_K_M.gguf' },
+       f='Wan2.2-TI2V-5B-Q4_K_M.gguf'; k='video' },
     @{ n='文本编码器 umt5-xxl Q5_K_M';        mb=3953
        u='https://huggingface.co/city96/umt5-xxl-encoder-gguf/resolve/main/umt5-xxl-encoder-Q5_K_M.gguf'
-       f='umt5-xxl-encoder-Q5_K_M.gguf' },
+       f='umt5-xxl-encoder-Q5_K_M.gguf'; k='video_text_encoder' },
     @{ n='VAE Wan2.2（safetensors，sd.cpp 认）'; mb=1344
        u='https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/vae/wan2.2_vae.safetensors'
-       f='Wan2.2_VAE.safetensors' },
+       f='Wan2.2_VAE.safetensors'; k='video_vae' },
     @{ n='配音骨干 Qwen3-TTS 12Hz 1.7B Q4_K_M'; mb=987
        u='https://huggingface.co/ggml-org/Qwen3-TTS-12Hz-1.7B-Base-GGUF/resolve/main/Qwen3-TTS-12Hz-1.7B-Base-Q4_K_M.gguf'
-       f='Qwen3-TTS-12Hz-1.7B-Base-Q4_K_M.gguf' },
+       f='Qwen3-TTS-12Hz-1.7B-Base-Q4_K_M.gguf'; k='tts' },
     @{ n='配音解码器 mmproj Q8_0';             mb=425
        u='https://huggingface.co/ggml-org/Qwen3-TTS-12Hz-1.7B-Base-GGUF/resolve/main/mmproj-Qwen3-TTS-12Hz-1.7B-Base-Q8_0.gguf'
-       f='mmproj-Qwen3-TTS-12Hz-1.7B-Base-Q8_0.gguf' },
+       f='mmproj-Qwen3-TTS-12Hz-1.7B-Base-Q8_0.gguf'; k='tts_decoder' },
     # 首帧用的图像模型。
     #
     # ⚠️ **要 2509，不要初版。** 多参考图是 2509 加的，而这套流水线一镜常常
@@ -61,13 +61,13 @@ $files = @(
     # 加配置里的文件名。
     @{ n='图像模型 Qwen-Image-Edit 2509 Q2_K（最小档，先验通路）'; mb=6816
        u='https://huggingface.co/QuantStack/Qwen-Image-Edit-2509-GGUF/resolve/main/Qwen-Image-Edit-2509-Q2_K.gguf'
-       f='Qwen-Image-Edit-2509-Q2_K.gguf' },
+       f='Qwen-Image-Edit-2509-Q2_K.gguf'; k='image' },
     # 视觉塔在**初版那个仓库**下面——2509 的仓库里只有扩散权重。
     # 2509 起不带它就是"参考图只进去一半"，而且不报错，日志里只有一句
     # vision disabled。
     @{ n='图像模型的视觉塔 Qwen2.5-VL mmproj'; mb=1291
        u='https://huggingface.co/QuantStack/Qwen-Image-Edit-GGUF/resolve/main/mmproj/Qwen2.5-VL-7B-Instruct-mmproj-BF16.gguf'
-       f='Qwen2.5-VL-7B-Instruct-mmproj-BF16.gguf' },
+       f='Qwen2.5-VL-7B-Instruct-mmproj-BF16.gguf'; k='image_text_encoder_vision' },
     # **Qwen-Image-Edit 的文本编码器不是 umt5，是 Qwen2.5-VL。**
     # 一开始只下了扩散模型就以为够了，是因为 C++ 那边图像那条路复用了视频的
     # video_vae 和 video_text_encoder——而那两个是 Wan 的，喂给 Qwen 是错的。
@@ -78,52 +78,54 @@ $files = @(
     # 也就是说图像那条路一直没接对，只是从来没跑过所以没人发现。
     @{ n='图像模型的文本编码器 Qwen2.5-VL 7B Q2_K（最小档）'; mb=2876
        u='https://huggingface.co/mradermacher/Qwen2.5-VL-7B-Instruct-GGUF/resolve/main/Qwen2.5-VL-7B-Instruct.Q2_K.gguf'
-       f='Qwen2.5-VL-7B-Instruct-Q2_K.gguf' },
+       f='Qwen2.5-VL-7B-Instruct-Q2_K.gguf'; k='image_text_encoder' },
     @{ n='图像模型的 VAE（Qwen 自己的，不是 Wan 的）'; mb=242
        u='https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/vae/qwen_image_vae.safetensors'
-       f='qwen_image_vae.safetensors' }
+       f='qwen_image_vae.safetensors'; k='image_vae' }
 )
 
 # ---- 全尺寸档 ----
 #
-# **扩散模型走 bf16，文本编码器走 fp8。** 不是省事，是显存算出来的：
-#   图像 bf16 38.05 GB + 它的文本编码器 bf16 15.45 GB = 53.5 GB > 48 GB，
-#   一张 L20 装不下。而 8 路并行是**每个进程在自己那张卡上放满一套**，
-#   不是八张卡分着放。
-# 文本编码器换成 fp8_scaled（8.74 GB）之后是 47 GB，刚好塞得下。
-# L20 是 Ada，有原生 FP8 张量核，这一档不是模拟出来的。
+# **和 fetch_models.sh 的 bf16 那一档是同一套**（≥40 GB 的卡：L20 / A100）：
+# 图像 Qwen-Image-Edit **2509** Q8_0（21.8 GB）+ 文本编码器 Qwen2.5-VL bf16
+#（16.6 GB）+ 视觉塔。38 GB，一张 48 GB 的卡放得下一整套。
 #
-# 画质由扩散模型决定，文本编码器的精度影响小得多。真要对比，
-# 单独再下一份 bf16 的编码器（15.45 GB），配置里换一行 image_text_encoder
-# 就切，别的都不用重下。
+# 这一档原来是 Comfy 的 qwen_image_edit_bf16 + qwen_2.5_vl_7b_fp8_scaled，两处错：
+#   · **fp8_scaled 不能用**：那种格式带 scale 张量，sd.cpp 的加载器里没有一行处理
+#     scaled，按普通 fp8 读——不报错，文本条件全是垃圾（fetch_models.sh 上写着）；
+#   · 那是**初版** Edit，不是 2509：多参考图是 2509 才有的，而且没带视觉塔，
+#     参考图只进去一半、日志里只有一句 vision disabled。
 #
 # **写剧本那个 27.5 GB 的没放进来**：到今天为止流水线一次都没用过它
 # （剧本和分镜走外部 Ollama 或者手写分镜表）。要进程内跑再单独加。
 $fullFiles = @(
-    @{ n='图像 Qwen-Image-Edit bf16（全尺寸）'; mb=38963
-       u='https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/resolve/main/split_files/diffusion_models/qwen_image_edit_bf16.safetensors'
-       f='qwen_image_edit_bf16.safetensors' },
-    @{ n='图像的文本编码器 Qwen2.5-VL fp8（装得下的那一档）'; mb=8950
-       u='https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors'
-       f='qwen_2.5_vl_7b_fp8_scaled.safetensors' },
+    @{ n='图像 Qwen-Image-Edit 2509 Q8_0（全尺寸）'; mb=20753
+       u='https://huggingface.co/QuantStack/Qwen-Image-Edit-2509-GGUF/resolve/main/Qwen-Image-Edit-2509-Q8_0.gguf'
+       f='Qwen-Image-Edit-2509-Q8_0.gguf'; k='image' },
+    @{ n='图像的文本编码器 Qwen2.5-VL bf16'; mb=15817
+       u='https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/text_encoders/qwen_2.5_vl_7b.safetensors'
+       f='qwen_2.5_vl_7b_bf16.safetensors'; k='image_text_encoder' },
+    @{ n='图像模型的视觉塔 Qwen2.5-VL mmproj'; mb=1291
+       u='https://huggingface.co/QuantStack/Qwen-Image-Edit-GGUF/resolve/main/mmproj/Qwen2.5-VL-7B-Instruct-mmproj-BF16.gguf'
+       f='Qwen2.5-VL-7B-Instruct-mmproj-BF16.gguf'; k='image_text_encoder_vision' },
     @{ n='图像 VAE'; mb=246
        u='https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/vae/qwen_image_vae.safetensors'
-       f='qwen_image_vae.safetensors' },
+       f='qwen_image_vae.safetensors'; k='image_vae' },
     @{ n='视频 Wan2.2-TI2V-5B fp16（全尺寸）'; mb=9534
        u='https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_ti2v_5B_fp16.safetensors'
-       f='wan2.2_ti2v_5B_fp16.safetensors' },
+       f='wan2.2_ti2v_5B_fp16.safetensors'; k='video' },
     @{ n='视频 VAE'; mb=1344
        u='https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/vae/wan2.2_vae.safetensors'
-       f='Wan2.2_VAE.safetensors' },
+       f='Wan2.2_VAE.safetensors'; k='video_vae' },
     @{ n='视频的文本编码器 umt5-xxl fp16（全尺寸）'; mb=10844
        u='https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp16.safetensors'
-       f='umt5_xxl_fp16.safetensors' },
+       f='umt5_xxl_fp16.safetensors'; k='video_text_encoder' },
     @{ n='配音骨干 Qwen3-TTS bf16（全尺寸）'; mb=3308
        u='https://huggingface.co/ggml-org/Qwen3-TTS-12Hz-1.7B-Base-GGUF/resolve/main/Qwen3-TTS-12Hz-1.7B-Base-bf16.gguf'
-       f='Qwen3-TTS-12Hz-1.7B-Base-bf16.gguf' },
+       f='Qwen3-TTS-12Hz-1.7B-Base-bf16.gguf'; k='tts' },
     @{ n='配音解码器 mmproj bf16'; mb=635
        u='https://huggingface.co/ggml-org/Qwen3-TTS-12Hz-1.7B-Base-GGUF/resolve/main/mmproj-Qwen3-TTS-12Hz-1.7B-Base-bf16.gguf'
-       f='mmproj-Qwen3-TTS-12Hz-1.7B-Base-bf16.gguf' }
+       f='mmproj-Qwen3-TTS-12Hz-1.7B-Base-bf16.gguf'; k='tts_decoder' }
 )
 
 if ($Preset -eq "full") { $files = $fullFiles }
@@ -165,20 +167,41 @@ if ($WhatIf) { Write-Host "（-WhatIf，不实际下载）"; exit 0 }
 
 New-Item -ItemType Directory -Force -Path $dest | Out-Null
 
+# 对面这个文件**确切**多少字节（跟着跳转走到最后那一跳的 Content-Length）。问不到回 -1。
+#
+# 原来判「下全了」是本地和表里的 MB 数差一成以内——一个 38 GB 的文件断在 92%
+# 就算「已有」，再也不续，半截的权重载进去出的是错图。
+function Get-RemoteLength([string]$url) {
+    $len = -1
+    try {
+        $head = & curl.exe -sSIL --retry 3 --retry-delay 3 $url 2>$null
+        foreach ($line in $head) {
+            if ($line -match '^(?i)content-length:\s*(\d+)') { $len = [int64]$Matches[1] }
+        }
+    } catch { $len = -1 }
+    return $len
+}
+
 foreach ($x in $files) {
     $out = Join-Path $dest $x.f
+    $want = Get-RemoteLength $x.u
     if (Test-Path $out) {
-        $haveMb = [math]::Round((Get-Item $out).Length / 1MB)
-        # 差一成以内就算下全了。HF 的 content-length 和落盘大小会有零头
-        if ([math]::Abs($haveMb - $x.mb) -lt ($x.mb * 0.1)) {
+        $have = (Get-Item $out).Length
+        $haveMb = [math]::Round($have / 1MB)
+        # **按字节比，一个都不能差**（问不到对面多大时才退回按 MB 估，并且说一声）。
+        if ($want -gt 0 -and $have -eq $want) {
             Write-Host "已有，跳过：$($x.f)（$haveMb MB）" -ForegroundColor DarkGray
+            continue
+        }
+        if ($want -le 0 -and [math]::Abs($haveMb - $x.mb) -lt ($x.mb * 0.01)) {
+            Write-Host "已有（问不到对面的确切大小，按 MB 估的）：$($x.f)（$haveMb MB）" -ForegroundColor DarkGray
             continue
         }
         # **别删。** 下面 curl 带 -C -，接着下就行。
         # 第一版这里直接 Remove-Item，等于把断点续传废掉了——
         # 一个 4 GB 的文件断在 627 MB，重跑一次从零开始。
         # 只有比目标还大才删：那说明文件是坏的，续传接不上。
-        if ($haveMb -gt $x.mb * 1.1) {
+        if (($want -gt 0 -and $have -gt $want) -or ($want -le 0 -and $haveMb -gt $x.mb * 1.1)) {
             Write-Host "比该有的还大（$haveMb MB > $($x.mb) MB），删掉重下：$($x.f)" -ForegroundColor Yellow
             Remove-Item $out -Force
         } else {
@@ -228,9 +251,10 @@ foreach ($x in $files) {
         Write-Host "下载失败：$($x.f)（连着 5 次没有进展，试了 $try 次）" -ForegroundColor Red
         exit 1
     }
-    $gotMb = [math]::Round((Get-Item $out).Length / 1MB)
-    if ([math]::Abs($gotMb - $x.mb) -gt ($x.mb * 0.1)) {
-        Write-Host "下完大小不对：有 $gotMb MB，该 $($x.mb) MB" -ForegroundColor Red
+    $got = (Get-Item $out).Length
+    $gotMb = [math]::Round($got / 1MB)
+    if (($want -gt 0 -and $got -ne $want) -or ($want -le 0 -and [math]::Abs($gotMb - $x.mb) -gt ($x.mb * 0.1))) {
+        Write-Host "下完大小不对：有 $got 字节，该 $(if ($want -gt 0) { $want } else { "$($x.mb) MB 上下" })" -ForegroundColor Red
         exit 1
     }
     Write-Host "  好了：$gotMb MB" -ForegroundColor Green
@@ -238,13 +262,11 @@ foreach ($x in $files) {
 
 Write-Host ""
 Write-Host "全下完了。配置里这么填（changji.toml 的 [models]）：" -ForegroundColor Cyan
-Write-Host @"
-[models]
-engine = "sd"
-dir = "$($dest -replace '\\','/')"
-video = "Wan2.2-TI2V-5B-Q4_K_M.gguf"
-video_vae = "Wan2.2_VAE.safetensors"
-video_text_encoder = "umt5-xxl-encoder-Q5_K_M.gguf"
-tts = "Qwen3-TTS-12Hz-1.7B-Base-Q4_K_M.gguf"
-tts_decoder = "mmproj-Qwen3-TTS-12Hz-1.7B-Base-Q8_0.gguf"
-"@
+# **照这一档真下的那几个文件印**。原来是写死的一段：不管选哪一档都印最小档那几个
+# 文件名，而且图像那四项一项都没有——照着填，首帧那条路指着不存在的文件。
+Write-Host "[models]"
+Write-Host 'engine = "sd"'
+Write-Host "dir = `"$($dest -replace '\\','/')`""
+foreach ($x in $files) {
+    if ($x.k) { Write-Host ("{0} = `"{1}`"" -f $x.k, $x.f) }
+}

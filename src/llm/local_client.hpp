@@ -1,7 +1,10 @@
 #pragma once
 
+#include <cstdint>
 #include <functional>
 #include <memory>
+#include <string>
+#include <vector>
 
 #include "config/settings.hpp"
 #include "llm/client.hpp"
@@ -30,6 +33,10 @@ public:
     /// 边生边给。进程内这条路能逐 token 拿到，所以真流式的就是它。
     std::string complete(const Request& req, pipeline::CancelToken& tok,
                          const OnToken& on_token) override;
+    /// 带工具的多轮对话（场记那条对话走这条）。工具怎么写进提示词、怎么解析回来交给
+    /// 这个模型自己的对话模板（`infer::LlamaChat::converse`）。
+    ChatReply chat(const std::vector<Message>& messages, const nlohmann::ordered_json& tools,
+                   const Request& opts, pipeline::CancelToken& tok) override;
 
 private:
     ConfigProvider cfg_;
@@ -60,8 +67,24 @@ LocalLlmStatus local_llm_status();
 ///
 /// **注册不等于加载。** 调度器是借出时才装的——用户定的
 /// 「用的时候才加载，不做启动预载」。
+///
+/// `even_if_remote`：全局配的是远端也注册。**一条对话可以单独挑本地那份**
+/// （`llm/chat_pick.hpp`），全局那一项管不着它——那时由 `ensure_llm_slot` 叫。
 void register_llm_slot(std::function<config::Settings()> provider,
-                       const models::HardwareProfile& profile);
+                       const models::HardwareProfile& profile,
+                       bool even_if_remote = false);
+
+/// 进程内那个槽挂上了没有；没有就按运行时那份配置挂上（`even_if_remote`）。
+/// 这个二进制没编进 llama.cpp 时什么都不做。
+void ensure_llm_slot();
+
+/// 进程内这会儿装着的那份编剧模型（完整路径）；没装着回空。
+std::string loaded_llm_file();
+
+/// 这一份权重是不是一份编剧模型（本机「本地」那一家能挑的那几个）：
+/// `.gguf`、不是 mmproj，放在 `llm/` 底下或者是清单里编剧那一组的文件。
+/// 给 `/api/llm/providers` 列本地模型、`/api/chat/model` 验人挑的那份用。
+bool is_llm_weights(const std::string& rel, std::uint64_t bytes);
 
 /// 造进程内那条客户端。**这个二进制没编进 llama.cpp 时回 nullptr**，
 /// 由 `make_client` 那头退回远端并在 stderr 上说一声——用户多半只是拿了个

@@ -72,7 +72,7 @@ inline constexpr const char* kLlmProvidersJson =
  },
  {
   "id": "zhipu",
-  "name": "智谱 GLM（国内站 · 默认）",
+  "name": "智谱 GLM（国内站）",
   "base_url": "https://open.bigmodel.cn/api/paas/v4",
   "local": false,
   "note": "默认就是这家。glm-4.7-flash 不要钱；写作要好换 glm-5.3。和 z.ai 同一套后端、同一把密钥"

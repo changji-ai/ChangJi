@@ -30,6 +30,7 @@
 #include <mutex>
 #include <optional>
 #include <stdexcept>
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -94,6 +95,17 @@ struct Episode {
     NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(
         Episode, episode_id, title, synopsis, target_duration_s, script, shots,
         chapter_refs, shots_from)
+
+    /// 这一章**有没有一镜能用**（shot_id 不是空白）。
+    ///
+    /// 「有没有分镜」的判据写成这个正面条件，**别写 `!shots.empty()`**
+    /// （CLAUDE.md 第四条）：一章全是空壳镜头时数组照样非空，于是整部出片把它
+    /// 排进去、每一步都报错；一键成片还可能挑中这章空壳而不是刚写的那章。
+    bool has_usable_shots() const {
+        return std::any_of(shots.begin(), shots.end(), [](const Shot& s) {
+            return s.shot_id.find_first_not_of(" \t\r\n") != std::string::npos;
+        });
+    }
 
     /// 这张分镜表是不是照**改之前**那版剧本拆的。
     ///

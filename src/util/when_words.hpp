@@ -41,8 +41,9 @@ inline std::string when_word(std::int64_t at, std::int64_t now) {
     const std::int64_t days = d / 86400'000;
     if (days == 1) return SAY("昨天");
     if (days < 30) return SAYF("%1 天前", std::to_string(days));
-    const std::int64_t months = days / 30;
-    if (months < 12) return SAYF("%1 个月前", std::to_string(months));
+    // 按天数分，不按月数分：360~364 天 months 是 12，落到下面按年算是 0——
+    // 「0 年前」。
+    if (days < 365) return SAYF("%1 个月前", std::to_string(days / 30));
     return SAYF("%1 年前", std::to_string(days / 365));
 }
 

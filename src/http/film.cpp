@@ -214,7 +214,7 @@ ApiResult get_film(const std::string& path) {
 ApiResult post_film_join(const json& body) {
     forbid_extra(body, {"project"});
     if (pipeline::jobs().running(pipeline::JobKind::Run)) {
-        throw ApiError(409, SAY("出片那边还在忙，等它完了再合成"));
+        throw ApiError(409, SAY("出片任务正在进行，请在完成后再合成"));
     }
     ProjectStore store = open_project(body);
     load_or_400(store);
@@ -234,7 +234,7 @@ ApiResult post_film_join(const json& body) {
         },
         pipeline::kFilmJoinStoppedMessage, root, SAY("成片 · 合成整部电影"));
     if (!started) {
-        throw ApiError(409, SAY("出片那边还在忙，等它完了再合成"));
+        throw ApiError(409, SAY("出片任务正在进行，请在完成后再合成"));
     }
     return {202, {{"started", true}}};
 }

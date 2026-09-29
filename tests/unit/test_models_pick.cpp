@@ -193,3 +193,58 @@ TEST_CASE("只落 models 那一节，别的旋钮不碰") {
     CHECK(out.llm.model == "我手挑的型号");
     CHECK(out.tiers.final_steps == 42);
 }
+
+TEST_CASE("片子里那份 changji.toml 只认这部电影的设置：命令、程序路径、连谁都不认") {
+    // 片子目录会被拷来拷去。原来片子里一句 `[upscale] command = "…"` 装配时就当
+    // 命令跑了、`[assembly].ffmpeg_path` 换掉 ffmpeg、`[llm].base_url` 把人的密钥
+    // 送到别家。这些是机器的属性，只认全局那份。
+    changji::test::ScopedUserConfigDir iso("film_only");
+    write_global(iso,
+                 "[llm]\nbase_url = \"https://good.example.com/v1\"\n"
+                 "[assembly]\nffmpeg_path = \"/usr/bin/ffmpeg\"\n"
+                 "[models]\nimage = \"global.gguf\"\n");
+    const auto proj = write_project(
+        "film_only",
+        "[upscale]\ncommand = \"sh -c 'touch /tmp/pwned'\"\n"
+        "[llm]\nbase_url = \"https://evil.example.com/v1\"\ncommand = \"evil\"\n"
+        "[assembly]\nffmpeg_path = \"/tmp/evil-ffmpeg\"\ncrf = 22\n"
+        "[models]\nimage = \"/tmp/evil.gguf\"\nvideo_cfg = 3.5\n"
+        "[models.pick]\nimage = \"项目挑的\"\n"
+        "[look]\npreset = \"clean\"\n");
+
+    const auto s = config::load_settings(proj);
+    CHECK(s.upscale.command.empty());
+    CHECK(s.llm.base_url == "https://good.example.com/v1");
+    CHECK(s.llm.command.empty());
+    CHECK(s.assembly.ffmpeg_path == "/usr/bin/ffmpeg");
+    CHECK(s.models.image == "global.gguf");
+    // 这部电影自己的那几样照认。
+    CHECK(s.assembly.crf == 22);
+    CHECK(s.models.video_cfg == doctest::Approx(3.5));
+    CHECK(s.models.pick.at("image") == "项目挑的");
+    CHECK(s.look.preset == "clean");
+}
+
+TEST_CASE("片子里那份：跟着模型文件和显卡走的旋钮也不认；叠上来不对的那一节按本机的来") {
+    changji::test::ScopedUserConfigDir iso("film_only_2");
+    write_global(iso,
+                 "[models]\nvideo_high_noise = \"hi.gguf\"\nvideo_max_frames = 81\n"
+                 "diffusion_flash_attn = false\nvideo_vae_tile = true\n"
+                 "[assembly]\nfps = 24\n");
+    const auto proj = write_project(
+        "film_only_2",
+        "[models]\nvideo_high_noise = \"/tmp/evil.gguf\"\nvideo_max_frames = 999\n"
+        "video_frame_step = 3\nvideo_frame_base = 7\n"
+        "diffusion_flash_attn = true\nvideo_vae_tile = false\nvideo_cfg = 4.5\n"
+        "[video]\norientation = \"方的\"\n"
+        "[assembly]\nfps = 30\n");
+    const auto s = config::load_settings(proj);
+    CHECK(s.models.video_high_noise == "hi.gguf");
+    CHECK(s.models.video_max_frames == 81);
+    CHECK_FALSE(s.models.diffusion_flash_attn);
+    CHECK(s.models.video_vae_tile);
+    CHECK(s.models.video_cfg == doctest::Approx(4.5));   // 采样旋钮是电影的，照认
+    // 画幅写坏了：那一节退回本机的（验得过），别的节照认
+    CHECK(s.video.validate().empty());
+    CHECK(s.assembly.fps == 30);
+}

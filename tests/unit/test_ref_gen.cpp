@@ -13,6 +13,8 @@
 #include <filesystem>
 #include <fstream>
 #include <chrono>
+#include "pipeline/task_board.hpp"
+#include <atomic>
 #include <functional>
 #include <string>
 #include <thread>
@@ -54,6 +56,33 @@ fs::path fresh_copy(const std::string& tag) {
     REQUIRE_MESSAGE(!ec, "复制项目失败：" << ec.message());
     return dst;
 }
+
+/// 用例里起的那一批，**出作用域一律停下、等它收干净**，再把假后端撤掉。
+///
+/// ⚠️ 为什么非有不可（2026-09-27 在 Windows 上撞到）：一键出图那条队列跑在一条
+/// 分离出去的线程上（`ref_gen.cpp` 的 `run_queue`），假后端又按引用抓着用例里的
+/// 局部变量（`painted`）。用例中途一抛（那天是窄字符路径抛「No mapping for the
+/// Unicode character」），局部变量没了，队列还在调它——写的是一块已经还回去的栈，
+/// 崩在**后面别的用例里**：0xC0000374 堆损坏，或者 test_render 里一个 SIGSEGV，
+/// 三次里一次，单跑哪个文件都不复现。下一个用例还会撞上「另一部电影正在出图」。
+///
+/// 所以这个守卫**声明在那些局部变量之后**：析构倒着来，线程先收干净，局部变量才没。
+/// 等的判据是 `active` 落下——那一下在 `run_queue` 把各路线程都 join 完之后，
+/// 之后不会再有谁调假后端。
+struct QueueDrain {
+    std::string project;
+    ~QueueDrain() {
+        try {
+            http::post_references_generate_all_stop({{"project", project}});
+            for (int i = 0; i < 1500; ++i) {   // 最多 30 秒
+                if (!http::get_references_queue(project).body.value("active", false)) break;
+                std::this_thread::sleep_for(std::chrono::milliseconds(20));
+            }
+        } catch (...) {
+        }
+        http::set_ref_renderer({});
+    }
+};
 
 /// 跑一次，把 ApiError 的状态码取出来。没抛就是 0。
 int status_of(const std::function<void()>& fn) {
@@ -281,6 +310,8 @@ TEST_CASE("一键出图：一次交一整批，排着的那几张报得出来") 
     const std::size_t want =
         before.characters.size() * 3 + before.locations.size();
     REQUIRE(want > 1);
+    // 中途抛了也要把这一批停下、收干净（见 QueueDrain）。
+    const QueueDrain drain{path};
 
     // **慢一点的假后端**：真跑得太快的话，下面那次快照会落在"已经全画完"
     // 上，而要看的正是"还排着几张"。
@@ -349,4 +380,124 @@ TEST_CASE("一键出图：一次交一整批，排着的那几张报得出来") 
     for (const auto& [id, l] : after.locations) CHECK_MESSAGE(l.ref_empty.has_value(), id);
 
     http::set_ref_renderer({});
+}
+
+TEST_CASE("一键出图：排着的时候人传了一张，那一格不再画、传的那张不被换掉") {
+    // 名单是按下去那一刻拍的；排着的这几十分钟里人可能已经传了一张。原来照画不误：
+    // 画完 settle 把人传的那张删掉、角色那栏指向新画的，还把这个人的镜头全退回重出。
+    const fs::path root = fresh_copy("排着的时候传了一张");
+    const models::ProjectStore store{root};
+    const std::string path = paths::to_utf8(root);
+    std::string last_loc;
+    {
+        auto assets = store.load_assets();
+        for (auto& [id, c] : assets.characters) {
+            c.ref_front.reset();
+            c.ref_three_quarter.reset();
+            c.ref_back.reset();
+        }
+        for (auto& [id, l] : assets.locations) {
+            l.ref_empty.reset();
+            last_loc = id;
+        }
+        store.save_assets(assets);
+    }
+    REQUIRE(!last_loc.empty());
+    const auto before = store.load_assets();
+    const std::size_t want = before.characters.size() * 3 + before.locations.size();
+
+    std::atomic<int> painted{0};
+    // **声明在 painted 之后**：抛了的话先把队列收干净，painted 才没（见 QueueDrain）。
+    const QueueDrain drain{path};
+    http::set_ref_renderer([&](const config::Settings&, const models::ProjectStore&) {
+        http::RefBackend b;
+        b.lanes = 1;
+        b.render = [&painted](const models::Shot&, const stages::PromptBundle&,
+                              const models::TierSpec&, const fs::path& dest,
+                              pipeline::CancelToken&, const infer::StepCallback&) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(40));
+            ++painted;
+            std::ofstream(dest, std::ios::binary) << "png";
+        };
+        return b;
+    });
+    REQUIRE(http::post_references_generate_all({{"project", path}}).status == 202);
+    // 排着的时候，最后一个场景那一格人自己传了一张。
+    {
+        fs::create_directories(root / "refs");
+        std::ofstream(root / "refs" / paths::from_utf8("人传的.jpg"), std::ios::binary) << "jpg";
+        auto assets = store.load_assets();
+        assets.locations.at(last_loc).ref_empty = "refs/人传的.jpg";
+        store.save_assets(assets);
+    }
+    for (int i = 0; i < 500; ++i) {
+        if (!http::get_references_queue(path).body.value("active", false)) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    CHECK(painted.load() == static_cast<int>(want) - 1);
+    CHECK(store.load_assets().locations.at(last_loc).ref_empty.value_or("") == "refs/人传的.jpg");
+    CHECK(fs::exists(root / "refs" / paths::from_utf8("人传的.jpg")));
+    http::set_ref_renderer({});
+    fs::remove_all(root);
+}
+
+TEST_CASE("一键出图：单独停正在画的那一张，整批接着画") {
+    // 原来停一张照「第一件砸了就别接着派」处理，整批都停了——「停一件」和
+    // 「停一整批」只剩一个。
+    const fs::path root = fresh_copy("单独停一张");
+    const models::ProjectStore store{root};
+    const std::string path = paths::to_utf8(root);
+    {
+        auto assets = store.load_assets();
+        for (auto& [id, c] : assets.characters) {
+            c.ref_front.reset();
+            c.ref_three_quarter.reset();
+            c.ref_back.reset();
+        }
+        for (auto& [id, l] : assets.locations) l.ref_empty.reset();
+        store.save_assets(assets);
+    }
+    const auto before = store.load_assets();
+    const int want = static_cast<int>(before.characters.size() * 3 + before.locations.size());
+    REQUIRE(want > 2);
+
+    std::atomic<int> painted{0};
+    // **声明在 painted 之后**：抛了的话先把队列收干净，painted 才没（见 QueueDrain）。
+    const QueueDrain drain{path};
+    http::set_ref_renderer([&](const config::Settings&, const models::ProjectStore&) {
+        http::RefBackend b;
+        b.lanes = 1;
+        b.render = [&painted](const models::Shot&, const stages::PromptBundle&,
+                              const models::TierSpec&, const fs::path& dest,
+                              pipeline::CancelToken& tok, const infer::StepCallback&) {
+            for (int i = 0; i < 30; ++i) {
+                if (tok.cancelled()) throw std::runtime_error(util::kStoppedOne);
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            }
+            ++painted;
+            std::ofstream(dest, std::ios::binary) << "png";
+        };
+        return b;
+    });
+    REQUIRE(http::post_references_generate_all({{"project", path}}).status == 202);
+    // 等第一张开画，停它。
+    bool stopped = false;
+    for (int i = 0; i < 200 && !stopped; ++i) {
+        const auto board = pipeline::task_board(path);
+        for (const auto& r : board.value("running", json::array())) {
+            stopped = pipeline::cancel_task(r.at("id").get<std::uint64_t>());
+            if (stopped) break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    REQUIRE(stopped);
+    for (int i = 0; i < 500; ++i) {
+        if (!http::get_references_queue(path).body.value("active", false)) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    const auto done = http::get_references_queue(path);
+    CHECK(done.body.value("failed", std::size_t{1}) == 0);
+    CHECK(painted.load() == want - 1);   // 停掉的那一张之外全画了
+    http::set_ref_renderer({});
+    fs::remove_all(root);
 }

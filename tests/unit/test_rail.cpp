@@ -144,7 +144,7 @@ TEST_CASE("图标条那几格：桌面端画得出图标、开得出面板，一
         ss << in.rdbuf();
         return ss.str();
     };
-    const std::string icon = slurp("SlotIcon.qml");
+    const std::string font = slurp("IconFont.qml");
     const std::string peek = slurp("Peek.qml");
 
     // `customSlots` 那一行：`readonly property var customSlots: [...]`
@@ -163,8 +163,10 @@ TEST_CASE("图标条那几格：桌面端画得出图标、开得出面板，一
         // 露出来。改成"只造用得着的那一个"之后（省下 22 MB，见
         // `test_qml_icons.cpp`），那个字符串整个没了，这条用例当场红了
         // ——**它是对的**：少一行 `case` 的后果正是"这一格什么都不画"。
-        CHECK(icon.find("id: g_" + s.key) != std::string::npos);
-        CHECK(icon.find("case \"" + s.key + "\": return g_" + s.key) != std::string::npos);
+        //
+        // 2026-09-27 起图标是字体里的字：画得出 = 字体那张表（IconFont.qml，和网页同一份
+        // icons.json 生成）里有这个名字。没有的话 SlotIcon 挑不出模子，这一格什么都不画。
+        CHECK(font.find("\"" + s.key + "\": \"\\u") != std::string::npos);
         // 开得出面板（名单里有它）
         CHECK(list.find("\"" + s.key + "\"") != std::string::npos);
     }

@@ -922,7 +922,7 @@ std::string HardwareProfile::describe() const {
         // 多卡的时候说一声。**说清楚显存是单卡的**——
         // 不然看到"8 张卡"很容易以为那 48 GB 是总数。
         if (gpu->count > 1) {
-            head += SAYF("（共 %1 张，显存是单卡的）",
+            head += SAYF("（共 %1 张，显存按单卡计）",
                          std::to_string(gpu->count));
         }
     } else if (detected) {

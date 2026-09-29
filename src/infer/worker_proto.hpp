@@ -232,6 +232,9 @@ bool room_freed(const std::string& wait_body, std::uint64_t asked_seq,
 ///
 /// 种子、attempt 那些**要算**（它们本来就在任务里）：换了种子就是另一张图，
 /// 拿上一次的顶替是错的。
+///
+/// **输入文件是路径时连文件本身一起算**（大小 + 修改时间）：同机那条路上参考图
+/// 是路径不是 `blob:`，原地换了图而路径不变，只按字面算就会拿旧的顶替。
 std::string task_key(const Task& t);
 
 enum class Orphan {

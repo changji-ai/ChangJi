@@ -149,6 +149,18 @@ void upscale_video(const fs::path& in, const fs::path& out,
     raw_in += ".in.raw";
     fs::path raw_up = out;
     raw_up += ".up.raw";
+    // **中间文件不管从哪儿出去都删。** 原来只有磁盘不够、跑到最后那两条路删，
+    // 解不出帧、模型载不进、某一帧放大失败都直接抛——一分钟的片子留下几 G 的
+    // .in.raw 和最多三十几 G 的半截 .up.raw，每重试一次多一份（2026-09-25 审出来）。
+    struct RemoveOnExit {
+        const fs::path& a;
+        const fs::path& b;
+        ~RemoveOnExit() {
+            std::error_code rm;
+            fs::remove(a, rm);
+            fs::remove(b, rm);
+        }
+    } cleanup{raw_in, raw_up};
 
     const std::vector<unsigned char> raw =
         decode_to_raw(in, assembly, raw_in);
@@ -237,6 +249,12 @@ void upscale_video(const fs::path& in, const fs::path& out,
         const int big_w = static_cast<int>(got->width);
         const int big_h = static_cast<int>(got->height);
         ::free_sd_images(got, n);
+        // 写没写进去要看：盘满了不看的话接着跑完几十分钟，最后 ffmpeg 报一句
+        // 看不懂的「文件截断」。
+        if (!up) {
+            ::free_upscaler_ctx(ctx);
+            throw SdError(SAYF("写中间文件时出错，多半是磁盘满了：%1", paths::to_utf8(raw_up)));
+        }
         if (i == 0) {
             std::fprintf(stderr, SAY_NEVER("[超分] 放大后每帧 %d×%d\n"), big_w, big_h);
         }

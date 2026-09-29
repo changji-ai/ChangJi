@@ -7,8 +7,17 @@
 #                      product repo too** — that is where the sources come
 #                      from, and a tag it does not have fails the run:
 #                        git tag ci-v2.3.0 && git push origin ci-v2.3.0
+#   dispatched with the product repo's `main`
+#                  → a proper Release too (用户 2026-09-27：「提交主分支打包直接成
+#                      release 而不是 prerelease」). Version is the counted one
+#                      (`cpp/tools/version.sh`, `v2.2.N`) with no branch suffix.
 #   dispatched     → a rolling prerelease, **always on the same `beta` tag**
-#                      (from the product repo's push, or run by hand)
+#                      (any other branch of the product repo, or run by hand)
+#
+# The stable Release is titled **"CI release <version>"** (用户：「release 显示成
+# ci release」). Its tag stays `release`: the updater reads
+# `.../releases/download/release/version.json`, and a renamed tag would strand
+# every copy already installed.
 #
 # The beta road is "last push wins": each run deletes the `beta` Release and
 # its tag and rebuilds them against this commit. So there is only ever one set
@@ -46,7 +55,7 @@
 # each, tens of core-hours together). A docs-only commit pays the same. Add
 # paths-ignore under on.push if that becomes too expensive.
 
-name: Release
+name: CI release
 
 on:
   # ⚠️ **No branch pushes here (2026-09-25).** Since that date the sources live
@@ -237,6 +246,12 @@ jobs:
             # and dots").
             echo "version=${GITHUB_REF_NAME#ci-}"  >> "$GITHUB_OUTPUT"
             echo "channel=release"             >> "$GITHUB_OUTPUT"
+          elif [ "$PRODUCT_REF" = "main" ]; then
+            # **A push to the product repo's main is a release, not a prerelease**
+            # (用户 2026-09-27). Same counted version as beta, without the branch
+            # suffix — on main there is only one line, nothing to tell apart.
+            echo "version=$(sh changji/cpp/tools/version.sh)" >> "$GITHUB_OUTPUT"
+            echo "channel=release" >> "$GITHUB_OUTPUT"
           else
             # **The version comes from the prefix in CMake** (decided
             # 2026-09-21): `<prefix>.<commits since the prefix was set>` (`v2.2.7`), and
@@ -290,6 +305,24 @@ jobs:
       matrix:
         os: [ubuntu-24.04, macos-15]
     steps:
+      # ⚠️ **macOS 一律用 Xcode 26**（用户 2026-09-27：「mac 打包使用 xcode 26」）。
+      # runner 镜像默认是 Xcode 16.x；换到 26 挑镜像里装着的最新一份 26.x，**一份都
+      # 没有就当场红**——静悄悄退回 16 的话，编出来的包和说好的不是同一套工具链，
+      # 而一切看起来正常。
+      - name: Use Xcode 26
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          x=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1 || true)
+          if [ -z "$x" ]; then
+            echo "::error::no Xcode 26 on this runner image; installed:"
+            ls -d /Applications/Xcode*.app || true
+            exit 1
+          fi
+          sudo xcode-select -s "$x/Contents/Developer"
+          echo "DEVELOPER_DIR=$x/Contents/Developer" >> "$GITHUB_ENV"
+          xcodebuild -version
+          clang++ --version | head -1
       # One checkout; see the meta job for why. It used to be optional here
       # (the tests came from this repo's own checkout); now the sources under
       # test are the product repo's `cpp/`, so without it there is nothing to
@@ -300,7 +333,11 @@ jobs:
         with:
           repository: integemjack/changji
           token: ${{ secrets.CHANGJI_PRODUCT_TOKEN }}
-          ref: ${{ needs.meta.outputs.product_ref }}
+          # Pinned to the commit meta resolved, not the branch name: if the
+          # branch moves during a multi-hour run (a push that doesn't dispatch,
+          # or a slow cancel), the cells would build different commits than
+          # the one version.json and the release notes name.
+          ref: ${{ needs.meta.outputs.product_sha }}
           path: changji
 
       - name: Install ninja
@@ -365,6 +402,24 @@ jobs:
       matrix:
         os: [ubuntu-24.04, macos-15, windows-2022]
     steps:
+      # ⚠️ **macOS 一律用 Xcode 26**（用户 2026-09-27：「mac 打包使用 xcode 26」）。
+      # runner 镜像默认是 Xcode 16.x；换到 26 挑镜像里装着的最新一份 26.x，**一份都
+      # 没有就当场红**——静悄悄退回 16 的话，编出来的包和说好的不是同一套工具链，
+      # 而一切看起来正常。
+      - name: Use Xcode 26
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          x=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1 || true)
+          if [ -z "$x" ]; then
+            echo "::error::no Xcode 26 on this runner image; installed:"
+            ls -d /Applications/Xcode*.app || true
+            exit 1
+          fi
+          sudo xcode-select -s "$x/Contents/Developer"
+          echo "DEVELOPER_DIR=$x/Contents/Developer" >> "$GITHUB_ENV"
+          xcodebuild -version
+          clang++ --version | head -1
       # One checkout, the product repo (engine included); see the meta job.
       - name: Check out the product repo
         uses: actions/checkout@v4
@@ -374,7 +429,11 @@ jobs:
           # Empty means that repo's default branch, which is what a push to
           # THIS repo wants. A push to the product repo passes its own ref
           # through, or a branch there would silently be built against main.
-          ref: ${{ needs.meta.outputs.product_ref }}
+          # Pinned to the commit meta resolved, not the branch name: if the
+          # branch moves during a multi-hour run (a push that doesn't dispatch,
+          # or a slow cancel), the cells would build different commits than
+          # the one version.json and the release notes name.
+          ref: ${{ needs.meta.outputs.product_sha }}
           path: changji
 
       - name: Install Qt
@@ -493,6 +552,24 @@ jobs:
             # keeps using MSVC.
             toolset: ClangCL
     steps:
+      # ⚠️ **macOS 一律用 Xcode 26**（用户 2026-09-27：「mac 打包使用 xcode 26」）。
+      # runner 镜像默认是 Xcode 16.x；换到 26 挑镜像里装着的最新一份 26.x，**一份都
+      # 没有就当场红**——静悄悄退回 16 的话，编出来的包和说好的不是同一套工具链，
+      # 而一切看起来正常。
+      - name: Use Xcode 26
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          x=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1 || true)
+          if [ -z "$x" ]; then
+            echo "::error::no Xcode 26 on this runner image; installed:"
+            ls -d /Applications/Xcode*.app || true
+            exit 1
+          fi
+          sudo xcode-select -s "$x/Contents/Developer"
+          echo "DEVELOPER_DIR=$x/Contents/Developer" >> "$GITHUB_ENV"
+          xcodebuild -version
+          clang++ --version | head -1
       # One checkout, the product repo (engine included); see the meta job.
       - name: Check out the product repo
         uses: actions/checkout@v4
@@ -502,7 +579,11 @@ jobs:
           # Empty means that repo's default branch, which is what a push to
           # THIS repo wants. A push to the product repo passes its own ref
           # through, or a branch there would silently be built against main.
-          ref: ${{ needs.meta.outputs.product_ref }}
+          # Pinned to the commit meta resolved, not the branch name: if the
+          # branch moves during a multi-hour run (a push that doesn't dispatch,
+          # or a slow cancel), the cells would build different commits than
+          # the one version.json and the release notes name.
+          ref: ${{ needs.meta.outputs.product_sha }}
           path: changji
 
       # CHANGJI_LLAMA=ON needs a Python: llama.cpp is patched in place with
@@ -574,14 +655,31 @@ jobs:
       # installed. The VS generator finds its own toolchain, one argument
       # covers both architectures, and that removes a whole class of "only the
       # arm64 cell is red" failures.
+      #
+      # ⚠️ **Ask the runner which Visual Studio it has; don't write it down.**
+      # In September 2026 the `windows-11-arm` label moved to the
+      # `windows-11-vs2026-arm64` image, which carries VS 2026 (18) and no 2022.
+      # `-G "Visual Studio 17 2022"` then stops at the first line of configure
+      # with "could not find any instance of Visual Studio", and only the arm64
+      # cell went red — the x64 cells are on `windows-2022` and never noticed.
+      # vswhere answers the major version; an unknown one fails here, by name,
+      # instead of as a CMake error that points at CMakeLists.txt.
       - name: Configure (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsver = & $vswhere -latest -products * -property installationVersion
+          $gen = switch -Wildcard ($vsver) {
+            '17.*'  { "Visual Studio 17 2022" }
+            '18.*'  { "Visual Studio 18 2026" }
+            default { throw "no generator known for Visual Studio '$vsver' on this runner" }
+          }
+          Write-Host "Visual Studio $vsver -> $gen"
           $tset = "${{ matrix.toolset }}"
           $targs = if ($tset) { @("-T", $tset) } else { @() }
           $ssl = ((Get-Location).Path -replace '\\','/') + "/openssl"
-          cmake -S changji/cpp -B build -G "Visual Studio 17 2022" -A ${{ matrix.arch }} @targs `
+          cmake -S changji/cpp -B build -G $gen -A ${{ matrix.arch }} @targs `
             -DCHANGJI_VERSION="$env:CHANGJI_VERSION" `
             -DCHANGJI_SD=ON `
             -DCHANGJI_LLAMA=ON `
@@ -955,7 +1053,11 @@ jobs:
           # Empty means that repo's default branch, which is what a push to
           # THIS repo wants. A push to the product repo passes its own ref
           # through, or a branch there would silently be built against main.
-          ref: ${{ needs.meta.outputs.product_ref }}
+          # Pinned to the commit meta resolved, not the branch name: if the
+          # branch moves during a multi-hour run (a push that doesn't dispatch,
+          # or a slow cancel), the cells would build different commits than
+          # the one version.json and the release notes name.
+          ref: ${{ needs.meta.outputs.product_sha }}
           path: changji
 
       # A runner has twenty-odd gigabytes free, and CUDA's intermediates (one
@@ -1464,7 +1566,7 @@ jobs:
 
   # ---- Publish ----
   publish:
-    name: Publish to ${{ needs.meta.outputs.channel == 'release' && 'Release' || 'the beta prerelease' }}
+    name: Publish to ${{ needs.meta.outputs.channel == 'release' && 'CI release' || 'the beta prerelease' }}
     # **Wait for build-gpu, but do not let it block.** It is in `needs` so that
     # publishing happens after it finishes — otherwise the Release is already
     # built by the time the GPU packages are, and it would have to be published
@@ -1669,6 +1771,10 @@ jobs:
           # the fallback). The notes have to name the version that went in.
           PRODUCT_REF: ${{ needs.meta.outputs.product_ref }}
           PRODUCT_SHA: ${{ needs.meta.outputs.product_sha }}
+          # The version embeds the branch (or tag) name. Never inline it into
+          # run: -- `x$(curl...)` is a valid ref name and would execute in a step
+          # holding the release token. Pass it through the environment.
+          CJ_VERSION: ${{ needs.meta.outputs.version }}
         run: |
           gh release delete release --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag \
             || echo "no previous release Release; skipping"
@@ -1677,7 +1783,7 @@ jobs:
           {
             echo "| | |"
             echo "|---|---|"
-            echo "| Version | \`${{ needs.meta.outputs.version }}\` (what \`changji --version\` prints) |"
+            echo "| Version | \`$CJ_VERSION\` (what \`changji --version\` prints) |"
             # **Everything in these packages is built from the product repo**
             # (engine, web UI, prompts; see the meta job), so that ref and
             # commit answer "which sources". The workflow commit is only which
@@ -1699,7 +1805,8 @@ jobs:
           gh release create release \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
-            --title "${{ needs.meta.outputs.version }}" \
+            --latest \
+            --title "CI release $CJ_VERSION" \
             --notes-file body.md \
             dist/*
 
@@ -1723,6 +1830,10 @@ jobs:
           # the fallback). The notes have to name the version that went in.
           PRODUCT_REF: ${{ needs.meta.outputs.product_ref }}
           PRODUCT_SHA: ${{ needs.meta.outputs.product_sha }}
+          # The version embeds the branch (or tag) name. Never inline it into
+          # run: -- `x$(curl...)` is a valid ref name and would execute in a step
+          # holding the release token. Pass it through the environment.
+          CJ_VERSION: ${{ needs.meta.outputs.version }}
         run: |
           gh release delete beta --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag \
             || echo "no previous beta Release; skipping"
@@ -1734,7 +1845,7 @@ jobs:
             || echo "no leftover beta tag; skipping"
           {
             echo "**Rolling prerelease.** Built from the last push to the product repo; the next one overwrites it."
-            echo "For a stable build, look for the `release` entry under [Releases](https://github.com/$GITHUB_REPOSITORY/releases)."
+            echo "For a stable build, look for the \`release\` entry under [Releases](https://github.com/$GITHUB_REPOSITORY/releases)."
             echo
             echo "| | |"
             echo "|---|---|"
@@ -1742,7 +1853,7 @@ jobs:
             # repo's, so that is the branch named here.
             echo "| Built from | \`$PRODUCT_REF\` @ ${PRODUCT_SHA} |"
             echo "| Workflow commit | ${GITHUB_SHA} |"
-            echo "| Version | \`${{ needs.meta.outputs.version }}\` (what \`changji --version\` prints) |"
+            echo "| Version | \`$CJ_VERSION\` (what \`changji --version\` prints) |"
             echo "| Built | $(date -u '+%Y-%m-%d %H:%M UTC') |"
             echo
             echo "## Downloads"

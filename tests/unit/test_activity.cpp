@@ -20,6 +20,7 @@
 #include "pipeline/jobs.hpp"
 #include "pipeline/task_board.hpp"
 #include "util/text.hpp"
+#include "util/writer.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -194,6 +195,22 @@ TEST_CASE("画的是哪一格参考图：target 跟着那一行走") {
     CHECK(rows[0]["total"] == 20);
 }
 
+TEST_CASE("短活那一行带着是哪一条对话派的（lane）") {
+    // 同一部片子开着两条对话：对话底下那几行只摆自己派的。不带 lane 的话 B 那条对话里照样摆着
+    // A 在写什么、想什么（2026-09-27 用户报的）。人按的钮没立 WriterScope，lane 是空串。
+    {
+        Activity a{"write", "/p/one", "", "写正文"};
+        const auto rows = running_activities();
+        REQUIRE(rows.size() == 1);
+        CHECK(rows[0]["lane"] == "");
+    }
+    changji::util::WriterScope w{{changji::pipeline::chat_lane("c2")}};
+    Activity a{"write", "/p/one", "", "写正文"};
+    const auto rows = running_activities();
+    REQUIRE(rows.size() == 1);
+    CHECK(rows[0]["lane"] == "chat:c2");
+}
+
 TEST_CASE("长跑任务那几行也要有 target 这一栏") {
     // 顶栏和设定页都是一套代码画两边的列表，少一个键就得到处判空。
     // 同 `queued` 那一栏的理由。
@@ -264,6 +281,46 @@ TEST_CASE("任务账本：人按的停不是失败") {
     // **有 error 也算"停下了"，不是"失败"。** 报成红的话人会去找哪儿出错
     // 了，而什么都没出错——和 util/cancel_words.hpp 那条是同一件事。
     CHECK(b.at("done")[0].at("state") == "cancelled");
+}
+
+TEST_CASE("任务账本：抛着异常走的那件记成没做成，不是做完") {
+    // 出大纲那种一抛 502 就走的：原来账上是绿的「做完了」，故事一章没出——
+    // 任务页、对话里场记读到的都是「正在出大纲 · 做完」（拿假模型回一句不是
+    // JSON 的话试出来的）。
+    const std::string proj = "/tmp/任务账本用例_异常";
+    try {
+        Activity a{"outline", proj, "", "正在出大纲"};
+        throw std::runtime_error("大模型没写出能用的大纲");
+    } catch (const std::exception&) {
+    }
+    // 自己先记过一句更具体的，不被那句泛泛的盖掉。
+    try {
+        Activity a{"outline", proj, "", "正在出大纲"};
+        a.task().fail("解析不动：第 3 行");
+        throw std::runtime_error("x");
+    } catch (const std::exception&) {
+    }
+    // 人按了停、停的那一下抛出来的：还是「停下了」。
+    try {
+        Activity a{"outline", proj, "", "正在出大纲"};
+        CHECK(pipeline::cancel_task(a.task().id()));
+        throw std::runtime_error("已手动停止");
+    } catch (const std::exception&) {
+    }
+    // 正常干完的照旧是做完。
+    { Activity a{"outline", proj, "", "正在出大纲"}; }
+    const auto b = pipeline::task_board(proj);
+    REQUIRE(b.at("done").size() == 4);
+    std::vector<std::string> states;
+    std::vector<std::string> errors;
+    for (const auto& r : b.at("done")) {
+        states.push_back(r.at("state").get<std::string>());
+        errors.push_back(r.value("error", std::string()));
+    }
+    // 做完的那一栏新的在前。
+    CHECK(states == std::vector<std::string>{"done", "cancelled", "failed", "failed"});
+    CHECK(errors[2] == "解析不动：第 3 行");
+    CHECK_FALSE(errors[3].empty());
 }
 
 TEST_CASE("任务账本：上一级停了，每一件跟着停") {
@@ -372,6 +429,22 @@ TEST_CASE("思考超了上限从头上截：截口落在字的边界上，读回
     std::string short_one = "想";
     CHECK(changji::text::keep_tail_utf8(short_one, 10) == 0);
     CHECK(short_one == "想");
+}
+
+TEST_CASE("按字节读满之后：尾巴上没写完的那半个字去掉，完整的、本来就坏的不动") {
+    using changji::text::drop_partial_utf8_tail;
+    const std::string full = "ab想";
+    CHECK(drop_partial_utf8_tail(full) == full);
+    CHECK(drop_partial_utf8_tail(full.substr(0, 4)) == "ab");   // 「想」只剩头一个字节
+    CHECK(drop_partial_utf8_tail(full.substr(0, 3)) == "ab");
+    CHECK(drop_partial_utf8_tail("ab") == "ab");
+    CHECK(drop_partial_utf8_tail("") == "");
+    const std::string emoji = "x\xF0\x9F\x98\x80";   // 四字节的
+    CHECK(drop_partial_utf8_tail(emoji) == emoji);
+    CHECK(drop_partial_utf8_tail(emoji.substr(0, 4)) == "x");
+    // GBK 尾巴（不是 UTF-8 的起头字节）原样留着，交给后面判编码。
+    const std::string gbk = "\xD6\xD0\xCE\xC4";
+    CHECK(drop_partial_utf8_tail(gbk).size() >= 3);
 }
 
 // ---------------------------------------------------------------------------

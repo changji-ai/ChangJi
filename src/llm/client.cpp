@@ -1,5 +1,6 @@
 #include "util/say.hpp"
 #include "llm/client.hpp"
+#include "llm/chat_pick.hpp"
 #include "llm/thinking.hpp"
 #include "llm/local_client.hpp"
 
@@ -409,16 +410,16 @@ std::string explain_status(const config::LLMConfig& cfg, int status,
             (low.find("not found") != std::string::npos ||
              low.find("not exist") != std::string::npos);
         if (about_model) {
-            hint = SAYF("大模型服务在，但它没有 %1 这个模型。"
-                        "本地 Ollama 的话先 ollama pull %1，"
-                        "或者去项目页「模型」那一行点一下编剧模型的名字，"
-                        "在弹出来的窗口里换一个已经有的。", cfg.model);
+            hint = SAYF("大模型服务可用，但没有 %1 这个模型。如使用本地 Ollama，"
+                        "请先执行 ollama pull %1；或在「设置 ▸ 大模型」"
+                        "中点击该服务的「选择模型…」，改选一个已有的模型。", cfg.model);
         } else {
-            hint = SAYF("大模型服务在 %1 上没有这个接口。"
-                        "多半是地址填错了——地址要带 /v1 结尾，"
-                        "而且那台机器上的服务得真的起着。"
-                        "改它：桌面端在「设置 ▸ 大模型 ▸ 地址」，"
-                        "网页那一套在项目页「模型」那一行点一下编剧模型的名字。",
+            // 地址在哪儿改：2026-09-28 设置页重排之后两个前端是同一个地方——「设置 ▸
+            // 大模型」里这一家的「修改」（原来桌面端写「设置 ▸ 大模型 ▸ 地址」，网页指的
+            // 项目页 09-26 就删了）。
+            hint = SAYF("大模型服务在 %1 上没有此接口，可能是地址填写有误："
+                        "地址应以 /v1 结尾，且该机器上的服务需已启动。修改地址："
+                        "在「设置 ▸ 大模型」中点击该服务的「修改」。",
                         url);
         }
     } else if (status == 401 || status == 403) {
@@ -439,17 +440,18 @@ std::string explain_status(const config::LLMConfig& cfg, int status,
         // **三种情况要说三句不同的话。** 都说成「API Key 不对」的话，
         // 前两种会把人支去检查一个他根本没填过的东西。
         if (cfg.api_key.empty()) {
-            hint = SAYF("还没填 API Key——桌面端在「设置 ▸ 大模型 ▸ 密钥」，"
-                        "网页那一套在项目页「模型」那一行点一下编剧模型的名字。"
-                        "当前地址是 %1。", cfg.base_url);
+            // 桌面端和网页（2026-09-26 起只剩对话页）都在「设置 ▸ 大模型」里填；原来那句还指着
+            // 网页的项目页，那一页已经删了。
+            hint = SAYF("未填写 API Key，请在「设置 ▸ 大模型」中点击该服务的「修改」"
+                        "填写。当前地址：%1。", cfg.base_url);
             if (cfg.base_url.find("bigmodel.cn") != std::string::npos ||
                 cfg.base_url.find("z.ai") != std::string::npos) {
                 // ⚠️ **两句话接在一起，接缝归被接的那一句管。** 中文
                 // 「。」后面不空格，西文句号后面要空一格——所以那几种语言的
                 // 译文自己带一个前导空格，中日韩的不带。在这儿写死一个
                 // `" "` 的话，中文那份就多出一个空格。
-                hint += SAY("去 bigmodel.cn 控制台领一把——默认挑的 "
-                            "glm-4.7-flash 本身不要钱，但服务仍然要认人。");
+                hint += SAY("可在 bigmodel.cn 控制台申请密钥；默认模型 glm-4.7-flash 免费，"
+                            "但仍需密钥验证身份。");
             }
         } else if (!model_not_allowed(detail).empty()) {
             // **403 不都是密钥问题。** 2026-09-13 实测：OpenRouter 上
@@ -462,14 +464,13 @@ std::string explain_status(const config::LLMConfig& cfg, int status,
             // 照老话术报的话，用户会去反复换一把其实没问题的密钥，而真正
             // 该做的是换一个模型。**服务已经把原因说清楚了，照抄就是**——
             // 我们猜的那句反而盖住了它。
-            hint = SAYF("这个模型不让我们用（%1）：%2"
-                        "\n密钥本身多半没问题——去项目页那个模型窗口里换一个"
-                        "模型试试。",
+            hint = SAYF("此模型不允许当前调用方使用（%1）：%2\n"
+                        "密钥本身通常没有问题，请在「设置 ▸ 大模型」"
+                        "中点击该服务的「选择模型…」换一个模型。",
                         std::to_string(status), model_not_allowed(detail));
         } else {
-            hint = SAYF("大模型服务拒绝了这次请求（%1），八成是 API Key 不对。"
-                        "去项目页「模型」那一行点一下编剧模型的名字，"
-                        "在那个窗口里换一把。", std::to_string(status));
+            hint = SAYF("大模型服务拒绝了此请求（%1），很可能是 API Key 不正确。"
+                        "请在「设置 ▸ 大模型」中点击该服务的「修改」更换密钥。", std::to_string(status));
         }
     } else if (status == 429) {
         // **429 不一定是"太频繁"。** 智谱把"余额不足/没有可用资源包"也回
@@ -481,9 +482,9 @@ std::string explain_status(const config::LLMConfig& cfg, int status,
             // 智谱那句 429 里就带着「余额」，翻了就再也对不上，而且不报错
             // ——人看到的会是一句"等一会儿再试"，等一件永远不会好的事。
             detail.find(SAY_NEVER("余额")) != std::string::npos) {
-            hint = SAY("这个模型要钱，而账上没余额（服务回的是 429 / 1113）。"
-                       "换一个免费模型（智谱这边是 glm-4.7-flash），"
-                       "或者去服务商那边充值。改在项目页那个模型窗口里。");
+            hint = SAY("此模型需要付费，但账户余额不足（服务返回 429 / 1113）。"
+                       "请改用免费模型（智谱为 glm-4.7-flash），或向服务商充值。"
+                       "更换模型：在「设置 ▸ 大模型」中点击该服务的「选择模型…」。");
             // **手上有 GLM Coding Plan 订阅的人会撞在这儿，而且想不明白。**
             // 那份额度只认智谱登记在册的编程工具（Claude Code、Cline、
             // Cursor 那些），官方原话是"在除规定工具外调用 API，不可享用
@@ -494,17 +495,18 @@ std::string explain_status(const config::LLMConfig& cfg, int status,
             if (cfg.base_url.find("bigmodel.cn") != std::string::npos ||
                 cfg.base_url.find("z.ai") != std::string::npos) {
                 hint += SAY(
-                    "\n⚠️ 有 GLM Coding Plan 订阅也一样：那份额度只认智谱"
-                    "登记在册的编程工具，自己写的程序调不到，正是这个报错。"
-                    "订阅之外另充一点按量余额，或者就用免费那个。");
+                    "\n"
+                    "⚠️ 持有 GLM Coding Plan 订阅时同样会出现此错误："
+                    "该额度仅适用于智谱登记在册的编程工具，其他程序无法使用。"
+                    "请在订阅之外另行充值按量计费余额，或改用免费模型。");
             }
         } else {
-            hint = SAY("大模型服务说请求太频繁了，等一会儿再试。"
-                       "免费档限流很紧，隔十几秒再点一次多半就过了。");
+            hint = SAY("大模型服务提示请求过于频繁，请稍后再试。免费版限流较严，"
+                       "通常间隔十几秒后重试即可。");
         }
     } else if (status >= 500) {
-        hint = SAYF("大模型服务自己出错了（%1）。"
-                    "本地服务的话看一眼它的日志，云服务的话过一会儿再试。",
+        hint = SAYF("大模型服务内部出错（%1）。如为本地服务，请查看其日志；"
+                    "如为云服务，请稍后再试。",
                     std::to_string(status));
     } else {
         hint = SAYF("大模型服务返回 %1。", std::to_string(status));
@@ -512,7 +514,8 @@ std::string explain_status(const config::LLMConfig& cfg, int status,
 
     std::string out = hint;
     if (!cfg.model.empty()) out += SAYF("\n当前模型：%1", cfg.model);
-    if (!detail.empty()) out += SAYF("\n服务说：%1", detail);
+    if (!detail.empty()) out += SAYF("\n"
+                                     "服务返回：%1", detail);
     return out;
 }
 
@@ -610,8 +613,12 @@ std::string connect_failed(const config::LLMConfig& cfg,
 ///      网络的事，重发只是让人多等一个超时（「连不上的时候不重试」那条用例）；
 ///   2. **正文、工具调用一个字都还没来**，由调用方判。来过的话界面上已经
 ///      出了半句，再发一趟会把同样的话再冒一遍；
-///   3. **离超时还远**（不到 timeout_s 的一半）。真是等满了超时的，再等一个
-///      超时也一样。
+///   3. **离超时还远**：断之前**静了多久**（最后一个字节到断开）不到 timeout_s
+///      的一半。真是等满了超时的，再等一个超时也一样。
+///      ⚠️ 量的是静了多久，**不是这一趟一共跑了多久**（2026-09-27）：拆分镜一场
+///      glm-5.3-flash 要想十几分钟，第 4 场流了 29 分钟（思考 8 万字、正文 5496 字）
+///      时被对面掐断——字一直在来，离读超时远得很，却因为"总时长过了一半"不重发，
+///      前三场白跑、整章一小时作废。
 /// 最多重发几趟。**一趟不够**：2026-09-25 实测智谱连着两趟都断（第二趟也是
 /// 想到一半），整轮以报错收场。三趟都断的概率小得多，再多就是在跟一个真坏
 /// 了的服务耗。
@@ -704,7 +711,11 @@ std::string RemoteClient::complete(const Request& req,
             int status = 0;
             std::optional<std::string> transport_error;
             bool canceled = false;
-            double secs = 0.0;       ///< 这一趟花了多久，见 worth_resending
+            double secs = 0.0;       ///< 这一趟花了多久
+            double idle = 0.0;       ///< 断开之前静了多久（最后一个字节到结束），见 worth_resending
+            /// 流是好好收尾的（见过 `[DONE]` 或者 finish_reason），或者是整份
+            /// JSON 那条兜底。都不是的就是断在半路了，见下面 require_finished。
+            bool finished = false;
         };
         const auto build = [&] {
             nlohmann::ordered_json payload = build_payload(cfg, req);
@@ -737,9 +748,11 @@ std::string RemoteClient::complete(const Request& req,
 
             SseDeltas sse;
             const auto t0 = std::chrono::steady_clock::now();
+            auto last_byte = t0;
             HttpResponse r = stream_post_(
                 url, payload.dump(), headers, cfg.timeout_s,
                 [&](const char* data, std::size_t len) {
+                    last_byte = std::chrono::steady_clock::now();
                     if (tok.cancelled()) {
                         a.canceled = true;
                         return false;   // 断掉，别让它继续生成
@@ -769,11 +782,13 @@ std::string RemoteClient::complete(const Request& req,
                     return true;
                 });
             a.secs = seconds_since(t0);
+            a.idle = seconds_since(last_byte);
             a.status = r.status;
             a.response_body = r.body;
             a.transport_error = r.transport_error;
             a.sse_error = sse.error();
             a.finish_reason = sse.finish_reason();
+            a.finished = sse.done() || !sse.finish_reason().empty();
             // **服务端没理会 stream 的情况**：它回了一份普通的 JSON，SSE 解不
             // 出任何东西。那份 body 在 r.body 里（流式那条只在出错时收 body，
             // 但"整份 JSON"和"错误体"在传输上没区别），试着按整段解一次。
@@ -794,6 +809,7 @@ std::string RemoteClient::complete(const Request& req,
                         log.append_thinking(think);
                     }
                     a.text = extract_content(r.body);
+                    a.finished = true;   // 整份 JSON：没有"断在半路"一说
                     if (on_token && !a.text.empty()) on_token(a.text);
                 } catch (const std::exception&) {
                     // 解不出来就由下面按本次响应直接报错；不重复发送同一个请求。
@@ -818,11 +834,13 @@ std::string RemoteClient::complete(const Request& req,
         }
         bool resent = false;
         // 正文来过一截的，调用方给了 `on_restart`（收得回）才重发，见 chat 那处。
+        // **没人接正文的（`on_token` 空）也重发**：那半截只在这儿攒着、谁都没看见过，
+        // 作废了不会冒两遍。拆分镜、改编剧本走的就是这条（界面上只推思考）。
         for (int tries = 0; tries < kMaxResends && !a.canceled &&
-                            (a.text.empty() || req.on_restart) &&
-                            worth_resending(a.transport_error, a.secs, cfg.timeout_s);
+                            (a.text.empty() || !on_token || req.on_restart) &&
+                            worth_resending(a.transport_error, a.idle, cfg.timeout_s);
              ++tries) {
-            if (!a.text.empty()) req.on_restart();
+            if (!a.text.empty() && on_token) req.on_restart();
             const std::string notice = resend_notice();
             if (req.on_thinking) req.on_thinking(notice);
             log.append_thinking(notice);
@@ -849,6 +867,14 @@ std::string RemoteClient::complete(const Request& req,
             throw LlmError(SAYF("大模型服务报错：%1", a.sse_error));
         }
         require_complete_reason(a.finish_reason);
+        // ⚠️ **流断在半路不算回完了。** 反向代理、网关把一条没写长度的 SSE 中途
+        // 关掉，httplib 读到 EOF 当成功——半章正文就这么进了库（2026-09-25 拿
+        // 假服务掐断实测：原样收下）。没见过 [DONE]、也没见过 finish_reason 的
+        // 就是断了。
+        if (!a.finished && !a.text.empty()) {
+            throw LlmError(SAY("大模型的回话断在半路了（没收到收尾），这一次没收下；"
+                               "多半是中间的代理或网关把连接掐了，再试一次"));
+        }
         if (a.text.empty()) {
             throw LlmError(SAY("大模型服务没有返回正文；本次请求不会自动重发，"
                             "以免重复生成或重复计费"));
@@ -1067,10 +1093,16 @@ ChatReply parse_chat_reply(const std::string& raw_body) {
         for (const auto& item : *tc) {
             if (!item.is_object()) continue;
             ToolCall call;
-            call.id = item.value("id", std::string());
+            // 按类型取：`"id": null` 这种 json::value 会抛 type_error——那不是
+            // LlmError，批量那几条只接 LlmError，一个怪回包就把整批停了。
+            if (const auto id = item.find("id"); id != item.end() && id->is_string()) {
+                call.id = id->get<std::string>();
+            }
             const auto fn = item.find("function");
             if (fn != item.end() && fn->is_object()) {
-                call.name = fn->value("name", std::string());
+                if (const auto n = fn->find("name"); n != fn->end() && n->is_string()) {
+                    call.name = n->get<std::string>();
+                }
                 const auto args = fn->find("arguments");
                 if (args != fn->end()) {
                     call.arguments = args->is_string() ? args->get<std::string>() : args->dump();
@@ -1212,11 +1244,14 @@ ChatReply RemoteClient::chat(const std::vector<Message>& messages, const ordered
         SseDeltas sse;
         std::string content;
         bool canceled = false;
+        // 最后一个字节什么时候到的：断开时量「静了多久」，见 worth_resending。
+        auto last_byte = std::chrono::steady_clock::now();
         const OnChunk on_chunk = [&](const char* data, std::size_t len) {
             if (tok.cancelled()) {
                 canceled = true;
                 return false;   // 断掉，别让它继续生成
             }
+            last_byte = std::chrono::steady_clock::now();
             const std::string piece = sse.feed(data, len);
             // **思考先推，正文后推**，理由同 complete_stream：反了的话
             // 界面上会先冒出第一句正文、再冒出"它正在想"，像倒放。
@@ -1232,12 +1267,12 @@ ChatReply RemoteClient::chat(const std::vector<Message>& messages, const ordered
             if (opts.on_token) opts.on_token(piece);
             return true;
         };
-        auto t0 = std::chrono::steady_clock::now();
+        last_byte = std::chrono::steady_clock::now();
         HttpResponse r =
             stream_post_(url, payload.dump(), headers, cfg.timeout_s, on_chunk);
         // 400 时流里一个字都没来过，sse / content 还是空的，接着用就是。
         if (thinking_refused(r)) {
-            t0 = std::chrono::steady_clock::now();
+            last_byte = std::chrono::steady_clock::now();
             r = stream_post_(url, payload.dump(), headers, cfg.timeout_s, on_chunk);
         }
         // 断在半路、正文和工具调用一个字都还没来：原样再发一趟，见
@@ -1249,7 +1284,7 @@ ChatReply RemoteClient::chat(const std::vector<Message>& messages, const ordered
         bool resent = false;
         for (int tries = 0; tries < kMaxResends && !canceled &&
                             (content.empty() || static_cast<bool>(opts.on_restart)) &&
-                            worth_resending(r.transport_error, seconds_since(t0), cfg.timeout_s);
+                            worth_resending(r.transport_error, seconds_since(last_byte), cfg.timeout_s);
              ++tries) {
             if (!content.empty()) {
                 opts.on_restart();
@@ -1260,7 +1295,7 @@ ChatReply RemoteClient::chat(const std::vector<Message>& messages, const ordered
             log.append_thinking(notice);
             sse = SseDeltas{};
             resent = true;
-            t0 = std::chrono::steady_clock::now();
+            last_byte = std::chrono::steady_clock::now();
             r = stream_post_(url, payload.dump(), headers, cfg.timeout_s, on_chunk);
         }
         log.note_response(r.status, r.body);
@@ -1290,6 +1325,13 @@ ChatReply RemoteClient::chat(const std::vector<Message>& messages, const ordered
             log.set_finish_reason(whole.finish_reason);
             log.set_reply(whole.content);
             return whole;
+        }
+        // 流断在半路（没 [DONE]、没 finish_reason）：工具调用的参数可能只有半截
+        // JSON，正文可能只有半句。理由同 complete_stream 那处。
+        if (!sse.done() && sse.finish_reason().empty() &&
+            (!content.empty() || !sse.tool_calls().empty())) {
+            throw LlmError(SAY("大模型的回话断在半路了（没收到收尾），这一次没收下；"
+                               "多半是中间的代理或网关把连接掐了，再试一次"));
         }
         ChatReply reply;
         reply.content = content;
@@ -1491,8 +1533,41 @@ std::shared_ptr<Client> make_client(ConfigProvider cfg, HttpPost post,
 }
 
 std::shared_ptr<Client> make_client(HttpPost post, HttpPostStream stream_post) {
-    return make_client(ConfigProvider([] { return config::runtime().snapshot().llm; }),
+    // **问的是这条线程上的那份**（`llm/chat_pick.hpp`）：对话那一轮、它派出去的活
+    // 各自挑了哪家哪个模型，叠在全局那份上。没挑就是全局那份，一个字不变。
+    return make_client(ConfigProvider([] { return effective_llm(); }),
                        std::move(post), std::move(stream_post));
+}
+
+std::string redirect_target(const std::string& base, const std::string& loc) {
+    if (loc.rfind("http://", 0) == 0 || loc.rfind("https://", 0) == 0) return loc;
+    const auto scheme_end = base.find("://");
+    if (scheme_end == std::string::npos) return loc;
+    if (loc.rfind("//", 0) == 0) return base.substr(0, scheme_end + 1) + loc;
+    const auto path_at = base.find('/', scheme_end + 3);
+    const std::string origin = path_at == std::string::npos ? base : base.substr(0, path_at);
+    if (!loc.empty() && loc[0] == '/') return origin + loc;
+    std::string dir = path_at == std::string::npos ? "/" : base.substr(path_at);
+    dir = dir.substr(0, dir.find_first_of("?#"));
+    dir = dir.substr(0, dir.rfind('/') + 1);
+    return origin + dir + loc;
+}
+
+std::string request_target(const std::string& path) {
+    static const char* hex = "0123456789ABCDEF";
+    std::string out;
+    out.reserve(path.size());
+    for (const char ch : path) {
+        const auto c = static_cast<unsigned char>(ch);
+        if (c >= 0x80 || c <= 0x20 || c == 0x7F) {
+            out += '%';
+            out += hex[c >> 4];
+            out += hex[c & 0xF];
+        } else {
+            out += ch;
+        }
+    }
+    return out;
 }
 
 }  // namespace changji::llm

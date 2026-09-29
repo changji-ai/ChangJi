@@ -15,6 +15,7 @@
 
 #include "stages/storyboard.hpp"
 #include "pipeline/task_board.hpp"
+#include "util/lanes.hpp"
 #include "util/paths.hpp"
 #include "util/text.hpp"
 
@@ -308,14 +309,22 @@ double probe_wav_duration(const fs::path& path) {
     if (sample_rate == 0 || channels == 0 || bits == 0) {
         throw AudioError("音频文件读不出时长：" + paths::to_utf8(path));
     }
+    std::error_code ec;
+    const auto total = fs::file_size(path, ec);
     if (data_bytes == 0) {
         // data 块在头 1KB 之外（元数据很长时会这样）。退回按文件大小估：
         // 比抛异常强——那会让整条流水线断在一句台词上。
-        std::error_code ec;
-        const auto total = fs::file_size(path, ec);
-        if (ec || total <= off) {
+        // `total <= off + 8` 也得拦：原来只拦 `<= off`，差那 8 个字节时
+        // `total - off - 8` 在无符号上绕成四十亿。
+        if (ec || total <= off + 8) {
             throw AudioError("音频文件读不出时长：" + paths::to_utf8(path));
         }
+        data_bytes = static_cast<std::uint32_t>(total - off - 8);
+    } else if (!ec && total > off + 8 && data_bytes > total - off - 8) {
+        // **data 块报的长度不能比文件还长。** 流式的 TTS 服务、从管道写的 wav
+        // 常把它写成占位的 0xFFFFFFFF（写头的时候还不知道多长）——照信就是
+        // 24 kHz 下八万九千秒，过得了「没声音」那道闸，然后一路拆镜、最后按
+        // 最长锁住这一镜（2026-09-25 审出来）。按文件里真有的那么多算。
         data_bytes = static_cast<std::uint32_t>(total - off - 8);
     }
 
@@ -676,14 +685,8 @@ std::vector<ShotAudioPlan> AudioStage::run(std::vector<models::Shot*>& shots,
         }
     };
 
-    if (lanes == 1) {
-        lane();   // 串行那条路一个线程都不起，行为和以前逐字节一样
-    } else {
-        std::vector<std::thread> pool;
-        pool.reserve(static_cast<std::size_t>(lanes));
-        for (int k = 0; k < lanes; ++k) pool.emplace_back(lane);
-        for (auto& t : pool) t.join();
-    }
+    // 一路抛了不从线程里漏出去（漏出去是 terminate），见 util/lanes.hpp。
+    util::run_lanes(lanes, lane);
 
     // ---- 收。**在调用线程上按镜头原顺序改 Shot** ----
     std::vector<ShotAudioPlan> plans;

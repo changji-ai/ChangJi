@@ -231,6 +231,12 @@ changji_patch_crow_422("${crow_SOURCE_DIR}/include")
 # Crow 发静态文件走窄字符 API：Windows 上带中文的片子目录里一张图都发不出去。
 include("${CMAKE_CURRENT_LIST_DIR}/cmake/patch_crow_utf8_path.cmake")
 changji_patch_crow_utf8_path("${crow_SOURCE_DIR}/include")
+# Crow 的 multipart 碰到一段没有 name 的就解引用 end()：一个畸形上传把引擎打崩。
+include("${CMAKE_CURRENT_LIST_DIR}/cmake/patch_crow_multipart_name.cmake")
+changji_patch_crow_multipart_name("${crow_SOURCE_DIR}/include")
+# /api/media 的分段请求原来是读进内存再回：拖一下整部电影的进度条就是一两个 G。
+include("${CMAKE_CURRENT_LIST_DIR}/cmake/patch_crow_static_range.cmake")
+changji_patch_crow_static_range("${crow_SOURCE_DIR}/include")
 
 # ⚠️ **httplib 的头文件目录不能是 SYSTEM。**
 #
@@ -821,7 +827,7 @@ if(_agent_dir)
     # 外层这一版还没有记忆 / 技能 / 扩展那几条接口的实现（拿新引擎编一版更早的
     # 外层时）：补上空壳，不然 server.cpp 链不上——CI 按分支配对，两边不一定同时
     # 有它。
-    foreach(_api memory_api skills_api mcp_api)
+    foreach(_api memory_api skills_api mcp_api chat_branch_api loops_api)
         if(NOT EXISTS "${_agent_dir}/${_api}.cpp")
             list(APPEND CHANGJI_AGENT_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/http/${_api}_absent.cpp")
         endif()
@@ -836,7 +842,8 @@ else()
         src/agent/transcript.cpp src/agent/tools.cpp src/agent/loop.cpp
         src/agent/outcome.cpp src/agent/attachments.cpp src/http/chat_api.cpp
         src/http/memory_api_absent.cpp src/http/skills_api_absent.cpp
-        src/http/mcp_api_absent.cpp)
+        src/http/mcp_api_absent.cpp src/http/chat_branch_api_absent.cpp
+        src/http/loops_api_absent.cpp)
     set(CHANGJI_AGENT_TESTS tests/unit/test_agent.cpp tests/unit/test_outcome.cpp)
     set(_agent_from "引擎仓库自带的旧版——外层没有 agent/")
     if(DEFINED ENV{GITHUB_ACTIONS})
@@ -848,6 +855,7 @@ message(STATUS "对话代理：${CHANGJI_AGENT_DIR}（${_agent_from}）")
 
 add_library(changji_core STATIC
     src/util/paths.cpp
+    src/util/atomic_file.cpp
     src/util/say.cpp
     src/util/proc.cpp
     src/util/child.cpp
@@ -870,6 +878,7 @@ add_library(changji_core STATIC
     src/models/hardware.cpp
     ${CHANGJI_METAL_SOURCES}
     src/util/text.cpp
+    src/util/net_inward.cpp
     src/util/human_time.cpp
     src/util/fs_time.cpp
     src/stages/json_extract.cpp
@@ -914,6 +923,7 @@ add_library(changji_core STATIC
     src/llm/client_command.cpp
     src/llm/local_client.cpp
     src/llm/call_log.cpp
+    src/llm/chat_pick.cpp
     src/infer/capability.cpp
     src/infer/blob.cpp
     src/infer/node_pick.cpp
@@ -923,6 +933,8 @@ add_library(changji_core STATIC
     src/infer/node_registry.cpp
     src/infer/peer_auth.cpp
     src/http/request_guard.cpp
+    src/http/ui_token.cpp
+    src/http/listen_addr.cpp
     src/infer/node_status.cpp
     src/infer/local_exec.cpp
     src/infer/task_run.cpp
@@ -969,6 +981,8 @@ add_library(changji_core STATIC
     src/http/episodes.cpp
     src/http/projects.cpp
     src/http/llm_info.cpp
+    src/http/cloud_api.cpp
+    src/cloud/cloud.cpp
     src/http/config_api.cpp
     src/http/config_api_doctor.cpp
     src/http/reset.cpp
@@ -1076,6 +1090,19 @@ endif()
 
 add_executable(changji src/main.cpp)
 target_link_libraries(changji PRIVATE changji_core)
+# 起步那道「CPU 有没有 AVX2 / FMA」的检查（main.cpp 的 cpu_ok）只给真按 AVX2 基线
+# 编的构建：编进了 ggml（SD 或 LLAMA）、GGML_NATIVE=OFF（发行版那条线，ggml 默认
+# 开 AVX2/FMA）、又没有明确关掉 GGML_AVX2。本机 -march=native 的开发构建、没编
+# ggml 的、或者照 main.cpp 那句提示 -DGGML_AVX2=OFF 编出来给老 CPU / 通用型号
+# 虚拟机用的，都不该被它拦（2026-09-27 在 192.168.20.239 那台 QEMU 虚拟机上撞到）。
+if((CHANGJI_SD OR CHANGJI_LLAMA)
+   AND DEFINED GGML_NATIVE AND NOT GGML_NATIVE
+   AND NOT (DEFINED GGML_AVX2 AND NOT GGML_AVX2))
+    target_compile_definitions(changji PRIVATE CHANGJI_NEEDS_AVX2=1)
+    message(STATUS "CPU 基线：AVX2 / FMA（起步会查）")
+else()
+    message(STATUS "CPU 基线：不查 AVX2（本机原生、没编 ggml、或明确关了 GGML_AVX2）")
+endif()
 # Windows：进程的窄字符代码页设成 UTF-8（理由在清单文件头上）。MSVC 链接器把
 # 源文件里的 .manifest 和它自己生成的那份合并。**测试程序不挂**：挂上之后
 # test_crow_static 在没打补丁时也会绿，就钉不住 Crow 那处补丁了。
@@ -1414,11 +1441,13 @@ if(CHANGJI_BUILD_TESTS)
         tests/unit/test_enums.cpp
         tests/unit/test_half_written.cpp
         tests/unit/test_qml_textformat.cpp
+        tests/unit/test_icons.cpp
         tests/unit/test_qml_names.cpp
         tests/unit/test_done_words.cpp
         tests/unit/test_lap_time.cpp
         tests/unit/test_qml_anim.cpp
     tests/unit/test_qml_icons.cpp
+    tests/unit/test_qml_refresh.cpp
     tests/unit/test_qml_round.cpp
     tests/unit/test_qml_float.cpp
     tests/unit/test_qml_effort.cpp
@@ -1442,6 +1471,8 @@ if(CHANGJI_BUILD_TESTS)
         tests/unit/test_peer_auth.cpp
         tests/unit/test_request_guard.cpp
         tests/unit/test_crow_static.cpp
+        tests/unit/test_crow_multipart.cpp
+        tests/unit/test_node_proxy.cpp
         tests/unit/test_blob.cpp
         tests/unit/test_node_pick.cpp
         tests/unit/test_node_table.cpp
@@ -1482,6 +1513,8 @@ if(CHANGJI_BUILD_TESTS)
         tests/unit/test_oneclick.cpp
         tests/unit/test_episodes.cpp
         tests/unit/test_llm_info.cpp
+        tests/unit/test_cloud.cpp
+        tests/unit/test_chat_pick.cpp
         tests/unit/test_writeback.cpp
         tests/unit/test_config_api.cpp
         tests/unit/test_projects.cpp
@@ -1549,6 +1582,8 @@ if(CHANGJI_BUILD_TESTS)
         src/infer/capability.cpp
         src/infer/peer_auth.cpp
         src/http/request_guard.cpp
+        src/http/ui_token.cpp
+        src/http/listen_addr.cpp
         src/infer/blob.cpp
         src/infer/node_pick.cpp
         # **这两个是 test_node_table / test_node_prefs 要的。**
@@ -1575,6 +1610,7 @@ if(CHANGJI_BUILD_TESTS)
         src/models/hardware.cpp
         ${CHANGJI_METAL_SOURCES}
         src/util/paths.cpp
+        src/util/atomic_file.cpp
     src/util/say.cpp
         src/util/proc.cpp
         src/util/child.cpp
@@ -1582,6 +1618,7 @@ if(CHANGJI_BUILD_TESTS)
         src/util/sysstat.cpp
         src/net/ws_client.cpp
         src/util/text.cpp
+        src/util/net_inward.cpp
         src/util/human_time.cpp
         src/util/fs_time.cpp
         src/stages/json_extract.cpp
@@ -1650,6 +1687,7 @@ if(CHANGJI_BUILD_TESTS)
         src/llm/client_command.cpp
         src/llm/local_client.cpp
         src/llm/call_log.cpp
+        src/llm/chat_pick.cpp
         src/config/settings.cpp
         src/config/model_index.cpp
         src/config/model_patch.cpp
@@ -1671,6 +1709,8 @@ if(CHANGJI_BUILD_TESTS)
         src/http/episodes.cpp
         src/http/projects.cpp
         src/http/llm_info.cpp
+        src/http/cloud_api.cpp
+        src/cloud/cloud.cpp
         src/http/config_api.cpp
         src/http/reset.cpp
         src/http/run.cpp

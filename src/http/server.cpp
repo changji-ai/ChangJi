@@ -28,8 +28,15 @@
 #include "util/text.hpp"
 #include "http/batch.hpp"
 #include "http/chat_api.hpp"
+#include "http/chat_branch_api.hpp"
 #include "http/crow_guard.hpp"
+#include "http/ui_token.hpp"
+#include "http/listen_addr.hpp"
+#include "infer/peer_auth.hpp"
+#include "http/cloud_api.hpp"
+#include "cloud/cloud.hpp"
 #include "http/memory_api.hpp"
+#include "http/loops_api.hpp"
 #include "http/mcp_api.hpp"
 #include "http/skills_api.hpp"
 #include "http/enums.hpp"
@@ -42,6 +49,7 @@
 #include "http/projects.hpp"
 #include "http/oneclick.hpp"
 #include "http/run.hpp"
+#include "stages/web_tools.hpp"
 #include "http/voices.hpp"
 #include "http/scripting.hpp"
 #include "http/story_api.hpp"
@@ -73,6 +81,7 @@
 #include "pipeline/activity.hpp"
 #include "pipeline/task_board.hpp"
 #include "pipeline/jobs.hpp"
+#include "util/cancel_words.hpp"
 #include <atomic>
 #include <chrono>
 #include <thread>
@@ -103,6 +112,29 @@ namespace fs = std::filesystem;
 using json = nlohmann::json;
 
 namespace {
+
+/// 机器表和"关掉哪台的哪一样"那两份，读→改→存在这一把锁里。
+///
+/// 加机器、删机器、改口令、用局域网里那台、关某一样，五条路由各自是
+/// "拿快照 → 改 → 整份写回"。两下重叠（连着加两台、加的同时删一台）就是
+/// 两边都从同一份快照改，后写的那份把先写的冲掉，一声不响（2026-09-25 审出来）。
+/// 不涉及网络，锁得住。
+std::mutex& peer_edit_mu() {
+    static std::mutex m;
+    return m;
+}
+
+/// 机器表写盘之后让这个进程跟上：**只换 peer.nodes 那一栏**。
+///
+/// 原来是整份 `load_settings()` 再 replace——设置页 persist:false 改的（只这一趟
+/// 生效的档位、旋钮）没进盘，加一台机器就被盘上那份冲回去，一声不响
+///（2026-09-26 审出来）。调的时候拿着 peer_edit_mu。
+config::Settings adopt_saved_nodes() {
+    auto cur = config::runtime().snapshot();
+    cur.peer.nodes = config::load_settings().peer.nodes;
+    config::runtime().replace(cur);
+    return cur;
+}
 
 /// 统一的 JSON 响应。
 ///
@@ -166,10 +198,19 @@ std::string stream_of(const json& body) {
 /// curl、对拍脚本走的都是那条，一个字没变。
 template <typename Work>
 ApiResult start_async(const std::string& stream_id, Work work) {
-    Offload::instance().post([stream_id, work] {
+    // 令牌**现在**就登上：排着队的那一段按停也停得住（见 JobPending）。
+    auto tok = std::make_shared<pipeline::CancelToken>();
+    auto pending = std::make_shared<JobPending>(stream_id, *tok);
+    Offload::instance().post([stream_id, work, tok, pending]() mutable {
         // 挂上"这条线程在给谁干活"，里面每一步的思考流就不用各自去捞
-        // stream 了（见 job_stream.hpp 的 current_stream）。
-        const JobScope scope{stream_id};
+        // stream 了（见 job_stream.hpp 的 current_stream）。借的就是排队时登上的那个令牌。
+        const JobScope scope{stream_id, *tok};
+        pending.reset();
+        // 排着的时候就被停了：不开跑，照「人按的停」那样收尾。
+        if (tok->cancelled()) {
+            job_error(stream_id, util::kCancelled);
+            return;
+        }
         // **异步的活砸了，日志里要有一行。**
         //
         // 这三条路原来只 job_error 给前端，服务端一个字不写。后果是活砸了
@@ -328,12 +369,60 @@ void request_stop() {
     if (g_app) g_app->stop();
 }
 
-void run(const config::Settings& settings, const Options& opts) {
+void settle_machine_token(config::Settings& s, const std::string& bind_host) {
+    if (!infer::is_public_bind(bind_host)) return;
+    const auto dir = paths::user_data_dir("changji");
+    const MachineToken t = resolve_machine_token(s.peer.token, dir);
+    if (t.from == "file" || t.from == "new") {
+        // 搬进 `[peer].token`：从此只有这一处，设置页改的也是它。搬完旧文件删掉——留着的话
+        // 哪天配置里那一行被人删了，它又会悄悄顶上来，而人以为口令是新生成的。
+        try {
+            config::save_user_config({{"peer", {{"token", t.value}}}});
+            std::error_code ec;
+            fs::remove(dir / "ui_token", ec);
+        } catch (const std::exception& e) {
+            // 配置写不进去（目录只读）：照样用它，文件留着，下次起来还是这一个。
+            CROW_LOG_WARNING << SAY_NEVER("口令没写进配置：") << e.what();
+        }
+    }
+    // 两处都写了而不一样：认配置里的（设置页改的是它）。说一声——原来两个都认，拿环境变量那个
+    // 进门的人会突然进不去，得让他在日志里看得到为什么。
+    if (t.from == "config") {
+        std::string env = paths::env("CHANGJI_UI_TOKEN");
+        const auto b = env.find_first_not_of(" \t\r\n");
+        env = b == std::string::npos ? std::string() : env.substr(b, env.find_last_not_of(" \t\r\n") - b + 1);
+        if (!env.empty() && env != t.value) {
+            CROW_LOG_WARNING << SAY_NEVER("CHANGJI_UI_TOKEN 和 [peer].token 不一样，认的是 [peer].token");
+        }
+    }
+    s.peer.token = t.value;
+}
+
+void run(const config::Settings& settings_in, const Options& opts) {
+    // **端口有人在听就别起**（2026-09-28 实测）：Crow 的 acceptor 设了 SO_REUSEADDR，Windows 上它的
+    // 意思是「别人正听着也让我绑上」——同一个端口起第二个引擎照样「起来了」、照样在终端上说
+    // 在浏览器里打开哪儿，连进来的请求落到哪一个听天由命。POSIX 上本来就 bind 失败，多问一声
+    // 不多花什么。**放在最前面**：往下起了线程（采样、局域网感知）再抛，收尾那几步就走不到了。
+    if (!port_usable(opts.host, opts.port)) {
+        throw std::runtime_error(
+            SAYF("端口 %1 已经有别的程序在听了。换一个：--port <端口>", std::to_string(opts.port)));
+    }
+    // 对外监听时先定下这台的口令（只有一个，`http/ui_token.hpp`），往下各处读的都是它。
+    config::Settings settings = settings_in;
+    settle_machine_token(settings, opts.host);
     // **门在 app 里**（`http/crow_guard.hpp`）：每个请求进路由之前都过一遍——浏览器里
     // 别的网页发来的、换了主机名（DNS 重绑定）的，一律不认。按监听地址定规矩：回环
     // 时 Host 只能是回环。
     EngineApp app;
     app.get_middleware<SameSiteGuard>().policy = guard_policy_for(opts.host);
+    // **对外监听要口令**（`request_guard.hpp` 第五条）：接扩展、改后端都是在这台机器上
+    // 起命令，一条 curl 就够。认的是这台的 `[peer].token`，**每条请求现问**（设置页能改它，
+    // 改完旧的就不认了）。
+    // 带口令的地址（Jupyter 那种）等服务真起来了再打，见 run() 末尾 `ready_banner` 那段。
+    if (auto& pol = app.get_middleware<SameSiteGuard>().policy; !pol.loopback_bind) {
+        pol.live_token = [] { return config::runtime().peer_token(); };
+        pol.lan_ticket_ok = [](const std::string& t) { return lan::Sense::instance().by_ticket(t).use; };
+    }
     {
         std::lock_guard<std::mutex> lk(g_app_mu);
         g_app = &app;
@@ -467,6 +556,17 @@ void run(const config::Settings& settings, const Options& opts) {
         }
     } sys_pump{stop_pump, std::thread([&stop_pump] {
         while (!stop_pump) {
+            // **闲够了的本地模型把显存还回去**（`SlotSpec::keep_alive`，[llm] keep_alive_minutes）。
+            // 搭这条两秒一拍的车：另起一条线程的话，退出时它还攥着调度器，而调度器析构
+            // 在 main 的收尾里（见 CLAUDE.md 一¾）。
+            infer::scheduler().reap_idle();
+            // **循环到点替人说一句**（外层 agent/recur.hpp）：同上，搭这条车不另起线程。
+            // 自己不阻塞——开火是另起一条线程跑一轮对话。`install_loops` 之前什么都不做。
+            try {
+                loops_tick();
+            } catch (const std::exception& e) {
+                std::fprintf(stderr, "[loops] tick: %s\n", e.what());
+            }
             if (ws::hub().subscriber_count("system") > 0) {
                 json msg = sysstat::to_json(sysstat::latest());
                 // **搭这趟车，不另开一条。** 顶栏那块"AI 作业中"要的就是
@@ -523,15 +623,14 @@ void run(const config::Settings& settings, const Options& opts) {
     /// 这儿挡的是"填了个明显不是地址的东西"——那种错误在表上显示成
     /// "连不上"，用户会去查网络，而问题在他自己刚敲的那一行。
     const auto bad_peer_url = [](const std::string& url) -> std::string {
-        if (url.empty()) return SAY("要填地址");
-        if (url == infer::kLocalEndpoint) return SAY("local 是本机，不用加");
+        if (url.empty()) return SAY("请填写地址");
+        if (url == infer::kLocalEndpoint) return SAY("local 即本机，无需添加");
         if (url.rfind("http://", 0) != 0 && url.rfind("https://", 0) != 0) {
-            return SAY("地址要以 http:// 或 https:// 开头，比如 "
-                       "http://192.168.1.20:9101");
+            return SAY("地址须以 http:// 或 https:// 开头，例如 http://192.168.1.20:9101");
         }
         const auto rest = url.substr(url.find("//") + 2);
-        if (rest.empty() || rest.front() == '/') return SAY("地址里没有主机名");
-        if (rest.find(' ') != std::string::npos) return SAY("地址里不能有空格");
+        if (rest.empty() || rest.front() == '/') return SAY("地址中缺少主机名");
+        if (rest.find(' ') != std::string::npos) return SAY("地址中不能包含空格");
         return {};
     };
 
@@ -544,7 +643,7 @@ void run(const config::Settings& settings, const Options& opts) {
                                      400);
             }
             std::string url = changji::text::strip_ws(
-                body.value("url", std::string()));
+                field_str(body, "url"));
             // 末尾的斜杠去掉：`http://x:9101/` 和 `http://x:9101` 是同一台，
             // 留着的话查重查不出来，表上就出现两行一模一样的机器。
             while (url.size() > 8 && url.back() == '/') url.pop_back();
@@ -555,20 +654,21 @@ void run(const config::Settings& settings, const Options& opts) {
             // 前后画风对不上。
             if (pipeline::jobs().running(pipeline::JobKind::Run)) {
                 return json_response(
-                    {{"detail", SAY("正在跑，这时候改派活的机器会把这一章跑坏")}},
+                    {{"detail", SAY("正在出片，此时更改分派机器会导致本章出错")}},
                     409);
             }
 
+            const std::lock_guard<std::mutex> nodes_edit{peer_edit_mu()};   // 读→改→存一把锁，见 peer_edit_mu
             auto s = config::runtime().snapshot();
             for (const auto& n : s.peer.nodes) {
                 if (n.url == url) {
                     return json_response(
-                        {{"detail", SAY("这台已经在表上了：") + url}}, 409);
+                        {{"detail", SAY("该机器已在列表中：") + url}}, 409);
                 }
             }
             auto arr = peer_nodes_json(s);
             arr.push_back({{"url", url},
-                           {"token", body.value("token", std::string())},
+                           {"token", field_str(body, "token")},
                            {"off", nlohmann::json::array()}});
             try {
                 config::save_peer_nodes(arr);
@@ -577,8 +677,7 @@ void run(const config::Settings& settings, const Options& opts) {
             }
             // 写完要让这个进程也跟着变：不重读的话，表上是新的、
             // 真派活时用的还是旧的那一份。
-            s = config::load_settings();
-            config::runtime().replace(s);
+            s = adopt_saved_nodes();
             infer::node_registry().refresh(s);
             return json_response(infer::nodes_json(s));
         });
@@ -590,14 +689,15 @@ void run(const config::Settings& settings, const Options& opts) {
                 return json_response({{"detail", SAY("请求体不是一个 JSON 对象")}},
                                      400);
             }
-            const std::string url = body.value("url", std::string());
-            if (url.empty()) return json_response({{"detail", SAY("要 url")}}, 422);
+            const std::string url = field_str(body, "url");
+            if (url.empty()) return json_response({{"detail", SAY("缺少 url")}}, 422);
             if (pipeline::jobs().running(pipeline::JobKind::Run)) {
                 return json_response(
-                    {{"detail", SAY("正在跑，这时候改派活的机器会把这一章跑坏")}},
+                    {{"detail", SAY("正在出片，此时更改分派机器会导致本章出错")}},
                     409);
             }
 
+            const std::lock_guard<std::mutex> nodes_edit{peer_edit_mu()};   // 读→改→存一把锁，见 peer_edit_mu
             auto s = config::runtime().snapshot();
             auto arr = peer_nodes_json(s);
             nlohmann::json left = nlohmann::json::array();
@@ -605,15 +705,14 @@ void run(const config::Settings& settings, const Options& opts) {
                 if (n.value("url", std::string()) != url) left.push_back(n);
             }
             if (left.size() == arr.size()) {
-                return json_response({{"detail", SAY("表上没有这台：") + url}}, 404);
+                return json_response({{"detail", SAY("列表中没有该机器：") + url}}, 404);
             }
             try {
                 config::save_peer_nodes(left);
             } catch (const std::exception& e) {
                 return json_response({{"detail", e.what()}}, 500);
             }
-            s = config::load_settings();
-            config::runtime().replace(s);
+            s = adopt_saved_nodes();
             infer::node_registry().refresh(s);
             return json_response(infer::nodes_json(s));
         });
@@ -631,22 +730,23 @@ void run(const config::Settings& settings, const Options& opts) {
                 return json_response({{"detail", SAY("请求体不是一个 JSON 对象")}},
                                      400);
             }
-            const std::string url = body.value("url", std::string());
-            if (url.empty()) return json_response({{"detail", SAY("要 url")}}, 422);
+            const std::string url = field_str(body, "url");
+            if (url.empty()) return json_response({{"detail", SAY("缺少 url")}}, 422);
 
             // 新地址不给就是不改地址，只改口令。
             std::string next = changji::text::strip_ws(
-                body.value("new_url", url));
+                field_str(body, "new_url", url));
             while (next.size() > 8 && next.back() == '/') next.pop_back();
             if (const auto why = bad_peer_url(next); !why.empty()) {
                 return json_response({{"detail", why}}, 422);
             }
             if (pipeline::jobs().running(pipeline::JobKind::Run)) {
                 return json_response(
-                    {{"detail", SAY("正在跑，这时候改派活的机器会把这一章跑坏")}},
+                    {{"detail", SAY("正在出片，此时更改分派机器会导致本章出错")}},
                     409);
             }
 
+            const std::lock_guard<std::mutex> nodes_edit{peer_edit_mu()};   // 读→改→存一把锁，见 peer_edit_mu
             auto s = config::runtime().snapshot();
             auto arr = peer_nodes_json(s);
             bool found = false;
@@ -655,7 +755,7 @@ void run(const config::Settings& settings, const Options& opts) {
                     // 换到一个别人已经占着的地址上，和 /add 撞车一个意思。
                     if (n.value("url", std::string()) == next) {
                         return json_response(
-                            {{"detail", SAY("这台已经在表上了：") + next}}, 409);
+                            {{"detail", SAY("该机器已在列表中：") + next}}, 409);
                     }
                     continue;
                 }
@@ -665,19 +765,18 @@ void run(const config::Settings& settings, const Options& opts) {
                 // 界面上那一格留空时用户想的是"不改"还是"删掉"分不出来，
                 // 所以由前端明确传，这边只照做。
                 if (body.contains("token")) {
-                    n["token"] = body.value("token", std::string());
+                    n["token"] = field_str(body, "token");
                 }
             }
             if (!found) {
-                return json_response({{"detail", SAY("表上没有这台：") + url}}, 404);
+                return json_response({{"detail", SAY("列表中没有该机器：") + url}}, 404);
             }
             try {
                 config::save_peer_nodes(arr);
             } catch (const std::exception& e) {
                 return json_response({{"detail", e.what()}}, 500);
             }
-            s = config::load_settings();
-            config::runtime().replace(s);
+            s = adopt_saved_nodes();
             infer::node_registry().refresh(s);
             return json_response(infer::nodes_json(s));
         });
@@ -693,26 +792,27 @@ void run(const config::Settings& settings, const Options& opts) {
                 return json_response({{"detail", SAY("请求体不是一个 JSON 对象")}},
                                      400);
             }
-            const std::string url = body.value("url", std::string());
+            const std::string url = field_str(body, "url");
             const auto cap =
-                infer::capability_from(body.value("cap", std::string()));
+                infer::capability_from(field_str(body, "cap"));
             if (url.empty() || !cap) {
                 return json_response(
-                    {{"detail", SAY("要 url 和 cap（llm/tts/frame/video/assemble）")}},
+                    {{"detail", SAY("缺少 url 或 cap（llm/tts/frame/video/assemble）")}},
                     422);
             }
             // **正在跑的时候不许改。** 半章换机器会让前后画风对不上——
             // 和 /api/connections 那边"正在跑时不许换机器"是同一条规矩。
             if (pipeline::jobs().running(pipeline::JobKind::Run)) {
                 return json_response(
-                    {{"detail", SAY("正在跑，这时候改派活的机器会把这一章跑坏")}},
+                    {{"detail", SAY("正在出片，此时更改分派机器会导致本章出错")}},
                     409);
             }
 
+            const std::lock_guard<std::mutex> nodes_edit{peer_edit_mu()};   // 读→改→存一把锁，见 peer_edit_mu
             const auto s = config::runtime().snapshot();
             const auto ws = s.workspace_path();
             auto prefs = infer::load_node_prefs(ws);
-            if (body.value("off", false)) {
+            if (field_bool(body, "off", false)) {
                 prefs[url].insert(*cap);
             } else if (auto it = prefs.find(url); it != prefs.end()) {
                 it->second.erase(*cap);
@@ -731,8 +831,9 @@ void run(const config::Settings& settings, const Options& opts) {
     // 用捕获的那份的话，改完之后体检和硬件画像还是老的，
     // 用户会以为改动没生效。
     CROW_ROUTE(app, "/api/doctor")([](const crow::request& req) {
-        // 体检里有三项要发网络请求，最坏情况阻塞二十多秒。
-        // Crow 是线程池模型，这只占住一个工作线程，不影响其它请求。
+        // 体检里「大模型」那一项要发网络请求（连、读各 8 秒），它和别的项
+        // 并排跑（见 doctor::run_checks）。Crow 是线程池模型，这只占住一个
+        // 工作线程，不影响其它请求。
         return json_response(
             doctor::to_json(doctor_for(req.url_params.get("path"))));
     });
@@ -772,6 +873,9 @@ void run(const config::Settings& settings, const Options& opts) {
             // **和推过去的那份一样**，而且是同一个函数拼的——见
             // pipeline::running_work()。两边各拼一次的话迟早只改一边。
             body["jobs"] = pipeline::running_work();
+            // 版本号只在这儿报，不进两秒一推的那份：报故障第一句就是「哪一版」，而
+            // 桌面端、网页界面原来没有一处摆它（`--version` 只有命令行有）。
+            body["version"] = CHANGJI_VERSION;
             return {200, std::move(body)};
         });
         return json_response(r.body, r.status);
@@ -797,7 +901,7 @@ void run(const config::Settings& settings, const Options& opts) {
     CROW_ROUTE(app, "/api/task/thinking")([](const crow::request& req) {
         auto r = guard([&]() -> ApiResult {
             const char* id = req.url_params.get("id");
-            if (id == nullptr) throw ApiError(400, SAY("要给 id"));
+            if (id == nullptr) throw ApiError(400, SAY("缺少 id"));
             const char* from = req.url_params.get("from");
             const auto t = pipeline::task_thinking(
                 std::strtoull(id, nullptr, 10),
@@ -824,7 +928,7 @@ void run(const config::Settings& settings, const Options& opts) {
             auto r = guard([&]() -> ApiResult {
                 const json body = parse_body(req.body);
                 if (!body.is_object() || !body.contains("id")) {
-                    throw ApiError(400, SAY("要给 id"));
+                    throw ApiError(400, SAY("缺少 id"));
                 }
                 const auto id = body.at("id").is_string()
                                     ? std::strtoull(
@@ -917,7 +1021,7 @@ void run(const config::Settings& settings, const Options& opts) {
                         const json body = parse_body(req.body);
                         if (!body.is_object() || !body.contains("on") ||
                             !body.at("on").is_boolean()) {
-                            throw ApiError(422, SAY("要一个布尔的 on"));
+                            throw ApiError(422, SAY("on 须为布尔值"));
                         }
                         // **这个平台没接上就照实说**，别默默把开关吞了：
                         // 界面会一直显示"开着"，而什么都没发生。
@@ -926,10 +1030,11 @@ void run(const config::Settings& settings, const Options& opts) {
                             // 原来写的是「眼下只有 macOS 那一档接上了」，
                             // 而 2026-09-22 Linux 也接上了——这种句子每接
                             // 一个平台就过期一次，而过期了没人会想起来改。
+                            //
+                            // 名字跟着界面叫「局域网发现」（2026-09-28 起，原来叫「局域网感知」）：
+                            // 这句话就摆在那个开关底下，两个名字并排是在让人猜是不是一回事。
                             throw ApiError(501,
-                                           SAY("这台机器上还没接局域网感知"
-                                               "（这一档要系统自带的 mDNS，"
-                                               "这个系统上没有）"));
+                                           SAY("本机不支持局域网发现（需要系统自带的 mDNS，当前系统未提供）"));
                         }
                         lan::Sense::instance().set_on(body.at("on").get<bool>());
                     }
@@ -944,11 +1049,11 @@ void run(const config::Settings& settings, const Options& opts) {
         .methods("POST"_method)([lan_json](const crow::request& req) {
             auto r = guard([&]() -> ApiResult {
                 const json body = parse_body(req.body);
-                const std::string id = body.value("id", std::string());
-                if (id.empty()) throw ApiError(422, SAY("要 id"));
+                const std::string id = field_str(body, "id");
+                if (id.empty()) throw ApiError(422, SAY("缺少 id"));
                 lan::Grant g;
-                g.use = body.value("use", false);
-                g.params = body.value("params", false);
+                g.use = field_bool(body, "use", false);
+                g.params = field_bool(body, "params", false);
                 lan::Sense::instance().allow(id, g);
                 return {200, lan_json()};
             });
@@ -967,10 +1072,13 @@ void run(const config::Settings& settings, const Options& opts) {
     CROW_ROUTE(app, "/api/lan/ticket")([](const crow::request& req) {
         auto r = guard([&]() -> ApiResult {
             const std::string who = req.get_header_value("X-Changji-Lan");
-            if (who.empty()) throw ApiError(422, SAY("要 X-Changji-Lan 那个头"));
+            if (who.empty()) throw ApiError(422, SAY("缺少 X-Changji-Lan 请求头"));
             const auto g = lan::Sense::instance().grant_of(who);
             if (!g.use || !lan::Sense::instance().on()) {
-                throw ApiError(403, SAY("这台机器还没给你用。让机主在设置里点一下。"));
+                // 开关的名字照界面上的字写（2026-09-28 起叫「允许其使用本机」，在「互联」里），
+                // 光说"在设置里点一下"的话，机主得在九类里一类一类翻。
+                throw ApiError(403, SAY("该机器尚未授权本机使用。请该机器的所有者在「设置 ▸ 互联」"
+                                        "中开启「允许其使用本机」。"));
             }
             return {200, {{"ticket", g.ticket},
                           {"use", g.use},
@@ -990,17 +1098,20 @@ void run(const config::Settings& settings, const Options& opts) {
         .methods("POST"_method)([peer_nodes_json](const crow::request& req) {
             auto r = guard([&]() -> ApiResult {
                 const json body = parse_body(req.body);
-                const std::string id = body.value("id", std::string());
-                if (id.empty()) throw ApiError(422, SAY("要 id"));
+                const std::string id = field_str(body, "id");
+                if (id.empty()) throw ApiError(422, SAY("缺少 id"));
                 const auto [url, ticket] = lan::Sense::instance().their_door(id);
                 if (url.empty() || ticket.empty()) {
+                    // 那颗开关 2026-09-28 起叫「允许其使用本机」（原来叫「给它用这台」），
+                    // 在「互联」里。照旧名字说，对面在界面上找不到它。
                     throw ApiError(409,
-                                   SAY("那台还没给你用，或者这会儿不在线。"
-                                       "让对面在设置里点一下「给它用这台」。"));
+                                   SAY("对方机器尚未授权本机使用，或当前不在线。请对方在「设置 ▸ 互联」"
+                                       "中开启「允许其使用本机」。"));
                 }
+                const std::lock_guard<std::mutex> nodes_edit{peer_edit_mu()};   // 读→改→存一把锁，见 peer_edit_mu
                 auto s = config::runtime().snapshot();
                 for (const auto& n : s.peer.nodes) {
-                    if (n.url == url) throw ApiError(409, SAY("这台已经在表上了：") + url);
+                    if (n.url == url) throw ApiError(409, SAY("该机器已在列表中：") + url);
                 }
                 auto arr = peer_nodes_json(s);
                 arr.push_back({{"url", url},
@@ -1015,12 +1126,69 @@ void run(const config::Settings& settings, const Options& opts) {
                 // 不重读的话配置文件里是新的、这个进程手里还是旧的那一份
                 // ——表上看不见它，真派活时也用不上它。2026-09-21 实撞：
                 // config.toml 里那一行明明在，`/api/nodes` 里没有。
-                s = config::load_settings();
-                config::runtime().replace(s);
+                s = adopt_saved_nodes();
                 infer::node_registry().refresh(s);
                 return {200, infer::nodes_json(s)};
             });
             return json_response(r.body, r.status);
+        });
+
+    // ---- 这台的地址和口令（设置 ▸ 机器表，2026-09-28）----
+    //
+    // 别的机器「加一台」时填的就是这两样。口令只有一个（`http/ui_token.hpp`）：网页进门、
+    // 别的机器派活过来都认它，这台派活出去而那一台没单独配口令时也带它——几台设成同一个，
+    // 加一台时口令那一格就能空着。
+    //
+    // 改：POST `{"token": "…"}`。写进 `[peer].token`、runtime 跟上，**下一条请求起只认新的**
+    // （门那头每条现问）。回包里顺手种上新 cookie——不种的话改口令的这个网页自己下一下就被
+    // 关在门外。
+    //
+    // 「换一个」是 GET `?fresh=1`：回包多一栏 `fresh`（现生的，**没存**），界面填进框里、人按
+    // 「存下」才算。一按就换的话，手一滑，所有拿着旧口令的机器当场全被关在外面，旧的还找不回来。
+    const auto token_json = [opts] {
+        const bool pub = infer::is_public_bind(opts.host);
+        json urls = json::array();
+        if (pub) {
+            for (const auto& ip : lan_ipv4s()) urls.push_back("http://" + ip + ":" + std::to_string(opts.port));
+        }
+        return json{{"token", config::runtime().peer_token()},
+                    {"reachable", pub},
+                    {"port", opts.port},
+                    {"urls", std::move(urls)}};
+    };
+    CROW_ROUTE(app, "/api/token")
+        .methods(crow::HTTPMethod::GET, crow::HTTPMethod::POST)([opts, token_json](const crow::request& req) {
+            auto r = guard([&]() -> ApiResult {
+                if (req.method != crow::HTTPMethod::POST) {
+                    json out = token_json();
+                    if (req.url_params.get("fresh") != nullptr) out["fresh"] = fresh_token();
+                    return {200, out};
+                }
+                const json body = parse_body(req.body);
+                // 粘过来的常带着首尾的空格、换行：去掉再判，别拿它回一句「只能用字母…」
+                std::string t = field_str(body, "token");
+                const auto b = t.find_first_not_of(" \t\r\n");
+                t = b == std::string::npos ? std::string() : t.substr(b, t.find_last_not_of(" \t\r\n") - b + 1);
+                if (const std::string why = token_problem(t); !why.empty()) throw ApiError(422, why);
+                const std::lock_guard<std::mutex> nodes_edit{peer_edit_mu()};   // 读→改→存一把锁，见 peer_edit_mu
+                try {
+                    config::save_user_config({{"peer", {{"token", t}}}});
+                } catch (const std::exception& e) {
+                    throw ApiError(500, e.what());
+                }
+                auto s = config::runtime().snapshot();
+                s.peer.token = t;
+                config::runtime().replace(s);
+                // 没单独配口令的那几台派活时带的是它，探活也跟着换。
+                infer::node_registry().refresh(s);
+                return {200, token_json()};
+            });
+            auto res = json_response(r.body, r.status);
+            if (r.status == 200 && req.method == crow::HTTPMethod::POST && infer::is_public_bind(opts.host)) {
+                res.set_header("Set-Cookie", std::string(kUiCookie) + "=" + config::runtime().peer_token() +
+                                                 "; Path=/; HttpOnly; SameSite=Strict; Max-Age=2592000");
+            }
+            return res;
         });
 
     CROW_ROUTE(app, "/api/autostart")
@@ -1041,7 +1209,7 @@ void run(const config::Settings& settings, const Options& opts) {
                     const json body = parse_body(req.body);
                     if (!body.is_object() || !body.contains("enabled") ||
                         !body.at("enabled").is_boolean()) {
-                        throw ApiError(400, SAY("要给 enabled（true / false）"));
+                        throw ApiError(400, SAY("enabled 须为布尔值（true / false）"));
                     }
                     const auto res = setup::set_autostart(
                         body.at("enabled").get<bool>(), opts.port);
@@ -1185,13 +1353,19 @@ void run(const config::Settings& settings, const Options& opts) {
             return send_whole();
         }
 
+        // **分段也不读进内存。** 原来这儿是把 [first, last] 读成一个 std::string
+        // 再回——而浏览器第一下发的就是 `bytes=0-`，每拖一次进度条是
+        // `bytes=N-`，照字面都是"到文件尾"：拖一下整部电影就是一两个 G 的内存。
+        // 截短回也不行（FFmpeg 的 http 拿到短的 206 就断，桌面端远端放片走它）。
+        // crow 的分块写打了补丁能从中间发一段，见 cmake/patch_crow_static_range.cmake。
         const std::uint64_t len = r.range.last - r.range.first + 1;
-        std::string chunk(static_cast<std::size_t>(len), '\0');
-        in.seekg(static_cast<std::streamoff>(r.range.first));
-        in.read(chunk.data(), static_cast<std::streamsize>(len));
-        chunk.resize(static_cast<std::size_t>(in.gcount()));
-
-        crow::response res(206, std::move(chunk));
+        crow::response res;
+        res.set_static_file_info_unsafe(paths::to_utf8(t.path));
+        if (res.code != 200) {
+            return json_response({{"detail", SAY("打不开文件")}}, 500);
+        }
+        res.code = 206;
+        res.changji_static_range(r.range.first, len);
         res.set_header("Content-Type", ctype);
         res.set_header("Accept-Ranges", "bytes");
         res.set_header("Content-Range",
@@ -1302,6 +1476,26 @@ void run(const config::Settings& settings, const Options& opts) {
                     fit->second.get_header_object("Content-Type").value;
                 return post_character_voice(field("project"), field("char_id"),
                                             ctype, fit->second.body);
+            });
+            return json_response(r.body, r.status);
+        });
+
+    // 对话附件：浏览器传不出引擎那台机器上的路径，先把文件传上来（见 upload.hpp）。
+    // ⚠️ 传文件的路由要进 is_upload_route（http/request_guard.cpp），不然 415。
+    CROW_ROUTE(app, "/api/chat/upload").methods("POST"_method)
+        ([](const crow::request& req) {
+            auto r = guard([&]() -> ApiResult {
+                crow::multipart::message msg(req);
+                auto fit = msg.part_map.find("file");
+                if (fit == msg.part_map.end()) throw ApiError(400, SAY("没有上传文件"));
+                const auto pit = msg.part_map.find("project");
+                const std::string project =
+                    pit == msg.part_map.end() ? std::string() : pit->second.body;
+                const auto& cd = fit->second.get_header_object("Content-Disposition");
+                const auto fn = cd.params.find("filename");
+                return post_chat_attachment(project,
+                                            fn == cd.params.end() ? std::string() : fn->second,
+                                            fit->second.body);
             });
             return json_response(r.body, r.status);
         });
@@ -1586,6 +1780,49 @@ void run(const config::Settings& settings, const Options& opts) {
         return json_response(get_llm_providers().body);
     });
 
+    // 人自己加一家、拿掉一家（设置 ▸ 大模型；见 llm_info.hpp「自己加的服务」）。
+    CROW_ROUTE(app, "/api/llm/providers/add").methods("POST"_method)(
+        [](const crow::request& req) {
+            auto r = guard([&] { return post_llm_provider_add(parse_body(req.body)); });
+            return json_response(r.body, r.status);
+        });
+    CROW_ROUTE(app, "/api/llm/providers/update").methods("POST"_method)(
+        [](const crow::request& req) {
+            auto r = guard([&] { return post_llm_provider_update(parse_body(req.body)); });
+            return json_response(r.body, r.status);
+        });
+    CROW_ROUTE(app, "/api/llm/providers/remove").methods("POST"_method)(
+        [](const crow::request& req) {
+            auto r = guard([&] { return post_llm_provider_remove(parse_body(req.body)); });
+            return json_response(r.body, r.status);
+        });
+
+    // 本机模型目录里能当编剧用的那几份（输入框底下「本地」那一家的模型单子）。
+    CROW_ROUTE(app, "/api/llm/local")([] {
+        auto r = guard([&] { return get_llm_local(config::runtime().snapshot()); });
+        return json_response(r.body, r.status);
+    });
+    CROW_ROUTE(app, "/api/llm/local/release").methods("POST"_method)([](const crow::request&) {
+        auto r = guard([&] { return post_llm_local_release(); });
+        return json_response(r.body, r.status);
+    });
+
+    // 这一条对话用哪个模型（`llm/chat_pick.hpp`）。GET 读、POST 改。
+    CROW_ROUTE(app, "/api/chat/model")
+        .methods(crow::HTTPMethod::GET, crow::HTTPMethod::POST)(
+            [](const crow::request& req) {
+                auto r = guard([&] {
+                    const auto s = config::runtime().snapshot();
+                    if (req.method == crow::HTTPMethod::POST) {
+                        return post_chat_model(parse_body(req.body), s);
+                    }
+                    const char* p = req.url_params.get("project");
+                    const char* c = req.url_params.get("chat");
+                    return get_chat_model(p ? p : "", c ? c : "", s);
+                });
+                return json_response(r.body, r.status);
+            });
+
     // GET = 问配置里存着的那一家；POST = 问 body 里指定的那一家。
     // **换平台那一下要用 POST**：那会儿配置里还是旧地址（见 llm_info.hpp）。
     // 密钥只走请求体，不进查询串——查询串会落进访问日志和浏览器历史。
@@ -1596,13 +1833,105 @@ void run(const config::Settings& settings, const Options& opts) {
                 auto r = guard([&] {
                     const auto s = config::runtime().snapshot();
                     // 按 POST 分：HEAD 也落到这儿、`req.method` 还是 HEAD（同 /api/autostart）。
+                    // 问到的那一串记在盘上、补上 `new`（没看过的前面摆个点；
+                    // 问不到拿上一次的顶上）。见 llm_info.hpp「模型单子记在盘上」。
                     if (req.method != crow::HTTPMethod::POST) {
-                        return get_llm_models(s, fetch);
+                        auto out = get_llm_models(s, fetch);
+                        out.body = remember_models(s.llm.base_url, std::move(out.body));
+                        return out;
                     }
-                    return post_llm_models(parse_body(req.body), s, fetch);
+                    const json body = parse_body(req.body);
+                    std::string url = s.llm.base_url;
+                    if (body.is_object() && body.contains("base_url") &&
+                        body.at("base_url").is_string() &&
+                        !body.at("base_url").get<std::string>().empty()) {
+                        url = body.at("base_url").get<std::string>();
+                    }
+                    auto out = post_llm_models(body, s, fetch);
+                    out.body = remember_models(url, std::move(out.body));
+                    return out;
                 });
                 return json_response(r.body, r.status);
             });
+    CROW_ROUTE(app, "/api/llm/models/seen").methods("POST"_method)(
+        [](const crow::request& req) {
+            auto r = guard([&] { return post_llm_models_seen(parse_body(req.body)); });
+            return json_response(r.body, r.status);
+        });
+    // 设置 ▸ 大模型「设为默认」：新对话用哪一家的哪个模型。
+    CROW_ROUTE(app, "/api/llm/default").methods("POST"_method)(
+        [](const crow::request& req) {
+            auto r = guard([&] { return post_llm_default(parse_body(req.body)); });
+            return json_response(r.body, r.status);
+        });
+
+    // ---- 场记云（docs/账号与云服务方案.md） ----
+    //
+    // 登录走系统浏览器 + PKCE，回调落在引擎自己的口上（桌面端、本机网页走同一条路，登录这件事
+    // 只在这儿写一遍）。登着的时候服务单子里多「场记云」那一家、机器表里多「场记云」那一台。
+    {
+        const GuardPolicy cloud_policy = app.get_middleware<SameSiteGuard>().policy;
+        // 用场记账号进门成功时种的 cookie：和拿口令进门的同一个（值就是这台的口令）。**到时候现问**：
+        // 设置页能改口令，抄一份的话改完之后用账号进门种的是旧的，进了门也是 401。
+        const bool cloud_public = !cloud_policy.loopback_bind;
+        const auto cloud_ui_token = [cloud_public] {
+            return cloud_public ? config::runtime().peer_token() : std::string();
+        };
+        const auto cloud_io = std::make_shared<CloudIo>(CloudIo{default_http_get(), llm::default_http_post()});
+        const auto cloud_url = [] { return config::runtime().snapshot().cloud.url; };
+        // 登录、退出之后：机器表跟上（那一台是虚的，读配置时按 cloud.json 加上 / 去掉），界面重问
+        const auto cloud_changed = [] {
+            {
+                std::lock_guard<std::mutex> lk(peer_edit_mu());
+                adopt_saved_nodes();
+            }
+            ws::hub().broadcast_all({{"type", "cloud"}, {"event", "changed"}});
+        };
+        const auto origin_of = [](const crow::request& req) {
+            return "http://" + req.get_header_value("Host");
+        };
+
+        CROW_ROUTE(app, "/api/cloud").methods(crow::HTTPMethod::GET)([cloud_io, cloud_url](const crow::request& req) {
+            const char* f = req.url_params.get("refresh");
+            auto r = guard([&] { return get_cloud(*cloud_io, cloud_url(), f != nullptr && std::string(f) != "0"); });
+            return json_response(r.body, r.status);
+        });
+        CROW_ROUTE(app, "/api/cloud/gate").methods(crow::HTTPMethod::GET)([cloud_policy, cloud_url](const crow::request& req) {
+            const bool authed = is_authed(facts_of(req, "GET"), cloud_policy);
+            return json_response(cloud_gate(authed, cloud_policy.loopback_bind, std::string(), cloud_url()));
+        });
+        CROW_ROUTE(app, "/api/cloud/login/start").methods("POST"_method)([cloud_url, origin_of](const crow::request& req) {
+            auto r = guard([&] {
+                return post_cloud_start(parse_body(req.body), cloud::Purpose::bind, origin_of(req), cloud_url());
+            });
+            return json_response(r.body, r.status);
+        });
+        CROW_ROUTE(app, "/api/cloud/enter/start").methods("POST"_method)([cloud_url, origin_of](const crow::request& req) {
+            auto r = guard([&] {
+                return post_cloud_start(parse_body(req.body), cloud::Purpose::enter, origin_of(req), cloud_url());
+            });
+            return json_response(r.body, r.status);
+        });
+        CROW_ROUTE(app, "/auth/cloud/callback")
+            .methods(crow::HTTPMethod::GET)([cloud_io, cloud_ui_token, cloud_changed](const crow::request& req) {
+                const auto q = [&req](const char* k) {
+                    const char* v = req.url_params.get(k);
+                    return v != nullptr ? std::string(v) : std::string();
+                };
+                const CloudRedirect r = cloud_callback(*cloud_io, q("code"), q("state"), q("error"), cloud_ui_token());
+                if (r.changed) cloud_changed();
+                crow::response res(303);
+                res.set_header("Location", r.location);
+                res.set_header("Cache-Control", "no-store");
+                if (!r.set_cookie.empty()) res.set_header("Set-Cookie", r.set_cookie);
+                return res;
+            });
+        CROW_ROUTE(app, "/api/cloud/logout").methods("POST"_method)([cloud_io, cloud_changed](const crow::request&) {
+            auto r = guard([&] { return post_cloud_logout(*cloud_io); });
+            cloud_changed();
+            return json_response(r.body, r.status);
+        });
+    }
 
     // GET /api/llm/thinking?model=&base_url= —— 这个模型「想多久」能挑哪几档。
     //
@@ -1900,7 +2229,7 @@ void run(const config::Settings& settings, const Options& opts) {
                 const auto body = parse_body(req.body);
                 const auto it = body.find("backend");
                 if (it == body.end() || !it->is_string()) {
-                    throw ApiError(400, SAY("缺 backend"));
+                    throw ApiError(400, SAY("缺少 backend"));
                 }
                 const auto backend = it->get<std::string>();
                 // **进程内那条 2026-09-14 删了，只剩 remote。**
@@ -1914,9 +2243,8 @@ void run(const config::Settings& settings, const Options& opts) {
                     // 的话用户会去翻配置文件找哪里填错了。
                     throw ApiError(
                         400,
-                        SAY("这个二进制没编进程内大模型（构建时 "
-                            "CHANGJI_LLAMA=OFF）。用外接：backend = remote "
-                            "并填 [llm].base_url"));
+                        SAY("当前程序未包含本地大模型（构建时 CHANGJI_LLAMA=OFF）。"
+                            "请使用外部服务：backend = remote 并填写 [llm].base_url"));
                 }
                 config::save_user_config(json{{"llm", {{"backend", backend}}}});
                 auto s = config::runtime().snapshot();
@@ -2098,7 +2426,7 @@ void run(const config::Settings& settings, const Options& opts) {
         [node_target, proxy_status](const crow::request& req) {
             const std::string url = node_target(req);
             if (url.empty()) {
-                return json_response({{"detail", SAY("要 url（local 或节点地址）")}},
+                return json_response({{"detail", SAY("缺少 url（local 或节点地址）")}},
                                      422);
             }
             const std::string project = query(req, "path");
@@ -2124,9 +2452,9 @@ void run(const config::Settings& settings, const Options& opts) {
                 return json_response({{"detail", SAY("请求体不是一个 JSON 对象")}},
                                      400);
             }
-            const std::string url = body.value("url", std::string());
+            const std::string url = field_str(body, "url");
             if (url.empty()) {
-                return json_response({{"detail", SAY("要 url")}}, 422);
+                return json_response({{"detail", SAY("缺少 url")}}, 422);
             }
             // url 是给我们自己看的，别跟着发出去
             nlohmann::json payload = body;
@@ -2146,7 +2474,7 @@ void run(const config::Settings& settings, const Options& opts) {
         [node_target, proxy_status](const crow::request& req) {
             const std::string url = node_target(req);
             if (url.empty()) {
-                return json_response({{"detail", SAY("要 url")}}, 422);
+                return json_response({{"detail", SAY("缺少 url")}}, 422);
             }
             const auto s = config::runtime().snapshot();
             if (url == infer::kLocalEndpoint) {
@@ -2161,9 +2489,9 @@ void run(const config::Settings& settings, const Options& opts) {
         .methods("POST"_method)([proxy_status](const crow::request& req) {
             const auto body = nlohmann::json::parse(req.body, nullptr, false);
             const std::string url =
-                body.is_object() ? body.value("url", std::string()) : "";
+                field_str(body, "url");
             if (url.empty()) {
-                return json_response({{"detail", SAY("要 url")}}, 422);
+                return json_response({{"detail", SAY("缺少 url")}}, 422);
             }
             const auto s = config::runtime().snapshot();
             if (url == infer::kLocalEndpoint) {
@@ -2810,6 +3138,31 @@ void run(const config::Settings& settings, const Options& opts) {
         };
     };
 
+    // 循环到点替人开一轮，用的是同一个客户端、同一套出片后端。
+    install_loops(batch_client, [] { return default_run_deps(); });
+
+    // ---- 循环（http/loops_api.hpp）----
+    CROW_ROUTE(app, "/api/loops")([] {
+        auto r = guard([] { return get_loops(); });
+        return json_response(r.body, r.status);
+    });
+    CROW_ROUTE(app, "/api/loops").methods("POST"_method)([](const crow::request& req) {
+        auto r = guard([&] { return post_loop(parse_body(req.body)); });
+        return json_response(r.body, r.status);
+    });
+    CROW_ROUTE(app, "/api/loops").methods("DELETE"_method)([](const crow::request& req) {
+        const char* id = req.url_params.get("id");
+        const char* work = req.url_params.get("work");
+        auto r = guard([&] {
+            return delete_loop(id ? id : "", work && std::string(work) == "1");
+        });
+        return json_response(r.body, r.status);
+    });
+    CROW_ROUTE(app, "/api/loops/run").methods("POST"_method)([](const crow::request& req) {
+        auto r = guard([&] { return post_loop_run(parse_body(req.body)); });
+        return json_response(r.body, r.status);
+    });
+
     // ---- 对话 ----
     //
     // 桌面端那条对话（`agent/`）。**全是新路由**，网页那 126 个接口一个都
@@ -2853,6 +3206,18 @@ void run(const config::Settings& settings, const Options& opts) {
         const char* p = req.url_params.get("project");
         const char* c = req.url_params.get("chat");
         auto r = guard([&] { return get_chat_history(p ? p : "", c ? c : ""); });
+        return json_response(r.body, r.status);
+    });
+
+    // 会话分叉（见 chat_branch_api.hpp）：眼前这条线上的分叉点、某个分叉点换一支。
+    CROW_ROUTE(app, "/api/chat/forks")([](const crow::request& req) {
+        const char* p = req.url_params.get("project");
+        const char* c = req.url_params.get("chat");
+        auto r = guard([&] { return get_chat_forks(p ? p : "", c ? c : ""); });
+        return json_response(r.body, r.status);
+    });
+    CROW_ROUTE(app, "/api/chat/branch").methods("POST"_method)([](const crow::request& req) {
+        auto r = guard([&] { return post_chat_branch(parse_body(req.body)); });
         return json_response(r.body, r.status);
     });
 
@@ -3009,8 +3374,10 @@ void run(const config::Settings& settings, const Options& opts) {
     CROW_ROUTE(app, "/api/story/from_web").methods("POST"_method)(
         [](const crow::request& req) {
             auto r = guard([&] {
+                // 不自己跟跳转：由上网那一层一跳一跳地跟、每跳重判（stages::web_tools）。
                 return post_story_from_web(parse_body(req.body), batch_client,
-                                           llm::default_http_get());
+                                           llm::default_http_get(false, stages::kWebPageMax,
+                                                                 /*public_only=*/true));
             });
             return json_response(r.body, r.status);
         });
@@ -3266,13 +3633,19 @@ void run(const config::Settings& settings, const Options& opts) {
     const auto ws_accept = [ws_policy](const crow::request& req, void**) {
         return accept_upgrade(req, ws_policy);
     };
+    // **上行一帧的上限。** 客户端只发订阅、退订这种几十字节的控制消息；不设的话
+    // Crow 默认是 UINT64_MAX——对外监听时不带 Origin 的客户端过得了 judge_upgrade，
+    // 一帧往 message_ 里一直灌，灌到引擎内存耗尽。
+    constexpr std::uint64_t kWsMaxPayload = 64 * 1024;
     CROW_WEBSOCKET_ROUTE(app, "/ws")
+        .max_payload(kWsMaxPayload)
         .onaccept(ws_accept)
         .onopen(on_open)
         .onclose(on_close)
         .onmessage(on_message);
 
     CROW_WEBSOCKET_ROUTE(app, "/api/ws")
+        .max_payload(kWsMaxPayload)
         .onaccept(ws_accept)
         .onopen(on_open)
         .onclose(on_close)
@@ -3284,6 +3657,18 @@ void run(const config::Settings& settings, const Options& opts) {
     // 摆在 `run()` 前面一行——端口到这一刻才定下来，而往外报的就是它。
     lan::Sense::instance().boot(paths::user_data_dir("changji"), opts.port);
 
+    // **起来之后在终端上说一声怎么打开**（`ready_banner`：点得开的地址，对外监听时带着口令）。
+    // 挂在 Crow 的 tick 上：它只在服务真转起来之后才走——端口被占、run() 抛出去的话一个字都
+    // 不打，不会先说「起来了」再报错。⚠️ 别换成 `wait_for_server_start()`：bind 失败时 Crow
+    // 根本不通知，那一头永远等下去。
+    std::atomic<bool> announced{false};
+    app.tick(std::chrono::milliseconds(500), [&announced, opts] {
+        if (announced.exchange(true)) return;
+        const std::string text = ready_banner(opts.host, opts.port, config::runtime().peer_token(), lan_ipv4s());
+        std::fwrite(text.data(), 1, text.size(), stdout);
+        std::fflush(stdout);
+    });
+
     app.bindaddr(opts.host)
         .port(static_cast<std::uint16_t>(opts.port))
         .concurrency(resolve_concurrency(opts.concurrency))
@@ -3294,7 +3679,7 @@ void run(const config::Settings& settings, const Options& opts) {
     ws::hub().shutdown();
     // 那条 select 线程也收掉。**不收的话进程退不干净**——它挂在一个
     // 永远不会自己醒的 select 上。
-    lan::Sense::instance().set_on(false);
+    lan::Sense::instance().shutdown();   // 只停不落盘：人开着的下次起来还开着
     // 扩展（MCP）拉起来的那几个进程一起关掉：本机命令那种是这个进程的子进程，不关的话
     // POSIX 上它们留在后台（Windows 上有 Job 兜着，也还是先客气地关）。**关在这儿**，
     // 不在 main() / 桌面端各调一次：服务停了就该关，而桌面端那一头 include 进来的头

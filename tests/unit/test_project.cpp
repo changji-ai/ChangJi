@@ -84,6 +84,113 @@ TEST_CASE("读 Python 写的项目：中文目录名、中文内容") {
     }
 }
 
+TEST_CASE("一栏写成 null 不让整部片子打不开") {
+    // `..._WITH_DEFAULT` 读每一栏是 `j.value(key, 默认)`：键不在回默认，键在而值是
+    // null 就抛 type_error.302。原来 project.json 里一个 `"title": null` 就让每一条
+    // 接口都回 400——包括拿来修它的那几条。
+    const json exp = load_golden("project_expectations");
+    const fs::path src = golden_project_root(exp);
+    const fs::path root =
+        fs::temp_directory_path() /
+        ("changji_nulls_" + std::to_string(
+            std::chrono::steady_clock::now().time_since_epoch().count()));
+    fs::copy(src, root, fs::copy_options::recursive);
+
+    const auto patch = [](const fs::path& f, const auto& change) {
+        json j;
+        {
+            std::ifstream in(f, std::ios::binary);
+            in >> j;
+        }
+        change(j);
+        std::ofstream(f, std::ios::binary) << j.dump();
+    };
+    patch(root / "project.json", [](json& j) {
+        j["premise"] = nullptr;
+        REQUIRE(!j["episodes"].empty());
+        j["episodes"][0]["title"] = nullptr;
+        for (auto& sh : j["episodes"][0]["shots"]) {
+            for (auto& line : sh["dialogue"]) line["emotion"] = nullptr;
+        }
+    });
+    patch(root / "assets.json", [](json& j) { j["style"] = nullptr; });
+
+    const ProjectStore store(root);
+    Project p;
+    CHECK_NOTHROW(p = store.load_project());
+    CHECK(p.premise.empty());
+    CHECK(p.episodes.size() == exp.at("episode_ids").size());
+    CHECK_NOTHROW(store.load_assets());
+
+    patch(root / "project.json", [](json& j) { j["episodes"] = nullptr; });
+    CHECK_NOTHROW(p = store.load_project());
+    CHECK(p.episodes.empty());
+
+    std::error_code ec;
+    fs::remove_all(root, ec);
+}
+
+TEST_CASE("盘上认不出的镜头枚举按没填过读，不悄悄变成表里第一项") {
+    // nlohmann 的枚举反序列化认不出取值时回落到表里第一项：shot_size 写成 "WS" 读出来是
+    // ECU（大特写）、camera_angle 认不出是 low（仰拍）。2026-09-26 拿一份手写的测试项目撞上：
+    // 镜头墙上两镜「远景」都摆成了大特写，全程不报错。现在读盘时洗掉，走结构体默认值。
+    const json exp = load_golden("project_expectations");
+    const fs::path src = golden_project_root(exp);
+    const fs::path root =
+        fs::temp_directory_path() /
+        ("changji_enums_" + std::to_string(
+            std::chrono::steady_clock::now().time_since_epoch().count()));
+    fs::copy(src, root, fs::copy_options::recursive);
+    json j;
+    {
+        std::ifstream in(root / "project.json", std::ios::binary);
+        in >> j;
+    }
+    REQUIRE(!j["episodes"][0]["shots"].empty());
+    auto& sh = j["episodes"][0]["shots"][0];
+    const std::string id = sh.value("shot_id", std::string());
+    sh["shot_size"] = "WS";
+    sh["camera_angle"] = "sideways";
+    sh["camera_move"] = "LS";           // 另一张表里的词
+    sh["transition_in"] = "wipe";
+    if (sh.contains("characters") && sh["characters"].is_array() && !sh["characters"].empty()) {
+        sh["characters"][0]["face_pose"] = "bogus";
+    }
+    std::ofstream(root / "project.json", std::ios::binary) << j.dump();
+
+    const Project p = ProjectStore(root).load_project();
+    const changji::models::Shot* got = nullptr;
+    for (const auto& s : p.episodes.front().shots) {
+        if (s.shot_id == id) got = &s;
+    }
+    REQUIRE(got != nullptr);
+    const changji::models::Shot fresh;
+    CHECK(got->shot_size == fresh.shot_size);          // 中景，不是大特写
+    CHECK(got->shot_size != changji::models::ShotSize::ECU);
+    CHECK(got->camera_angle == fresh.camera_angle);
+    CHECK(got->camera_move == fresh.camera_move);
+    CHECK(got->transition_in == fresh.transition_in);
+    if (!got->characters.empty()) {
+        CHECK(got->characters.front().face_pose == changji::models::CharacterInShot{}.face_pose);
+    }
+
+    std::error_code ec;
+    fs::remove_all(root, ec);
+}
+
+TEST_CASE("drop_unknown_shot_enums 说出抹掉了哪几栏，认得的一栏不动") {
+    json sh = {{"shot_size", "WS"}, {"camera_angle", "high"}, {"camera_move", nullptr},
+               {"characters", json::array({{{"char_id", "c1"}, {"face_pose", "profile"}},
+                                           {{"char_id", "c2"}, {"face_pose", "nope"}}})}};
+    const auto dropped = changji::models::drop_unknown_shot_enums(sh);
+    CHECK(dropped.size() == 3);
+    CHECK_FALSE(sh.contains("shot_size"));
+    CHECK_FALSE(sh.contains("camera_move"));
+    CHECK(sh["camera_angle"] == "high");
+    CHECK(sh["characters"][0]["face_pose"] == "profile");
+    CHECK_FALSE(sh["characters"][1].contains("face_pose"));
+}
+
 TEST_CASE("没写画风的项目，读出来要有这条线的底子") {
     // **2026-09-12 用户报的那件事就是它空着。** 同一个项目里三个角色出了
     // 皮克斯 3D、半写实、照片三种质感，空景图也是一会 CG 一会实拍——
@@ -394,3 +501,53 @@ TEST_CASE("资产库保持文件里的键顺序") {
 }
 
 
+
+TEST_CASE("存盘：哪一栏里混进半个字，也照样存得上") {
+    // 外部命令的报错尾巴按字节截过的话，截口劈开一个中文字；那段话进了闸门
+    // 理由（gate_notes）。默认的 dump 在这儿抛 type_error.316——这一回存不上，
+    // 之后每一回也存不上，整部片子卡死在那一个字节上。
+    const fs::path root = fs::temp_directory_path() /
+                          changji::paths::from_utf8("changji_半个字_存盘");
+    std::error_code ec;
+    fs::remove_all(root, ec);
+    ProjectStore store = ProjectStore::create(root, "half-char", "半个字", StyleLine::ANIME);
+    Project p = store.load_project();
+    Episode ep;
+    ep.episode_id = "ep01";
+    Shot s;
+    s.shot_id = "ep01_sh001";
+    s.gate_notes.push_back(std::string("ffmpeg 退出码 1：…/片子/\xE6\x83"));   // 「想」只剩两个字节
+    ep.shots.push_back(s);
+    p.episodes.push_back(ep);
+    CHECK_NOTHROW(store.save_project(p));
+    const Project back = store.load_project();
+    REQUIRE(back.episodes.size() == 1);
+    REQUIRE(back.episodes[0].shots.size() == 1);
+    CHECK(back.episodes[0].shots[0].gate_notes.at(0).rfind("ffmpeg 退出码 1", 0) == 0);
+    fs::remove_all(root, ec);
+}
+
+TEST_CASE("设定库存盘保留角色、场景的先后，不按键名排") {
+    // 2026-09-26 审出来：save_assets 拿普通 json 写，键按字母排——改一处设定，界面上的
+    // 顺序就变成字母序。
+    const fs::path root =
+        fs::temp_directory_path() /
+        ("changji_asset_order_" + std::to_string(
+            std::chrono::steady_clock::now().time_since_epoch().count()));
+    ProjectStore::create(root, "顺序");
+    const ProjectStore store(root);
+    AssetLibrary lib = store.load_assets();
+    for (const char* id : {"loc_rooftop", "loc_alley", "loc_bridge"}) {
+        Location l;
+        l.location_id = id;
+        l.name = id;
+        lib.locations[id] = l;
+    }
+    store.save_assets(lib);
+    const AssetLibrary back = store.load_assets();
+    std::vector<std::string> order;
+    for (const auto& [k, v] : back.locations) order.push_back(k);
+    CHECK(order == std::vector<std::string>{"loc_rooftop", "loc_alley", "loc_bridge"});
+    std::error_code ec;
+    fs::remove_all(root, ec);
+}

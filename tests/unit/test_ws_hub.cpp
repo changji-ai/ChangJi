@@ -228,3 +228,18 @@ TEST_CASE("过了间隔又放行") {
     std::this_thread::sleep_for(ws::kThrottleInterval + std::chrono::milliseconds(80));
     CHECK_FALSE(h.should_throttle("job1", "progress", "progress"));
 }
+
+TEST_CASE("预览图也节流，参考图那条按 target 分桶") {
+    // 原来 job_preview / ref_preview 一条都不节流：采样每一步一张几十 KB 的图，
+    // Crow 的写队列又没有上限，半开着的连接每分钟攒几 MB。
+    ws::Hub h;
+    CHECK_FALSE(h.should_throttle("chat-a", "job_preview", ""));
+    CHECK(h.should_throttle("chat-a", "job_preview", ""));
+    // 参考图频道全片共用：一张图的预览不许挡住另一张
+    CHECK_FALSE(h.should_throttle("refs", "ref_preview", "", "char:c1:front"));
+    CHECK_FALSE(h.should_throttle("refs", "ref_preview", "", "char:c2:front"));
+    CHECK(h.should_throttle("refs", "ref_preview", "", "char:c1:front"));
+    // 落定那几条照旧不节流
+    CHECK_FALSE(h.should_throttle("refs", "ref_done", ""));
+    CHECK_FALSE(h.should_throttle("refs", "ref_done", ""));
+}

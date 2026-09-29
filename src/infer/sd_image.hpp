@@ -144,6 +144,31 @@ void remove_preview_sink(int token);
 /// 页面上的小图不该知道活是在哪台机器上跑的。
 void publish_preview(const std::string& tag, int step, std::string data_url);
 
+/// **这条线程上起的生成，预览记在哪件活名下。**
+///
+/// 预览的 tag 原来就是 shot_id，而**每一部电影都有 `ep01_sh001`**（CLAUDE.md 十¾）：
+/// 这台机器一边出自己的片子、一边替别的机器跑活（挂着的 worker 接口）时，别人那一镜
+/// 的采样图落在自己镜头墙同名那一格上，自己的图也被当成别人那件活的预览带回去。
+///
+/// 替别人跑的那一件在自己线程上立一个（worker_server），这条线程上起的生成、转发的
+/// 预览，tag 前面都带上它；本机自己的活不立，tag 照旧。本机的落点只认不带前缀的
+/// （`preview_tag_is_local`），替别人跑的那件只认自己那个前缀。
+class PreviewScope {
+public:
+    explicit PreviewScope(std::string scope);
+    ~PreviewScope();
+    PreviewScope(const PreviewScope&) = delete;
+    PreviewScope& operator=(const PreviewScope&) = delete;
+
+private:
+    std::string prev_;
+};
+
+/// 按这条线程上的 PreviewScope 给 tag 加上前缀（没立就原样回）。
+std::string scoped_preview_tag(const std::string& tag);
+/// 这个 tag 是不是本机自己的活（不带任何 PreviewScope 前缀）。
+bool preview_tag_is_local(const std::string& tag);
+
 /// 挂上、出作用域自动摘。
 class PreviewSinkHandle {
 public:

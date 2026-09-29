@@ -10,7 +10,9 @@
 
 #include <doctest/doctest.h>
 
+#include <chrono>
 #include <filesystem>
+#include <thread>
 #include <fstream>
 #include <sstream>
 #include <system_error>
@@ -558,24 +560,23 @@ TEST_CASE("状态码翻成人话") {
         const std::string no_model = llm::explain_status(
             cfg, 404, R"({"error": "model 'qwen3:14b' not found"})");
         CHECK(no_model.find("ollama pull qwen3:14b") != std::string::npos);
-        CHECK(no_model.find("地址填错") == std::string::npos);
+        CHECK(no_model.find("地址填写有误") == std::string::npos);
 
         const std::string no_route =
             llm::explain_status(cfg, 404, R"({"error": "404 page not found"})");
-        CHECK(no_route.find("地址填错") != std::string::npos);
+        CHECK(no_route.find("地址填写有误") != std::string::npos);
         CHECK(no_route.find("/v1") != std::string::npos);
         CHECK(no_route.find("ollama pull") == std::string::npos);
     }
 
     SUBCASE("认证失败要指出去哪儿填密钥") {
-        // **指的是项目页那个模型弹窗，不是设置页。** 大模型的地址、模型名、
-        // 密钥、温度 2026-09-14 全搬进了项目页「模型」那一行点开的窗；设置页
-        // 那一节整个删了（SettingsView 里那段注释：「密钥根本不经过这一页」）。
-        // 这条用例原来钉着「设置页」，把人支去一个没有那个框的页面。
+        // **指的是「设置 ▸ 大模型」。** 项目页 2026-09-26 删了（网页只剩对话页），
+        // 2026-09-28 设置页重排之后两个前端填密钥都在「设置 ▸ 大模型」里这一家的
+        // 「修改」。这条用例原来钉着「项目页」——照着找的人会找一个已经没有的页面。
         for (const int code : {401, 403}) {
             const std::string s = llm::explain_status(cfg, code, "{}");
             CHECK(s.find("API Key") != std::string::npos);
-            CHECK(s.find("项目页") != std::string::npos);
+            CHECK(s.find("「设置 ▸ 大模型」") != std::string::npos);
             CHECK(s.find(std::to_string(code)) != std::string::npos);
         }
     }
@@ -587,21 +588,21 @@ TEST_CASE("状态码翻成人话") {
         //     根本没填过的东西，而且该提哪儿领要说清楚。
         REQUIRE(c.api_key.empty());
         const std::string fresh = llm::explain_status(c, 401, "{}");
-        CHECK(fresh.find("还没填") != std::string::npos);
+        CHECK(fresh.find("未填写") != std::string::npos);
         CHECK(fresh.find("bigmodel.cn") != std::string::npos);
-        CHECK(fresh.find("不对") == std::string::npos);
+        CHECK(fresh.find("不正确") == std::string::npos);
 
         // 二、换了一家云服务、密钥还没填。说"密钥不对"会把人支去检查
         //     一个他根本没填过的东西。
         c.base_url = "https://api.deepseek.com/v1";
         c.model = "deepseek-chat";
         const std::string empty = llm::explain_status(c, 401, "{}");
-        CHECK(empty.find("还没填") != std::string::npos);
-        CHECK(empty.find("不对") == std::string::npos);
+        CHECK(empty.find("未填写") != std::string::npos);
+        CHECK(empty.find("不正确") == std::string::npos);
 
         // 三、真填了一个错的。
         c.api_key = "填了但是错的";
-        CHECK(llm::explain_status(c, 401, "{}").find("不对") !=
+        CHECK(llm::explain_status(c, 401, "{}").find("不正确") !=
               std::string::npos);
     }
 
@@ -617,8 +618,8 @@ TEST_CASE("状态码翻成人话") {
             c, 403,
             R"({"error":{"code":403,"message":"thinkingmachines/inkling:free is only available on agentic harnesses. Try plugging it into a coding agent or productivity app listed on https://openrouter.ai/apps"}})");
         CHECK(gated.find("换一个模型") != std::string::npos);
-        CHECK(gated.find("密钥本身多半没问题") != std::string::npos);
-        CHECK(gated.find("API Key 不对") == std::string::npos);
+        CHECK(gated.find("密钥本身通常没有问题") != std::string::npos);
+        CHECK(gated.find("API Key 不正确") == std::string::npos);
         // 服务的原话要原样带上——那才是唯一说清了原因的东西
         CHECK(gated.find("agentic harnesses") != std::string::npos);
 
@@ -627,12 +628,12 @@ TEST_CASE("状态码翻成人话") {
             // 误判是在密钥真过期时把人支去换模型。
             const std::string plain = llm::explain_status(
                 c, 403, R"({"error":"forbidden"})");
-            CHECK(plain.find("API Key 不对") != std::string::npos);
+            CHECK(plain.find("API Key 不正确") != std::string::npos);
         }
     }
 
     SUBCASE("429 要分清「太频繁」和「没钱」") {
-        CHECK(llm::explain_status(cfg, 429, "{}").find("太频繁") !=
+        CHECK(llm::explain_status(cfg, 429, "{}").find("过于频繁") !=
               std::string::npos);
 
         // 智谱把"余额不足/没有可用资源包"也回 429（code 1113）。报成
@@ -641,13 +642,13 @@ TEST_CASE("状态码翻成人话") {
             cfg, 429,
             R"({"error":{"code":"1113","message":"余额不足或无可用资源包，请充值。"}})");
         CHECK(broke.find("余额") != std::string::npos);
-        CHECK(broke.find("太频繁") == std::string::npos);
+        CHECK(broke.find("过于频繁") == std::string::npos);
         // 指一条出路：这家免费的那个叫什么，直接说出来
         CHECK(broke.find("glm-4.7-flash") != std::string::npos);
     }
 
     SUBCASE("服务端错误") {
-        CHECK(llm::explain_status(cfg, 503, "{}").find("服务自己出错") !=
+        CHECK(llm::explain_status(cfg, 503, "{}").find("服务内部出错") !=
               std::string::npos);
     }
 
@@ -663,13 +664,13 @@ TEST_CASE("状态码翻成人话") {
     SUBCASE("服务说的原话要带上") {
         const std::string s =
             llm::explain_status(cfg, 400, R"({"error": "context too long"})");
-        CHECK(s.find("服务说：context too long") != std::string::npos);
+        CHECK(s.find("服务返回：context too long") != std::string::npos);
     }
 
     SUBCASE("响应不是 JSON 也要能翻") {
         const std::string s =
             llm::explain_status(cfg, 502, "<html>Bad Gateway</html>");
-        CHECK(s.find("服务自己出错") != std::string::npos);
+        CHECK(s.find("服务内部出错") != std::string::npos);
         CHECK(s.find("Bad Gateway") != std::string::npos);
     }
 
@@ -968,6 +969,12 @@ TEST_CASE("远端 SSE：不给 stream_post 就还是整段那条") {
 
 TEST_CASE("远端 SSE：服务端压根不认 stream，回了一份普通 JSON") {
     // 这条是"不会变得更糟"的核心：老服务照样能用，只是那一下是整段到的。
+    //
+    // ⚠️ **这条是在传输外面把 body 塞回去的**，真传输（client_http.cpp）上
+    // 那份 body 原来一直是空的——带了 content_receiver 的话 httplib 不往
+    // res->body 里放。2026-09-25 拿一个不认 stream 的假服务起真引擎才撞到，
+    // 修在 client_http.cpp 那段「看第一个非空白字节」。用例这套不编真传输，
+    // 所以这一段只能拿真引擎验。
     FakeHttp http;
     FakeStream stream;
     // 200，但没有一条 SSE，body 里是整份普通响应
@@ -990,6 +997,17 @@ TEST_CASE("远端 SSE：服务端压根不认 stream，回了一份普通 JSON")
 
     CHECK(out == "{\"ch\":\"整段那份\"}");
     CHECK(pieces == std::vector<std::string>{"{\"ch\":\"整段那份\"}"});
+}
+
+TEST_CASE("远端 SSE：流断在半路（没 [DONE]、没 finish_reason）不收下半截") {
+    // 反向代理把没写长度的 SSE 中途关掉，httplib 读到 EOF 当成功——原来半章
+    // 正文照样收下、进库。
+    FakeHttp http;
+    FakeStream stream;
+    stream.chunks = {{"data: {\"choices\":[{\"delta\":{\"content\":\"{\\\"ch\\\":\\\"半\"}}]}\n\n"}};
+    llm::RemoteClient c(test_cfg(), http.fn(), stream.fn());
+    pipeline::CancelToken tok;
+    CHECK_THROWS_AS(c.complete(simple_req(), tok), llm::LlmError);
 }
 
 TEST_CASE("远端 SSE：流里报错要抛，不能当成写完了") {
@@ -1146,6 +1164,39 @@ TEST_CASE("断在半路、正文还没来：原样再发一趟，只一趟") {
         opts.on_token = [](const std::string&) {};
         CHECK_THROWS_AS(c.chat({}, json::array(), opts, tok), llm::LlmError);
         CHECK(stream.calls.size() == 1);
+    }
+    SUBCASE("正文来过一截、但没人接正文（拆分镜那种只推思考的）：照样重发") {
+        // 那半截只在客户端里攒着、谁都没看见过，作废了不会冒两遍。
+        FakeStream stream;
+        stream.chunks = {{sse_delta(json{{"reasoning_content", "想"}}), sse_chunk("{\\\"title\\\": \\\"雨")},
+                         {sse_chunk("{\\\"title\\\": \\\"雨\\\"}"), "data: [DONE]\n\n"}};
+        stream.broke = {kBroke};
+        llm::RemoteClient c(test_cfg(), http.fn(), stream.fn());
+        llm::Request req = simple_req();
+        req.on_thinking = [](const std::string&) {};
+        CHECK(c.complete(req, tok) == "{\"title\": \"雨\"}");
+        CHECK(stream.calls.size() == 2);
+    }
+    SUBCASE("字一直在来、跑得久了才被掐断：量的是静了多久，照样重发") {
+        // 2026-09-27：拆分镜第 4 场流了 29 分钟被对面掐断，因为"总时长过了超时的一半"
+        // 不重发，整章一小时作废。这里总时长过了一半（睡在第一段里），断之前却一直有字。
+        FakeStream stream;
+        stream.chunks = {{sse_delta(json{{"reasoning_content", "想"}}),
+                          sse_delta(json{{"reasoning_content", "接着想"}})},
+                         {sse_chunk("{\\\"title\\\": \\\"雨\\\"}"), "data: [DONE]\n\n"}};
+        stream.broke = {kBroke};
+        auto cfg = test_cfg();
+        cfg.timeout_s = 0.2;
+        llm::RemoteClient c(cfg, http.fn(), stream.fn());
+        llm::Request req = simple_req();
+        bool slept = false;
+        req.on_thinking = [&](const std::string&) {
+            if (slept) return;
+            slept = true;
+            std::this_thread::sleep_for(std::chrono::milliseconds(150));
+        };
+        CHECK(c.complete(req, tok) == "{\"title\": \"雨\"}");
+        CHECK(stream.calls.size() == 2);
     }
     SUBCASE("整段那条同样重发一趟") {
         llm::HttpResponse broke;
@@ -2198,4 +2249,32 @@ TEST_CASE("关不掉思考：带工具那条（整段和流式）同样换 low")
         CHECK(sent_low(stream.calls[1].body));
         CHECK(http.calls.empty());
     }
+}
+
+// 2026-09-27：设置页「现在查一次」永远「取不到版本信息」，curl 一秒就拿到。GitHub 发布
+// 文件先 302 到一条带签名的地址，查询串里有 `rscd=attachment%3B+filename%3D…`；httplib
+// 跟跳转时把 `+` 编成 `%2B`，签名对不上回 403。现在跳转自己跟、请求目标自己编。
+TEST_CASE("请求目标：只编非 ASCII 和空白，+ , ; ' 这些合法的字一个不动") {
+    using changji::llm::request_target;
+    const std::string signed_q =
+        "/asset/c992?sp=r&se=2026-09-26T18%3A09%3A09Z&rscd=attachment%3B+filename%3Dversion.json&sig=a+b%2Fc";
+    CHECK(request_target(signed_q) == signed_q);
+    CHECK(request_target("/a,b;c'd") == "/a,b;c'd");
+    // 模型、人贴进来的网址常是没编过的：中文和空格还得编上。
+    CHECK(request_target("/wiki/中") == "/wiki/%E4%B8%AD");
+    CHECK(request_target("/a b\tc") == "/a%20b%09c");
+    // 已经编过的不再编一遍（% 原样）。
+    CHECK(request_target("/wiki/%E4%B8%AD") == "/wiki/%E4%B8%AD");
+}
+
+TEST_CASE("跳转地址：绝对、//host、/path、相对路径都按上一跳补全") {
+    using changji::llm::redirect_target;
+    const std::string at = "https://github.com/o/r/releases/download/beta/version.json?x=1";
+    CHECK(redirect_target(at, "https://release-assets.example.com/a?b=c+d") ==
+          "https://release-assets.example.com/a?b=c+d");
+    CHECK(redirect_target(at, "//cdn.example.com/x") == "https://cdn.example.com/x");
+    CHECK(redirect_target(at, "/login") == "https://github.com/login");
+    CHECK(redirect_target(at, "latest.json") ==
+          "https://github.com/o/r/releases/download/beta/latest.json");
+    CHECK(redirect_target("http://h:8080", "next") == "http://h:8080/next");
 }

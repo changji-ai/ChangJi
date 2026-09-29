@@ -20,6 +20,8 @@
 #include <nlohmann/json.hpp>
 
 #include "media/assemble.hpp"
+#include "media/ffmpeg.hpp"
+#include "media/watermark.hpp"
 // 时间轴按真正会生成的帧数排，这两个头提供上限和 frames_for
 #include "stages/limits.hpp"
 #include "stages/render.hpp"
@@ -175,6 +177,31 @@ TEST_CASE("时间线：字幕时间戳来自配音的真实时长") {
         const auto t = media::build_timeline({s}, paths, config::AssemblyConfig{});
         CHECK(t.cues().empty());
     }
+}
+
+TEST_CASE("时间线：每条配音记着自己从哪儿起，不跟字幕按下标对") {
+    // 字幕只出「有字、有时长」的，配音只出「有文件」的——两张表不是一一对应。
+    // 原来混音按下标拿字幕时长往后推：清掉第 2 句的字（配音还在），第 3 句的
+    // 声音就提前 2 秒，和字幕错开。
+    const ExactFrames exact;
+    const auto paths = make_paths("配音起点");
+    touch(paths.shots("draft") / "a.mp4");
+    auto s = make_shot("sh001", 8.0, "shots/draft/a.mp4");
+    s.dialogue.push_back(line("第一句。", 1.5, "c_lin", "audio/1.wav"));
+    s.dialogue.push_back(line("", 2.0, "c_lin", "audio/2.wav"));   // 字清掉了，配音还在
+    s.dialogue.push_back(line("第三句。", 1.0, "c_lin", "audio/3.wav"));
+
+    const auto tl = media::build_timeline({s}, paths, config::AssemblyConfig{});
+    REQUIRE(tl.entries.size() == 1);
+    const auto& e = tl.entries[0];
+    REQUIRE(e.audio_paths.size() == 3);
+    REQUIRE(e.audio_starts.size() == 3);
+    CHECK(e.audio_starts[0] == doctest::Approx(0.0));
+    CHECK(e.audio_starts[1] == doctest::Approx(1.5));
+    CHECK(e.audio_starts[2] == doctest::Approx(3.5));
+    // 第三句的字幕和它的配音同一刻起。
+    REQUIRE(e.cues.size() == 2);
+    CHECK(e.cues[1].start_s == doctest::Approx(e.audio_starts[2]));
 }
 
 TEST_CASE("转场不影响时间线：装配是纯硬切，没有重叠") {
@@ -458,12 +485,78 @@ TEST_CASE("烧字幕时路径里的冒号要转义") {
                                        config::AssemblyConfig{}, "out.mp4");
     const std::string vf = arg_value(args, "-vf");
     CAPTURE(vf);
-    CHECK(vf.rfind("subtitles='", 0) == 0);
+    CHECK(vf.rfind("subtitles=filename='", 0) == 0);
     CHECK(vf.back() == '\'');
 
     SUBCASE("烧字幕时音频原样拷贝") {
         CHECK(arg_value(args, "-c:a") == "copy");
     }
+}
+
+TEST_CASE("滤镜路径真交给 ffmpeg：撇号、等号、逗号、冒号都认得出") {
+    // 上面几条只比字符串，**把错的转义当成正确答案钉住过**：`'\\''` 看着像对的，
+    // 真交给 ffmpeg 撇号被第二层吞掉（`Bob's` 变 `Bobs`），路径里带 `=` 时
+    // 不写键的第一个参数被拆成「键=值」。水印那条 movie= 每一镜都走，所以
+    // 片子目录名里带一个撇号就一镜都出不来。这一条拿真 ffmpeg 开文件。
+    const media::FFmpeg ff("ffmpeg", "ffprobe", media::default_runner());
+    if (!ff.available()) return;   // 没有 ffmpeg 的机器上出片、装配整个不跑
+    const fs::path dir = fs::temp_directory_path() /
+                         paths::from_utf8("cj_esc Bob's a=b,c;d:e [x]");
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+    fs::create_directories(dir);
+    const fs::path img = dir / "wm.png";
+    const media::Runner run = media::default_runner();
+    run("ffmpeg", {"-y", "-loglevel", "error", "-f", "lavfi", "-i", "color=red:s=16x16",
+                   "-frames:v", "1", paths::to_utf8(img)}, {});
+    REQUIRE(fs::exists(img));
+
+    media::WatermarkPlan plan;
+    plan.image = img;
+    plan.width = 8;
+    plan.height = 8;
+    plan.margin = 1;
+    const std::string graph = media::with_watermark("[0:v]null", plan);
+    const auto r = run("ffmpeg", {"-y", "-loglevel", "error", "-f", "lavfi", "-i",
+                                  "color=blue:s=64x64", "-filter_complex", graph,
+                                  "-frames:v", "1", "-f", "null", "-"}, {});
+    CAPTURE(graph);
+    CHECK(r.exit_code == 0);
+    fs::remove_all(dir, ec);
+}
+
+TEST_CASE("烧字幕真交给 ffmpeg：中文目录名、撇号、等号也开得了字幕文件") {
+    // 字幕文件是 libass 自己开的（`subtitles=filename='…'`），不是我们开——转义错了
+    // 或者中文路径没传对，这一步回非零，这一章「烧字幕」失败。CLAUDE.md 第十五条里
+    // 记着「中文目录下开字幕出一章才算验过」，这一条在 Linux 上把路径那一半钉住。
+    const media::FFmpeg ff("ffmpeg", "ffprobe", media::default_runner());
+    if (!ff.available()) return;
+    const media::Runner run = media::default_runner();
+    const auto has_libass = run("ffmpeg", {"-hide_banner", "-filters"}, {});
+    if (has_libass.out.find(" subtitles ") == std::string::npos) return;
+
+    const fs::path dir = fs::temp_directory_path() /
+                         paths::from_utf8("cj_字幕 雨夜 Bob's a=b,c;d:e [x]");
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+    fs::create_directories(dir);
+    const fs::path video = dir / paths::from_utf8("第一章.mp4");
+    run("ffmpeg", {"-y", "-loglevel", "error", "-f", "lavfi", "-i", "color=black:s=64x64:d=1",
+                   "-c:v", "libx264", "-pix_fmt", "yuv420p", paths::to_utf8(video)}, {});
+    REQUIRE(fs::exists(video));
+    const fs::path subs = dir / paths::from_utf8("第一章.srt");
+    {
+        std::ofstream f(subs, std::ios::binary);
+        f << "1\n00:00:00,000 --> 00:00:00,900\n快走，从后门。\n\n";
+    }
+    const fs::path out = dir / paths::from_utf8("成片.mp4");
+    auto args = media::burn_args(video, subs, config::AssemblyConfig{}, out);
+    args.insert(args.begin(), {"-loglevel", "error"});
+    const auto r = run("ffmpeg", args, {});
+    CAPTURE(r.out);
+    CHECK(r.exit_code == 0);
+    CHECK(fs::exists(out));
+    fs::remove_all(dir, ec);
 }
 
 TEST_CASE("每条命令都带 -y") {
@@ -510,7 +603,8 @@ TEST_CASE("路径里有单引号：以前会破掉滤镜，2026-09-11 补上了"
         media::escape_filter_path(paths::from_utf8("C:/Bob's drama/a.ass"));
     CAPTURE(e);
     CHECK(e.find("C\\:/") == 0);              // 冒号照旧转义
-    CHECK(e.find("Bob'\\''s") != std::string::npos);  // 撇号按 '\\'' 转
+    // 撇号按 '\\\'' 转：滤镜图、滤镜参数各解一层（见 escape_filter_path）。
+    CHECK(e.find("Bob'\\\\\\''s") != std::string::npos);
 
     // 拼进整条 -vf 之后，引用必须是闭合的（只数没被反斜杠转义的单引号）。
     const auto args = media::burn_args(

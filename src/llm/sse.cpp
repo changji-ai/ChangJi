@@ -42,7 +42,11 @@ void SseDeltas::take_line(std::string line, std::string& out) {
     const auto j = nlohmann::json::parse(payload, nullptr, false);
     if (j.is_discarded() || !j.is_object()) return;
 
-    if (const auto err = j.find("error"); err != j.end() && error_.empty()) {
+    // `"error": null` 不是报错：有的网关每一块都把这个可空的字段序列化出来。
+    // 原来照样当错，第一块就把整条流掐了，报一句「大模型服务报错：null」
+    // （2026-09-25 拿假服务实测撞到；client.cpp 的 error_detail 本来就跳过 null）。
+    if (const auto err = j.find("error");
+        err != j.end() && !err->is_null() && error_.empty()) {
         if (err->is_string()) {
             error_ = err->get<std::string>();
         } else if (err->is_object()) {
@@ -99,7 +103,20 @@ void SseDeltas::take_line(std::string line, std::string& out) {
                                                    i->is_number_integer() &&
                                                    i->get<long long>() >= 0) {
                 idx = static_cast<std::size_t>(i->get<long long>());
+            } else if (const auto id = item.find("id");
+                       !tool_calls_.empty() && id != item.end() && id->is_string() &&
+                       !id->get<std::string>().empty() &&
+                       !tool_calls_.back().id.empty() &&
+                       tool_calls_.back().id != id->get<std::string>()) {
+                // **不带 index、换了一个 id：是新的一个调用。** 原来一律当「接着
+                // 上一个」，两个并行调用并成一个——名字留第一个、参数拼成
+                // `{}{}`，第二个工具一声不响没了（2026-09-25 拿假服务实测撞到）。
+                idx = tool_calls_.size();
             }
+            // index 是对面给的：一个 1e12 就是 resize 出几 TB，在 httplib 的回调里
+            // 抛 bad_alloc。一次回话里的工具调用不会上百个，超了就不认这一条。
+            constexpr std::size_t kMaxCalls = 64;
+            if (idx >= kMaxCalls) continue;
             if (idx >= tool_calls_.size()) tool_calls_.resize(idx + 1);
             SseToolCall& call = tool_calls_[idx];
             if (const auto id = item.find("id"); id != item.end() && id->is_string()) {

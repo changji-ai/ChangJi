@@ -28,6 +28,9 @@ TEST_CASE("多久之前：越近说得越细") {
     CHECK(util::when_word(now - 29 * kDay, now) == "29 天前");
     CHECK(util::when_word(now - 60 * kDay, now) == "2 个月前");
     CHECK(util::when_word(now - 400 * kDay, now) == "1 年前");
+    // 360~364 天：原来按月数分（12 个月）落到按年算，说的是「0 年前」。
+    CHECK(util::when_word(now - 362 * kDay, now) == "12 个月前");
+    CHECK(util::when_word(now - 365 * kDay, now) == "1 年前");
 
     SUBCASE("往后的时间当刚刚") {
         // 机器时钟往回调过、两台机器差几秒，都会让 `at` 比 `now` 大。

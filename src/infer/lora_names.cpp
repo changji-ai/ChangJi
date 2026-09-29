@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <cstdio>
 #include <fstream>
+#include <atomic>
+#include <random>
 #include <stdexcept>
 #include <system_error>
 
@@ -113,8 +115,18 @@ fs::path ensure_sdcpp_lora_names(const fs::path& lora) {
 
     std::ifstream in(lora, std::ios::binary);
     in.seekg(static_cast<std::streamoff>(8 + h.json_len));
+    // ⚠️ **临时名要独一份。** 一台多卡机每张卡一个工作进程、共用同一个模型目录；
+    // 两张卡同时第一次用这个 LoRA 的话，固定名 `.part` 被两个进程一起 O_TRUNC 着写，
+    // 一个把另一个写到一半的头清零，改名出去的是一份带洞的 LoRA（2026-09-25 审
+    // 出来）。名字带一个随机后缀（同 sd_image.cpp 实测显存那份，不用进程号是为了
+    // 不分平台）。
+    static const std::string kTag = [] {
+        std::random_device rd;
+        return std::to_string(rd()) + "-" + std::to_string(rd());
+    }();
+    static std::atomic<unsigned> seq{0};
     fs::path tmp = fixed;
-    tmp += ".part";
+    tmp += ".part." + kTag + "-" + std::to_string(seq.fetch_add(1));
     {
         std::ofstream o(tmp, std::ios::binary | std::ios::trunc);
         if (!o) {
@@ -133,12 +145,23 @@ fs::path ensure_sdcpp_lora_names(const fs::path& lora) {
             if (got > 0) o.write(buf.data(), got);
         }
         if (!o) {
+            o.close();
+            std::error_code rm;
+            fs::remove(tmp, rm);   // 半截的别留着占盘
             throw std::runtime_error(
                 SAYF("写 %1 时出错，多半是磁盘满了", paths::to_utf8(tmp)));
         }
     }
     fs::rename(tmp, fixed, ec);
     if (ec) {
+        std::error_code ec2;
+        fs::remove(tmp, ec2);
+        // 另一个进程抢先写好了（改名那一下没有"覆盖失败"的平台上会走到这儿）：
+        // 它那份就是同一个源文件写出来的，照用。
+        if (fs::is_regular_file(fixed, ec2) && fs::file_size(fixed, ec2) > 0 &&
+            fs::last_write_time(fixed, ec2) >= fs::last_write_time(lora, ec2)) {
+            return fixed;
+        }
         throw std::runtime_error(SAYF("改名失败：%1 -> %2：%3",
                                       paths::to_utf8(tmp),
                                       paths::to_utf8(fixed), ec.message()));

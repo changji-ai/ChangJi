@@ -127,6 +127,8 @@ public:
 
     /// 砸了。记一句原话，析构时按"失败"结账。
     void fail(std::string why);
+    /// 同上，但**已经记过一句的不盖**（那句更具体）。
+    void fail_if_clean(std::string why);
 
     /// **这一件在长跑任务表里也有一份。**
     ///

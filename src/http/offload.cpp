@@ -1,5 +1,7 @@
 #include "http/offload.hpp"
 
+#include "llm/chat_pick.hpp"
+
 #include <condition_variable>
 #include <deque>
 #include <mutex>
@@ -58,6 +60,12 @@ Offload& Offload::instance() {
 }
 
 void Offload::post(std::function<void()> fn) {
+    // 派活那条线程上挑的模型跟着过去（`llm/chat_pick.hpp`）：对话那一轮里写大纲、
+    // 读网页这些挪到后台线程上的活，照样用这条对话挑的那一个。
+    fn = [pick = llm::current_pick(), f = std::move(fn)]() {
+        const llm::PickScope picked{pick};
+        f();
+    };
     {
         std::lock_guard lg(impl_->mu);
         if (!impl_->stopping) {

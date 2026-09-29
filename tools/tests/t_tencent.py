@@ -131,7 +131,9 @@ SENT[:] = []
 q.power_on("ins-1"); q.power_off("ins-1"); q.release("ins-1")
 assert [x["action"] for x in SENT] == ["StartInstances", "StopInstances", "TerminateInstances"]
 assert all(x["body"]["InstanceIds"] == ["ins-1"] for x in SENT)
-check("开机/关机/销毁三个 Action 对，实例 ID 是数组")
+# 关机不收费：不带的话腾讯云默认 KEEP_CHARGING，关着照扣算力钱
+assert SENT[1]["body"].get("StoppedMode") == "STOP_CHARGING", SENT[1]["body"]
+check("开机/关机/销毁三个 Action 对，实例 ID 是数组，关机不收费")
 
 # 安全组和子网在 vpc 那套里，不在 cvm
 SENT[:] = []
@@ -275,5 +277,18 @@ except G.CloudError as e:
     check("腾讯云同样：可用区不在选中的地域里就拦住")
 else:
     raise AssertionError("没拦住")
+
+# ---- 列表翻页 ----
+pg = T({"secret_id":"a","secret_key":"b"})
+asked = []
+def paged(act, p, *a, **k):
+    asked.append(p.get("Offset"))
+    ids_ = range(p["Offset"], min(p["Offset"] + 100, 230))
+    return {"TotalCount": 230, "InstanceSet": [
+        {"InstanceId": "ins-%d" % i, "InstanceState": "RUNNING"} for i in ids_]}
+pg._call = paged
+got = pg.instances()
+assert len(got) == 230 and asked == [0, 100, 200], (len(got), asked)
+check("230 台按 Offset 问三页问全（原来只问第一页）")
 
 print("\n腾讯云 %d 项全过" % len(ok))

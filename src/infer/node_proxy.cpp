@@ -19,27 +19,19 @@ std::pair<std::string, std::string> split_url(const std::string& url) {
             rest.substr(slash)};
 }
 
-/// 派活给这台时用哪个口令。那台单独配了就用它的，否则用全局那个。
-std::string token_for(const config::Settings& s, const std::string& node_url) {
-    for (const auto& n : s.peer.nodes) {
-        if (n.url == node_url) {
-            return n.token.empty() ? s.peer.token : n.token;
-        }
-    }
-    // **不在配置里也照发。** 这种情况是界面传了个没登记的地址，
-    // 那头会回 401 或者连不上——两种都比这里静默拒绝好查。
-    return s.peer.token;
+/// 不在机器表里的：不发请求、不带口令，回一句人话。见 node_proxy.hpp 的 proxy_target。
+/// 那句话指路照界面上的名字：机器表 2026-09-28 起摆在「设置 ▸ 互联」里。
+ProxyResult not_listed(const std::string& node_url) {
+    return {404, json{{"detail", SAYF("%1 不在机器列表中：请先在「设置 ▸ 互联」中添加这台机器", node_url)}}};
 }
 
-httplib::Client make_client(const config::Settings& s,
-                            const std::string& node_url, int timeout_s,
-                            std::string& prefix) {
+httplib::Client make_client(const std::string& token, const std::string& node_url,
+                            int timeout_s, std::string& prefix) {
     const auto [origin, p] = split_url(node_url);
     prefix = p;
     httplib::Client cli(origin);
     cli.set_connection_timeout(timeout_s, 0);
     cli.set_read_timeout(timeout_s, 0);
-    const std::string token = token_for(s, node_url);
     if (!token.empty()) cli.set_bearer_token_auth(token);
     return cli;
 }
@@ -52,12 +44,12 @@ ProxyResult finish(const httplib::Result& res, const std::string& node_url) {
     if (!res) {
         return {0,
                 json{{"detail",
-                      SAYF("连不上 %1：%2", node_url,
+                      SAYF("无法连接 %1：%2", node_url,
                            httplib::to_string(res.error()))}}};
     }
     auto body = json::parse(res->body, nullptr, false);
     if (body.is_discarded()) {
-        body = json{{"detail", SAYF("对面回的不是 JSON（%1）",
+        body = json{{"detail", SAYF("对方机器返回的内容不是 JSON（%1）",
                                     std::to_string(res->status))}};
     }
     return {res->status, std::move(body)};
@@ -67,16 +59,20 @@ ProxyResult finish(const httplib::Result& res, const std::string& node_url) {
 
 ProxyResult node_get(const config::Settings& s, const std::string& node_url,
                      const std::string& path, int timeout_s) {
+    const auto target = proxy_target(s, node_url);
+    if (!target.listed) return not_listed(node_url);
     std::string prefix;
-    auto cli = make_client(s, node_url, timeout_s, prefix);
+    auto cli = make_client(target.token, node_url, timeout_s, prefix);
     return finish(cli.Get(prefix + path), node_url);
 }
 
 ProxyResult node_post(const config::Settings& s, const std::string& node_url,
                       const std::string& path, const json& body,
                       int timeout_s) {
+    const auto target = proxy_target(s, node_url);
+    if (!target.listed) return not_listed(node_url);
     std::string prefix;
-    auto cli = make_client(s, node_url, timeout_s, prefix);
+    auto cli = make_client(target.token, node_url, timeout_s, prefix);
     return finish(cli.Post(prefix + path, body.dump(), "application/json"),
                   node_url);
 }

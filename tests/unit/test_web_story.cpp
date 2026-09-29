@@ -3,7 +3,12 @@
 // 上网走假的 HttpGet，按网址回固定的页面。真上网不在单测里。
 
 #include <doctest/doctest.h>
+#include "util/text.hpp"
+#include <thread>
 
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <map>
 #include <string>
 #include <vector>
@@ -13,6 +18,7 @@
 #include "llm/client.hpp"
 #include "stages/story_from_web.hpp"
 #include "stages/web_tools.hpp"
+#include "util/net_inward.hpp"
 
 using namespace changji;
 using json = nlohmann::json;
@@ -196,6 +202,17 @@ TEST_CASE("读网页：指着本机或内网的地址，一律不开") {
         "http://172.20.3.4/x",
         "http://0.0.0.0/x",
         "https://admin@127.0.0.1/x",
+        // 解析器认、原来的四段十进制判据不认的写法（glibc 全解成本机 / 元数据口子）
+        "http://127.1/x",
+        "http://2130706433/x",
+        "http://0x7f000001/x",
+        "http://0177.0.0.1/x",
+        "http://169.254.43518/x",
+        "http://[0:0:0:0:0:0:0:1]/x",
+        "http://[::]/x",
+        "http://[::ffff:127.0.0.1]/x",
+        "http://[fd00::1]/x",
+        "http://localhost./x",
     };
     for (const char* u : inward) {
         CAPTURE(u);
@@ -211,6 +228,11 @@ TEST_CASE("读网页：指着本机或内网的地址，一律不开") {
         "http://1.2.3.4/a",
         "https://172.32.0.1/a",   // 172.16/12 的外沿，不算内网
         "https://100.200.0.1/a",  // 100.64/10 的外沿
+        // 原来按字面前缀 fc / fd 判 IPv6，把这些域名也当内网拒了
+        "https://www.fda.gov/a",
+        "https://fc2.com/a",
+        "https://f-droid.org/a",
+        "https://fdroid.org/a",
     };
     for (const char* u : outward) {
         CAPTURE(u);
@@ -218,6 +240,122 @@ TEST_CASE("读网页：指着本机或内网的地址，一律不开") {
             stages::run_web_tool(web, "fetch_page", json{{"url", u}}.dump());
         CHECK(out.find("不给开") == std::string::npos);
     }
+}
+
+TEST_CASE("读网页：跳转每一跳都重新判，跳进内网的不跟") {
+    // 让 httplib 自己跟的话，公网上一个 302 就把请求带到元数据口子上。
+    stages::WebTools web;
+    std::vector<std::string> asked;
+    web.get = [&asked](const std::string& url, const std::map<std::string, std::string>&,
+                       double) -> llm::HttpResponse {
+        asked.push_back(url);
+        llm::HttpResponse r;
+        if (url == "https://evil.example/go") {
+            r.status = 302;
+            r.headers["location"] = "http://169.254.169.254/latest/meta-data/";
+        } else if (url == "https://ok.example/a") {
+            r.status = 301;
+            r.headers["location"] = "/b?x=1";
+        } else if (url == "https://ok.example/b?x=1") {
+            r.status = 200;
+            r.body = "<p>到了</p>";
+        } else {
+            r.status = 200;
+            r.body = "<p>不该看到我</p>";
+        }
+        return r;
+    };
+    const std::string bad = stages::run_web_tool(web, "fetch_page", json{{"url", "https://evil.example/go"}}.dump());
+    CHECK(bad.find("不该看到我") == std::string::npos);
+    CHECK(bad.find("内网") != std::string::npos);
+    CHECK(asked == std::vector<std::string>{"https://evil.example/go"});
+
+    const std::string good = stages::run_web_tool(web, "fetch_page", json{{"url", "https://ok.example/a"}}.dump());
+    CHECK(good.find("到了") != std::string::npos);
+}
+
+TEST_CASE("读网页：解析到本机或内网的域名也不开——先解析、每个地址都判、钉住判过的去连") {
+    // 原来只判字面：`127.0.0.1.nip.io`、自己注册一个指向 169.254.169.254 的名字，就绕过去了
+    // （2026-09-26 审查）。取网页那一层（public_only）现在先解析。
+    CHECK(util::resolve_host("localhost").inward);
+    CHECK_FALSE(util::resolve_host("localhost").addrs.empty());
+    // 字面那一层（从 web_tools 搬到 util/net_inward 之后照旧）。
+    for (const char* h : {"127.1", "2130706433", "0x7f.1", "::1", "fd00::1", "::ffff:10.0.0.1", "64:ff9b::a9fe:a9fe"}) {
+        CAPTURE(h);
+        bool literal = false;
+        CHECK(util::literal_inward(h, literal));
+        CHECK(literal);
+    }
+    bool literal = true;
+    CHECK_FALSE(util::literal_inward("example.com", literal));
+    CHECK_FALSE(literal);
+    CHECK_FALSE(util::literal_inward("1.2.3.4", literal));
+    CHECK(literal);
+
+    // 取网页之前那一道（`default_http_get(..., public_only=true)` 调的就是它）：
+    // 本机、内网的字面地址和名字当场回，不去解析、不连。
+    for (const char* h : {"localhost", "sub.localhost", "127.0.0.1", "::1", "0x7f.1", "169.254.169.254", ""}) {
+        CAPTURE(h);
+        const auto v = util::vet_public_host(h);
+        CHECK(v.refuse.find("内网") != std::string::npos);
+        CHECK(v.pin.empty());
+    }
+    CHECK(util::vet_public_host("1.2.3.4").refuse.empty());
+    CHECK(util::vet_public_host("1.2.3.4").pin.empty());   // 字面地址不用钉
+    // 一个**不是 localhost、却解析到回环**的名字（重绑定就是这个样子）。这台的 /etc/hosts
+    // 里有就拿它验，没有就跳过这一段（换台机器不一定有）。
+    std::string rebinding;
+    for (const char* name : {"vm", "runsc", "ip6-localhost", "ip6-loopback"}) {
+        const auto r = util::resolve_host(name);
+        if (!r.addrs.empty() && r.inward) {
+            rebinding = name;
+            break;
+        }
+    }
+    if (!rebinding.empty()) {
+        CAPTURE(rebinding);
+        const auto v = util::vet_public_host(rebinding);
+        CHECK(v.refuse.find("解析到了本机或者内网") != std::string::npos);
+        CHECK(v.pin.empty());
+    }
+    // 取网页那一层真的调它、真的钉住（读源码：测试目标不链 httplib）。
+    const std::string src = [] {
+        std::ifstream in(std::filesystem::path{CHANGJI_SRC_DIR} / "llm/client_http.cpp");
+        return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    }();
+    CHECK(src.find("util::vet_public_host(host)") != std::string::npos);
+    CHECK(src.find("cli.set_hostname_addr_map({{host, v.pin}})") != std::string::npos);
+    CHECK(src.find("if (public_only) follow_redirects = false;") != std::string::npos);
+    // 两处读网页的入口都开着这一档。
+    for (const char* f : {"http/run_deps.cpp", "http/server.cpp"}) {
+        CAPTURE(f);
+        std::ifstream in(std::filesystem::path{CHANGJI_SRC_DIR} / f);
+        const std::string t(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>{});
+        CHECK(t.find("/*public_only=*/true") != std::string::npos);
+    }
+}
+
+TEST_CASE("网页转正文：一段几百 KB 的内联脚本、一个超长的标签也不崩") {
+    // std::regex 每吃一个字符递归一层：100 KB 的 <script> 在 8 MB 栈上当场 SIGSEGV，
+    // 整个引擎进程没了。在一条 512 KB 栈的线程上跑，更接近 macOS 副线程的样子。
+    std::string html = "<html><body><p>正文开头</p><script>var d=\"";
+    html += std::string(400 * 1024, 'x');
+    html += "\";</script><img src=\"data:image/png;base64,";
+    html += std::string(300 * 1024, 'A');
+    html += "\"><p>正文结尾</p></body></html>";
+    std::string out;
+    std::thread t([&] { out = stages::html_to_text(html); });
+    t.join();
+    CHECK(out.find("正文开头") != std::string::npos);
+    CHECK(out.find("正文结尾") != std::string::npos);
+    CHECK(out.find("xxxx") == std::string::npos);
+}
+
+TEST_CASE("读网页：GBK 的页面交回去也是合法 UTF-8，不让后面 dump 抛") {
+    const stages::WebTools web = fake_web({{"https://", "<p>\xD6\xD0\xCE\xC4\xCD\xF8\xD2\xB3</p>"}});
+    const std::string out = stages::run_web_tool(web, "fetch_page", json{{"url", "https://gbk.example/"}}.dump());
+    CHECK(changji::text::is_valid_utf8(out));
+    CHECK_NOTHROW((void)json(out).dump());
 }
 
 TEST_CASE("那条对话：模型要看热榜、读一页，结果喂回去，最后写成这一章") {
@@ -356,4 +494,16 @@ TEST_CASE("从网上写这一章：写到一半又去查东西，下一轮要从
 
     CHECK(painted == wc.text);
     CHECK(painted.find("不算数") == std::string::npos);
+}
+
+TEST_CASE("上网写的这一章：可选的栏写成 null 不作废整章") {
+    // schema 里 source 是可选的，模型写 `"source": null` 很常见。原来
+    // data.value("source", std::string()) 在值是 null 时抛 type_error，
+    // 几轮查资料加整章正文一起作废。
+    const auto ch = changji::stages::parse_web_chapter(
+        R"({"title": null, "source": null, "text": "雨下了一整夜。"})");
+    CHECK(ch.text == "雨下了一整夜。");
+    CHECK(ch.source.empty());
+    CHECK(ch.title.empty());
+    CHECK_THROWS(changji::stages::parse_web_chapter(R"({"text": null})"));   // 正文空照旧拒
 }

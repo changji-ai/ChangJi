@@ -4,6 +4,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdio>
+#include <functional>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -69,6 +70,11 @@ struct LlamaChat::Impl {
     /// chatml，那正好是 Qwen 那一族的写法。
     common_chat_templates_ptr tmpls;
     bool supports_thinking = false;
+
+    int generate(const std::string& prompt_text, const ChatRun& run,
+                 pipeline::CancelToken& tok,
+                 const std::function<void(const std::string&)>& sink, std::string& why,
+                 bool& truncated);
 
     // 空闲上下文的取还。池空了就等——**等，不是失败**：同时编两个项目时，
     // 第二个人宁可多等十几秒，也不该看见一句"忙，稍后再试"。
@@ -213,13 +219,176 @@ int LlamaChat::slots() const { return static_cast<int>(impl_->ctxs.size()); }
 
 bool LlamaChat::supports_thinking() const { return impl_->supports_thinking; }
 
+/// 把一段套好模板的提示词喂进去、一个 token 一个 token 往外吐（交给 `sink`）。
+/// 回 0 = 写完了（`truncated` 说是不是写到上限被截的）、1 = 中途按了停、-1 = 出错
+/// （`why`）。`complete` 和 `converse` 共用这一段：切词、分批喂、采样、取消都只写一遍。
+int LlamaChat::Impl::generate(const std::string& prompt_text, const ChatRun& run,
+                              pipeline::CancelToken& tok,
+                              const std::function<void(const std::string&)>& sink,
+                              std::string& why, bool& truncated) {
+    truncated = false;
+    Impl& im = *this;
+    const llama_vocab* vocab = llama_model_get_vocab(im.model);
+
+    // ---- 提示词切词 ----
+    // parse_special 必须是 true，否则 `<|im_start|>` 会被当成普通文字切碎，
+    // 模板等于白套。
+    //
+    // add_special：模板里已经写了 BOS 的（Llama-3 那一族的 jinja 自带
+    // `<|begin_of_text|>`）不能再加一个，两个 BOS 开头模型会发懵。
+    bool add_special = true;
+    if (llama_vocab_get_add_bos(vocab)) {
+        char bos_buf[64];
+        const int n = llama_token_to_piece(vocab, llama_vocab_bos(vocab), bos_buf,
+                                           sizeof(bos_buf), 0, true);
+        if (n > 0 && prompt_text.compare(0, static_cast<std::size_t>(n), bos_buf,
+                                       static_cast<std::size_t>(n)) == 0) {
+            add_special = false;
+        }
+    }
+    const int n_prompt = -llama_tokenize(vocab, prompt_text.c_str(),
+                                         static_cast<int32_t>(prompt_text.size()),
+                                         nullptr, 0, add_special, true);
+    if (n_prompt <= 0) {
+        why = SAY("提示词切不出 token");
+        return -1;
+    }
+    std::vector<llama_token> toks(static_cast<std::size_t>(n_prompt));
+    if (llama_tokenize(vocab, prompt_text.c_str(),
+                       static_cast<int32_t>(prompt_text.size()), toks.data(),
+                       n_prompt, add_special, true) < 0) {
+        why = SAY("提示词切词失败");
+        return -1;
+    }
+    // **max_tokens ≤ 0 = 上下文里剩多少就写多少。**
+    //
+    // 原来调用方写死一个数（8192，后来 12288），而这个数和 schema 要的输出量
+    // 是两条各自在变的线：一章从"一堆段落"改成"几场戏"之后输出量一路涨。
+    // 两次撞上上限的表现**都不是"写短了"而是"解析失败"**——输出停在半截
+    // JSON 上，那一章落成 0 字，看报错根本想不到是这儿。与其再拍一个魔数，
+    // 不如让它跟着上下文走。留 64 个 token 的余量给模板尾巴和收尾。
+    //
+    // 思考也从这份额度里出：想得越多正文剩得越少。这是上下文的物理事实，
+    // 不是这儿能改的——上下文开小了会在这儿报"提示词太长"那句能读懂的话。
+    int max_tokens = run.max_tokens;
+    if (max_tokens <= 0) max_tokens = std::max(1, im.n_ctx - n_prompt - 64);
+
+    // **先查长度再跑。** 超了的话 llama.cpp 会截断而不是报错，
+    // 出来的东西看着像模型没听懂，其实是提示词根本没喂全。
+    if (n_prompt + max_tokens > im.n_ctx) {
+        why = SAYF("提示词太长：%1 个 token 加上要生成的 %2 个，超过这个模型"
+                   "的上下文 %3。把 [llm].context_tokens 调大，或者换一个"
+                   "上下文更长的模型。",
+                   std::to_string(n_prompt), std::to_string(max_tokens),
+                   std::to_string(im.n_ctx));
+        return -1;
+    }
+
+    // ---- 采样链 ----
+    //
+    // 没有语法采样了（理由见头文件）。**也没有重复惩罚和 DRY 了。**
+    //
+    // 当年那两道（penalties 1.10 / 512、DRY 0.8 / 1.75 / 6）是配着 GBNF 来
+    // 的：语法钉住形状，惩罚管复读。2026-09-19 拿 Qwen3-4B Q4 真写一章
+    // 看到的：JSON 里 "where" "pov" "paragraphs" 这些键每一场都要重写，
+    // 惩罚把它们和常用字一起压下去，模型只好往冷门 token 上躲——正文越写
+    // 越往繁体和错字上漂（「捏著」「表盤內側」「指縀」），到第三场已经不像
+    // 中文小说了。远端那条从来没发过这两个参数，各家服务默认也都是关的。
+    //
+    // 复读今天由收稿那头的守卫抓（check_repetition），抓到了走改稿那一轮
+    // ——那是"告诉它哪句重了"，比在采样上盲压每一个 token 准得多。
+    llama_sampler_chain_params sp = llama_sampler_chain_default_params();
+    llama_sampler* chain = llama_sampler_chain_init(sp);
+    struct ChainGuard {
+        llama_sampler* p;
+        ~ChainGuard() { llama_sampler_free(p); }
+    } guard{chain};
+    llama_sampler_chain_add(chain, llama_sampler_init_top_k(40));
+    llama_sampler_chain_add(chain, llama_sampler_init_top_p(0.95f, 1));
+    llama_sampler_chain_add(
+        chain, llama_sampler_init_temp(static_cast<float>(run.temperature)));
+    // LLAMA_DEFAULT_SEED = 随机种子。重掷那一次得真的是另一把骰子。
+    llama_sampler_chain_add(chain, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
+
+    // ---- 跑 ----
+    //
+    // 借一个空闲上下文。**同一个上下文同一时刻只有一路**——llama.cpp 的
+    // 单 context 不支持并发 decode。池里有空的就直接开跑（真并发），
+    // 全忙着就在这儿等（排队）。
+    Lease lease(im, tok);
+    if (lease.get() == nullptr) {
+        why = SAY("已取消");
+        return -1;
+    }
+    llama_context* lctx = lease.get();
+
+    llama_memory_clear(llama_get_memory(lctx), true);
+
+    // ---- 先把提示词喂进去，**分批喂** ----
+    //
+    // ⚠️ **llama_decode 一次最多吃 n_batch 个 token，超了不是报错是 abort。**
+    //
+    //     llama-context.cpp:1722: GGML_ASSERT(n_tokens_all <= cparams.n_batch)
+    //
+    // 那是 GGML_ASSERT，整个进程当场没——用户正在批量写正文，写到一半
+    // 界面连同引擎一起消失（2026-09-12 实撞）。n_batch 的默认值是 2048，
+    // 而上面那道长度检查比的是 n_ctx。分批喂就没有这条限制：
+    // llama_batch_get_one 不带位置，位置由上下文按 KV 里已有的长度顺着排。
+    const int n_batch = std::max(1, static_cast<int>(llama_n_batch(lctx)));
+    for (int i = 0; i < n_prompt; i += n_batch) {
+        // 提示词几千个 token 时这一步也要几秒，取消要能在这儿生效。
+        if (tok.cancelled()) return 1;
+        const int n = std::min(n_batch, n_prompt - i);
+        llama_batch part = llama_batch_get_one(toks.data() + i, n);
+        if (llama_decode(lctx, part) != 0) {
+            why = SAYF("llama_decode 失败（喂提示词，第 %1 个 token 起，"
+                       "这一批 %2 个）",
+                       std::to_string(i), std::to_string(n));
+            return -1;
+        }
+    }
+
+    bool ended = false;   // 模型自己收的尾（EOG），不是写到上限被截的
+    for (int produced = 0; produced < max_tokens; ++produced) {
+        // 取消在**每个 token 之间**查一次。写一章要几分钟，
+        // 不查的话点了停止要等它自己写完。
+        if (tok.cancelled()) return 1;
+
+        // **别再 accept 一次。** `llama_sampler_sample` 内部已经调过
+        // `llama_sampler_accept`。再手动接一次的话采样状态被推进两遍。
+        llama_token id = llama_sampler_sample(chain, lctx, -1);
+        if (llama_vocab_is_eog(vocab, id)) {
+            ended = true;
+            break;
+        }
+
+        char buf[256];
+        const int n = llama_token_to_piece(vocab, id, buf, sizeof(buf), 0, true);
+        if (n < 0) {
+            why = SAY("token 转不回文字");
+            return -1;
+        }
+        // 思考和正文在这儿分家：思考走 on_thinking，正文走 on_piece 并攒进 out。
+        sink(std::string(buf, static_cast<std::size_t>(n)));
+
+        // 把刚采出来的这个喂回去，下一轮才采得出下一个。
+        llama_batch one = llama_batch_get_one(&id, 1);
+        if (llama_decode(lctx, one) != 0) {
+            why = SAYF("llama_decode 失败（第 %1 个 token）",
+                       std::to_string(produced));
+            return -1;
+        }
+    }
+    truncated = !ended;
+    return 0;
+}
+
 bool LlamaChat::complete(const std::string& prompt, const ChatRun& run,
                          pipeline::CancelToken& tok, std::string& out,
                          std::string& why, bool& truncated) {
     out.clear();
     truncated = false;
     Impl& im = *impl_;
-    const llama_vocab* vocab = llama_model_get_vocab(im.model);
 
     // ---- 套对话模板 ----
     //
@@ -259,162 +428,130 @@ bool LlamaChat::complete(const std::string& prompt, const ChatRun& run,
     split.on_thinking(run.on_thinking);
     split.on_content(run.on_piece);
 
-    // ---- 提示词切词 ----
-    // parse_special 必须是 true，否则 `<|im_start|>` 会被当成普通文字切碎，
-    // 模板等于白套。
-    //
-    // add_special：模板里已经写了 BOS 的（Llama-3 那一族的 jinja 自带
-    // `<|begin_of_text|>`）不能再加一个，两个 BOS 开头模型会发懵。
-    bool add_special = true;
-    if (llama_vocab_get_add_bos(vocab)) {
-        char bos_buf[64];
-        const int n = llama_token_to_piece(vocab, llama_vocab_bos(vocab), bos_buf,
-                                           sizeof(bos_buf), 0, true);
-        if (n > 0 && templated.compare(0, static_cast<std::size_t>(n), bos_buf,
-                                       static_cast<std::size_t>(n)) == 0) {
-            add_special = false;
-        }
-    }
-    const int n_prompt = -llama_tokenize(vocab, templated.c_str(),
-                                         static_cast<int32_t>(templated.size()),
-                                         nullptr, 0, add_special, true);
-    if (n_prompt <= 0) {
-        why = SAY("提示词切不出 token");
-        return false;
-    }
-    std::vector<llama_token> toks(static_cast<std::size_t>(n_prompt));
-    if (llama_tokenize(vocab, templated.c_str(),
-                       static_cast<int32_t>(templated.size()), toks.data(),
-                       n_prompt, add_special, true) < 0) {
-        why = SAY("提示词切词失败");
-        return false;
-    }
-    // **max_tokens ≤ 0 = 上下文里剩多少就写多少。**
-    //
-    // 原来调用方写死一个数（8192，后来 12288），而这个数和 schema 要的输出量
-    // 是两条各自在变的线：一章从"一堆段落"改成"几场戏"之后输出量一路涨。
-    // 两次撞上上限的表现**都不是"写短了"而是"解析失败"**——输出停在半截
-    // JSON 上，那一章落成 0 字，看报错根本想不到是这儿。与其再拍一个魔数，
-    // 不如让它跟着上下文走。留 64 个 token 的余量给模板尾巴和收尾。
-    //
-    // 思考也从这份额度里出：想得越多正文剩得越少。这是上下文的物理事实，
-    // 不是这儿能改的——上下文开小了会在这儿报"提示词太长"那句能读懂的话。
-    int max_tokens = run.max_tokens;
-    if (max_tokens <= 0) max_tokens = std::max(1, im.n_ctx - n_prompt - 64);
-
-    // **先查长度再跑。** 超了的话 llama.cpp 会截断而不是报错，
-    // 出来的东西看着像模型没听懂，其实是提示词根本没喂全。
-    if (n_prompt + max_tokens > im.n_ctx) {
-        why = SAYF("提示词太长：%1 个 token 加上要生成的 %2 个，超过这个模型"
-                   "的上下文 %3。把 [llm].context_tokens 调大，或者换一个"
-                   "上下文更长的模型。",
-                   std::to_string(n_prompt), std::to_string(max_tokens),
-                   std::to_string(im.n_ctx));
-        return false;
-    }
-
-    // ---- 采样链 ----
-    //
-    // 没有语法采样了（理由见头文件）。**也没有重复惩罚和 DRY 了。**
-    //
-    // 当年那两道（penalties 1.10 / 512、DRY 0.8 / 1.75 / 6）是配着 GBNF 来
-    // 的：语法钉住形状，惩罚管复读。2026-09-19 拿 Qwen3-4B Q4 真写一章
-    // 看到的：JSON 里 "where" "pov" "paragraphs" 这些键每一场都要重写，
-    // 惩罚把它们和常用字一起压下去，模型只好往冷门 token 上躲——正文越写
-    // 越往繁体和错字上漂（「捏著」「表盤內側」「指縀」），到第三场已经不像
-    // 中文小说了。远端那条从来没发过这两个参数，各家服务默认也都是关的。
-    //
-    // 复读今天由收稿那头的守卫抓（check_repetition），抓到了走改稿那一轮
-    // ——那是"告诉它哪句重了"，比在采样上盲压每一个 token 准得多。
-    llama_sampler_chain_params sp = llama_sampler_chain_default_params();
-    llama_sampler* chain = llama_sampler_chain_init(sp);
-    struct ChainGuard {
-        llama_sampler* p;
-        ~ChainGuard() { llama_sampler_free(p); }
-    } guard{chain};
-    llama_sampler_chain_add(chain, llama_sampler_init_top_k(40));
-    llama_sampler_chain_add(chain, llama_sampler_init_top_p(0.95f, 1));
-    llama_sampler_chain_add(
-        chain, llama_sampler_init_temp(static_cast<float>(run.temperature)));
-    // LLAMA_DEFAULT_SEED = 随机种子。重掷那一次得真的是另一把骰子。
-    llama_sampler_chain_add(chain, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
-
-    // ---- 跑 ----
-    //
-    // 借一个空闲上下文。**同一个上下文同一时刻只有一路**——llama.cpp 的
-    // 单 context 不支持并发 decode。池里有空的就直接开跑（真并发），
-    // 全忙着就在这儿等（排队）。
-    Impl::Lease lease(im, tok);
-    if (lease.get() == nullptr) {
-        why = SAY("已取消");
-        return false;
-    }
-    llama_context* lctx = lease.get();
-
-    llama_memory_clear(llama_get_memory(lctx), true);
-
-    // ---- 先把提示词喂进去，**分批喂** ----
-    //
-    // ⚠️ **llama_decode 一次最多吃 n_batch 个 token，超了不是报错是 abort。**
-    //
-    //     llama-context.cpp:1722: GGML_ASSERT(n_tokens_all <= cparams.n_batch)
-    //
-    // 那是 GGML_ASSERT，整个进程当场没——用户正在批量写正文，写到一半
-    // 界面连同引擎一起消失（2026-09-12 实撞）。n_batch 的默认值是 2048，
-    // 而上面那道长度检查比的是 n_ctx。分批喂就没有这条限制：
-    // llama_batch_get_one 不带位置，位置由上下文按 KV 里已有的长度顺着排。
-    const int n_batch = std::max(1, static_cast<int>(llama_n_batch(lctx)));
-    for (int i = 0; i < n_prompt; i += n_batch) {
-        // 提示词几千个 token 时这一步也要几秒，取消要能在这儿生效。
-        if (tok.cancelled()) return true;
-        const int n = std::min(n_batch, n_prompt - i);
-        llama_batch part = llama_batch_get_one(toks.data() + i, n);
-        if (llama_decode(lctx, part) != 0) {
-            why = SAYF("llama_decode 失败（喂提示词，第 %1 个 token 起，"
-                       "这一批 %2 个）",
-                       std::to_string(i), std::to_string(n));
-            return false;
-        }
-    }
-
-    bool ended = false;   // 模型自己收的尾（EOG），不是写到上限被截的
-    for (int produced = 0; produced < max_tokens; ++produced) {
-        // 取消在**每个 token 之间**查一次。写一章要几分钟，
-        // 不查的话点了停止要等它自己写完。
-        if (tok.cancelled()) {
-            split.finish();
-            out = split.content();
-            return true;
-        }
-
-        // **别再 accept 一次。** `llama_sampler_sample` 内部已经调过
-        // `llama_sampler_accept`。再手动接一次的话采样状态被推进两遍。
-        llama_token id = llama_sampler_sample(chain, lctx, -1);
-        if (llama_vocab_is_eog(vocab, id)) {
-            ended = true;
-            break;
-        }
-
-        char buf[256];
-        const int n = llama_token_to_piece(vocab, id, buf, sizeof(buf), 0, true);
-        if (n < 0) {
-            why = SAY("token 转不回文字");
-            return false;
-        }
-        // 思考和正文在这儿分家：思考走 on_thinking，正文走 on_piece 并攒进 out。
-        split.feed(std::string(buf, static_cast<std::size_t>(n)));
-
-        // 把刚采出来的这个喂回去，下一轮才采得出下一个。
-        llama_batch one = llama_batch_get_one(&id, 1);
-        if (llama_decode(lctx, one) != 0) {
-            why = SAYF("llama_decode 失败（第 %1 个 token）",
-                       std::to_string(produced));
-            return false;
-        }
-    }
+    const int rc = im.generate(templated, run, tok,
+                               [&](const std::string& piece) { split.feed(piece); }, why,
+                               truncated);
+    if (rc < 0) return false;
     split.finish();
     out = split.content();
-    truncated = !ended;
+    if (rc == 1) truncated = false;
+    return true;
+}
+
+bool LlamaChat::converse(const std::vector<ChatMsg>& msgs,
+                         const std::vector<ChatTool>& tools, const ChatRun& run,
+                         pipeline::CancelToken& tok, ChatAnswer& ans, std::string& why,
+                         bool& truncated) {
+    ans = ChatAnswer{};
+    truncated = false;
+    Impl& im = *impl_;
+
+    // ---- 整段来回 + 工具表，套这个模型自己的对话模板 ----
+    //
+    // 工具怎么写进提示词、模型怎么回「帮我调这个」，**每一族都不一样**（Qwen3 是
+    // `<tool_call>{…}</tool_call>`，别家是另一套）。这两头都交给 llama.cpp 的 common：
+    // 套模板那一下它按模板把工具表写进去，回来之后按同一个格式解析。自己写一份
+    // 只认 Qwen 的解析，换一个模型就静悄悄全变成正文。
+    common_chat_templates_inputs in;
+    for (const auto& m : msgs) {
+        common_chat_msg cm;
+        cm.role = m.role;
+        cm.content = m.content;
+        cm.tool_call_id = m.tool_call_id;
+        cm.tool_name = m.tool_name;
+        for (const auto& c : m.calls) cm.tool_calls.push_back({c.name, c.arguments, c.id});
+        in.messages.push_back(std::move(cm));
+    }
+    for (const auto& t : tools) in.tools.push_back({t.name, t.description, t.parameters});
+    in.tool_choice = COMMON_CHAT_TOOL_CHOICE_AUTO;
+    in.parallel_tool_calls = true;
+    in.add_generation_prompt = true;
+    in.use_jinja = true;
+    in.enable_thinking = run.thinking;
+    in.reasoning_format = COMMON_REASONING_FORMAT_DEEPSEEK;
+    common_chat_params params;
+    try {
+        params = common_chat_templates_apply(im.tmpls.get(), in);
+    } catch (const std::exception& e) {
+        why = SAYF("套对话模板失败：%1", e.what());
+        return false;
+    }
+
+    const std::string think_start =
+        params.thinking_start_tag.empty() ? std::string("<think>") : params.thinking_start_tag;
+    const std::string think_end = params.thinking_end_tags.empty()
+                                      ? std::string("</think>")
+                                      : params.thinking_end_tags.front();
+    const bool forced_open = run.thinking && ends_with_tag(params.prompt, think_start);
+    ThinkSplitter split(think_start, think_end, forced_open);
+    split.on_thinking(run.on_thinking);
+
+    // ---- 边写边给，但**调工具那一段不给** ----
+    //
+    // 正文一出来就流给界面；写到 `<tool_call` 就停——后面那段是给解析用的 JSON，
+    // 流出去人会在对话里看见一串 `<tool_call>{"name": …}`。一个 `<` 先扣着，
+    // 等攒够字数认得出是不是那个头再说。
+    static const std::string kCallTag = "<tool_call";
+    std::string pend;
+    bool held = false;
+    const auto emit = [&](const std::string& piece) {
+        if (!piece.empty() && run.on_piece) run.on_piece(piece);
+    };
+    split.on_content([&](const std::string& piece) {
+        if (held) return;
+        pend += piece;
+        for (;;) {
+            const auto at = pend.find('<');
+            if (at == std::string::npos) {
+                emit(pend);
+                pend.clear();
+                return;
+            }
+            emit(pend.substr(0, at));
+            pend.erase(0, at);
+            if (pend.size() < kCallTag.size()) {
+                if (kCallTag.compare(0, pend.size(), pend) == 0) return;   // 还认不出，先扣着
+            } else if (pend.compare(0, kCallTag.size(), kCallTag) == 0) {
+                held = true;
+                pend.clear();
+                return;
+            }
+            emit(pend.substr(0, 1));   // 不是那个头：这个 `<` 放出去，接着找下一个
+            pend.erase(0, 1);
+        }
+    });
+
+    std::string raw;
+    const int rc = im.generate(params.prompt, run, tok,
+                               [&](const std::string& piece) {
+                                   raw += piece;
+                                   split.feed(piece);
+                               },
+                               why, truncated);
+    if (rc < 0) return false;
+    split.finish();
+    if (!held) emit(pend);
+    if (rc == 1) truncated = false;
+
+    // ---- 解析：正文、思考、要调的工具 ----
+    common_chat_parser_params pp(params);
+    pp.reasoning_format = COMMON_REASONING_FORMAT_DEEPSEEK;
+    try {
+        if (!params.parser.empty()) pp.parser.load(params.parser);
+        const common_chat_msg msg = common_chat_parse(raw, /*is_partial=*/rc == 1, pp);
+        ans.content = msg.content;
+        ans.reasoning = msg.reasoning_content;
+        int n = 0;
+        for (const auto& c : msg.tool_calls) {
+            ++n;
+            ans.calls.push_back(
+                {c.id.empty() ? "call_" + std::to_string(n) : c.id, c.name, c.arguments});
+        }
+    } catch (const std::exception&) {
+        // 解析不动（写到一半被截、模型乱写了个头）：拿切出来的正文顶上，当它没调工具。
+        ans = ChatAnswer{};
+    }
+    if (ans.content.empty() && ans.calls.empty()) ans.content = split.content();
     return true;
 }
 
@@ -437,6 +574,13 @@ int LlamaChat::slots() const { return 0; }
 bool LlamaChat::supports_thinking() const { return false; }
 bool LlamaChat::complete(const std::string&, const ChatRun&, pipeline::CancelToken&,
                          std::string&, std::string& why, bool& truncated) {
+    truncated = false;
+    why = SAY("这个二进制没编进程内大模型");
+    return false;
+}
+bool LlamaChat::converse(const std::vector<ChatMsg>&, const std::vector<ChatTool>&,
+                         const ChatRun&, pipeline::CancelToken&, ChatAnswer&,
+                         std::string& why, bool& truncated) {
     truncated = false;
     why = SAY("这个二进制没编进程内大模型");
     return false;

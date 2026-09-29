@@ -526,6 +526,68 @@ TEST_CASE("预告装到 output/preview/ 下，字幕不盖正片那份") {
     fs::remove_all(store.root(), ec);
 }
 
+TEST_CASE("烧字幕那一步砸了：上一版成片原样留着，不被清空成半截") {
+    // 2026-09-26 审出来：原来 ffmpeg 直接 -y 写 output/ep01.mp4，一打开就清空了上一版；
+    // 烧到一半失败留下半截 mp4，整部电影拼接照样把它当这一章的片子。
+    if (!have_ffmpeg()) return;
+    const WanGrid grid;
+    const auto store = make_store("烧字幕砸了", 2, 4.0);
+    models::Project project = store.load_project();
+    models::Episode* ep = project.episode_by_id("ep01");
+    REQUIRE(ep != nullptr);
+    for (auto& s : ep->shots) {
+        const std::string rel = "shots/" + s.shot_id + ".mp4";
+        make_clip(store.paths().abs(rel), 4.0);
+        s.video_path = rel;
+        s.status = models::ShotStatus::FINAL_DONE;
+        models::DialogueLine line;
+        line.char_id = "c_lin_wan";
+        line.text = "走吧";
+        line.actual_duration_s = 1.2;
+        s.dialogue.push_back(line);
+    }
+    store.save_project(project);
+    // 上一版好好的成片
+    const fs::path final_path = store.paths().output() / "ep01.mp4";
+    std::error_code ec;
+    fs::create_directories(final_path.parent_path(), ec);
+    { std::ofstream(final_path, std::ios::binary) << "上一版的成片"; }
+
+    // 烧字幕那一下失败（照真的来：已经打开了输出、写了半截再退出非零）
+    const media::Runner real = media::default_runner();
+    const media::Runner failing_burn = [real](const std::string& exe,
+                                              const std::vector<std::string>& args,
+                                              double timeout) {
+        for (const auto& a : args) {
+            if (a.find("subtitles=") != std::string::npos) {
+                std::ofstream(paths::from_utf8(args.back()), std::ios::binary) << "半截";
+                media::ProcResult r;
+                r.launched = true;
+                r.exit_code = 1;
+                r.out = "burn failed";
+                return r;
+            }
+        }
+        return real(exe, args, timeout);
+    };
+    const media::FFmpeg ff("ffmpeg", "ffprobe", failing_burn);
+    pipeline::JobTable table;
+    config::Settings settings;
+    settings.sound.music = false;
+    table.start(pipeline::JobKind::Run, "ep01", [&](pipeline::JobProgress& p) {
+        models::Project pj = store.load_project();
+        try {
+            pipeline::assemble_episode(store, settings, *pj.episode_by_id("ep01"), ff, p, {});
+        } catch (...) {
+        }
+    });
+    table.wait_idle();
+    std::ifstream in(final_path, std::ios::binary);
+    const std::string got((std::istreambuf_iterator<char>(in)), {});
+    CHECK(got == "上一版的成片");
+    fs::remove_all(store.root(), ec);
+}
+
 TEST_CASE("预告的配乐用自己的文件名，不会把整章那条占了") {
     // 配乐是"文件在就沿用"，而 ffmpeg 那头短了不循环：预告先出一条两分钟
     // 的，整章再跑就沿用它——**后面几分钟静悄悄没有配乐**。

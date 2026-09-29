@@ -696,6 +696,7 @@ RunReport run_episode(const ProjectStore& store,
     // 2026-09-25 之前这儿写着「仍然会被这一轮盖掉——那是真冲突，不在这儿
     // 解决」，于是出片途中改的字幕、台词整笔冲回去，全程 200。
     bool gone_said = false;
+    bool replaced_said = false;
     std::vector<Shot> last_written;
     const auto save = [&] {
         // 读→换这一格→存，一把锁（ProjectStore::lock）：同一部片子别的对话
@@ -712,6 +713,20 @@ RunReport run_episode(const ProjectStore& store,
                     SAY("这一章在跑的过程中被删掉了，"
                         "这一轮的进度没有写回项目文件"
                         "（已经出来的文件还在磁盘上）"));
+            }
+            return;
+        }
+        // 整张分镜表在这期间被重拆了：手里这份是旧表，写回去就是把新表冲掉
+        //（旧镜头回来、新镜头少了、新文字配上旧片子，不留底、不问人）。
+        // 不写，并且这一章停下——接着出的也是旧表上的镜头，白占显卡。
+        if (writeback.replaced(target->shots)) {
+            if (!replaced_said) {
+                replaced_said = true;
+                report.errors.push_back(
+                    SAY("这一章的分镜在出片途中被重拆了，这一轮停下，"
+                        "没有把旧镜头写回去（已经出来的文件还在磁盘上）。"
+                        "重新出片就按新的分镜来"));
+                tok.request();
             }
             return;
         }

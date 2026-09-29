@@ -19,6 +19,7 @@
 #include "config/runtime.hpp"
 #include "doctor/doctor.hpp"
 #include "http/run.hpp"
+#include "stages/web_tools.hpp"
 #include "infer/sd_image.hpp"
 #include "infer/sd_video.hpp"
 #include "infer/node_pick.hpp"
@@ -117,7 +118,7 @@ FarmRunner local_farm_runner(const config::Settings& settings) {
     });
 
     FarmRunner r;
-    r.run = [settings, pooled](const infer::Task& task,
+    r.run = [pooled](const infer::Task& task,
                                const infer::StepCallback& on_step,
                                pipeline::CancelToken& tok) {
         // 会有池子就等它热好。子进程起来加探活实测十秒上下，farm 起不来时
@@ -130,8 +131,16 @@ FarmRunner local_farm_runner(const config::Settings& settings) {
             return warm->pool->run(task, on_step, tok);
         }
         // 单卡机（以及双卡机上 farm 一张都没拉起来）：就地跑，和以前一样。
-        return infer::run_task_locally(task, settings, infer::Origin::Local,
-                                       task.shot_id, on_step, tok);
+        // 设置现读运行期那份：远程装完模型之后 persist() 改的是它，捕获的
+        // 那份是启动那一刻的（同 worker_server 的 /task）。
+        // **沙箱名每件一个**：原来拿 shot_id 当沙箱名，配音那几件全叫 "tts"，而
+        // run_task_locally 收尾时 remove_all 自己那个沙箱——回收线程强行腾出一件
+        // 卡住的活之后，第二件开跑，产物被前一件收尾时删掉。
+        static std::atomic<unsigned long long> seq{0};
+        const std::string sandbox = "local-" + std::to_string(seq.fetch_add(1)) + "-" +
+                                    task.shot_id;
+        return infer::run_task_locally(task, config::runtime().snapshot(),
+                                       infer::Origin::Local, sandbox, on_step, tok);
     };
     r.capacity = [] {
         if (warm->ready.load(std::memory_order_acquire) && warm->pool) {
@@ -150,6 +159,8 @@ RunDeps default_run_deps() {
     d.settings = [] { return config::runtime().snapshot(); };
     // 场记上网那几个工具用的（RunDeps::web_get）。
     d.web_get = llm::default_http_get();
+    d.web_page_get = llm::default_http_get(/*follow_redirects=*/false, stages::kWebPageMax,
+                                            /*public_only=*/true);
     // 远程 MCP 扩展用的（RunDeps::http_post）。
     d.http_post = llm::default_http_post();
     d.profile = [] { return config::runtime().profile(); };
@@ -167,7 +178,8 @@ RunDeps default_run_deps() {
             if (!why.empty()) why += SAY("；");
             why += SAYF("%1：%2", c.name, c.detail);
         }
-        return why.empty() ? SAY("去设置页看体检那一节") : why;
+        // 体检在界面上叫「环境检测」，摆在「通用」里（2026-09-28 起），照界面上的字指路。
+        return why.empty() ? SAY("请查看「设置 ▸ 通用」中的环境检测") : why;
     };
     // 第二个形参（项目目录）**故意不接名字**：RunDeps 的签名要求它在，而
     // 这一套后端一个字都没用到——`s` 已经是这一章自己的设置了（出片那条路

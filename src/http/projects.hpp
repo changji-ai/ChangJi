@@ -8,6 +8,7 @@
 
 #include "config/settings.hpp"
 #include "http/readonly.hpp"
+#include "models/project.hpp"
 
 namespace changji::http {
 
@@ -33,6 +34,12 @@ ApiResult post_delete_project(const nlohmann::json& body,
 
 /// POST /api/project/premise —— 存下这部电影讲什么。写下一章时当提示词用。
 ApiResult post_project_premise(const nlohmann::json& body);
+
+/// 存梗概：project.json 和 story.json（有的话）**两份一起改**，回存下的那句。
+/// 自己拿项目锁（可重入）。改梗概的地方都走这一个：只改 project.json 的话，
+/// 故事页下一次存盘（commit_story 把 story.premise 抄回 project.json）会把旧的
+/// 写回去，一声不响。
+std::string store_premise(const models::ProjectStore& store, const std::string& premise);
 
 /// POST /api/project/rename —— 改片名。body: {project, title}
 ///

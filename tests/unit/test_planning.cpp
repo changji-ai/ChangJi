@@ -159,6 +159,25 @@ TEST_CASE("写盘要刷新 updated_at") {
     fs::remove_all(root, ec);
 }
 
+TEST_CASE("/api/plan：章号会拼进文件名，不合规的进门就 400") {
+    // 没有这一章时 post_plan 照这个号新建一章，章号拼进 frames/<章号>_sh001.png、
+    // output/<章号>.mp4——`../../x` 能一路写到项目目录外面。
+    const fs::path root = fresh_copy("章号", true);
+    llm::ReplayClient cl({});
+    pipeline::CancelToken tok;
+    for (const char* bad : {"../../../tmp/x", "ep01/..", "EP01", "ep 01"}) {
+        const auto r = http::guard([&] {
+            return http::post_plan(json{{"project", paths::to_utf8(root)},
+                                        {"script", "林晚：你说过会来的"},
+                                        {"episode_id", bad}},
+                                   cl, tok);
+        });
+        CHECK_MESSAGE(r.status == 400, bad);
+    }
+    std::error_code ec;
+    fs::remove_all(root, ec);
+}
+
 TEST_CASE("角色圣经是合并不是替换") {
     // 角色和场景是全片共用的库。第五章的场景要出的时候，前四章的还在里面。
     // 整个换掉的话，那些场景连同它们的空景图一起没了，而分镜表里还留着

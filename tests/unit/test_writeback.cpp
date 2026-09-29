@@ -15,6 +15,7 @@
 #include <string>
 
 #include <nlohmann/json.hpp>
+#include <toml++/toml.hpp>
 
 #include "config/settings.hpp"
 #include "config/writeback.hpp"
@@ -61,7 +62,8 @@ std::string slurp(const fs::path& p) {
 /// 隔离怎么做、三个平台各换哪个变量，见 scoped_env.hpp。
 config::Settings reload(const fs::path& dir) {
     const test::ScopedUserConfigDir iso("writeback");
-    return config::load_settings(dir);
+    // 当全局那份读（每一节都认）：这几条测的是写回，写的正是全局那种文件。
+    return config::load_settings_file(dir / "changji.toml");
 }
 
 }  // namespace
@@ -83,6 +85,17 @@ TEST_CASE("TOML 字面量的写法") {
     SUBCASE("字符串里的引号和反斜杠要转义") {
         CHECK(config::to_toml_literal(json("a\"b")) == "\"a\\\"b\"");
         CHECK(config::to_toml_literal(json("C:\\models")) == "\"C:\\\\models\"");
+    }
+
+    SUBCASE("控制字符要转义，读回来一字不差") {
+        // 贴进来一个换行，原来写出去的那一行在引号中间断开，下次读配置整份报错。
+        const std::string raw = std::string("第一行\n第二行\t\r\b\f") + '\x01' + "\x7f尾";
+        const std::string lit = config::to_toml_literal(json(raw));
+        CHECK(lit.find('\n') == std::string::npos);
+        CHECK(lit.find("\\u0001") != std::string::npos);
+        CHECK(lit.find("\\u007F") != std::string::npos);
+        const auto tbl = toml::parse("k = " + lit + "\n");
+        CHECK(tbl["k"].value_or(std::string()) == raw);
     }
 
     SUBCASE("null 写成空串") {
@@ -551,3 +564,110 @@ TEST_CASE("带斜杠的键：写出去加引号，重写时替换不追加") {
     // 而这一层的全部价值就是"没碰的地方一个字节都不动"。
     CHECK(twice.find("video = \"h3-full-q4_k_m\"") != std::string::npos);
 }
+
+TEST_CASE("节头带行尾注释：认得出，不再在文件尾追加同名的一节") {
+    const fs::path dir = tmp_dir("节头注释");
+    const fs::path cfg = dir / "changji.toml";
+    put(cfg, "[llm]  # 大模型\nmodel = \"a\"\n\n[assembly]\nfps = 24\n");
+    config::save_user_config(json{{"llm", {{"model", "b"}}}}, cfg);
+    const std::string after = slurp(cfg);
+    CHECK(after.find("model = \"b\"") != std::string::npos);
+    CHECK(after.find("[llm]", after.find("[llm]") + 1) == std::string::npos);
+    CHECK_NOTHROW(toml::parse(after));
+}
+
+TEST_CASE("多行的值：改它连后面几行一起换；长字符串里的 [xxx] 不当节头") {
+    const fs::path dir = tmp_dir("多行值");
+    const fs::path cfg = dir / "changji.toml";
+    put(cfg,
+        "[llm]\n"
+        "note = \"\"\"\n"
+        "[assembly]\n"
+        "fps = 1\n"
+        "\"\"\"\n"
+        "model = \"a\"\n"
+        "\n"
+        "[assembly]\n"
+        "off = [\n"
+        "  \"llm\",  # 注释里的 ] 不算\n"
+        "  \"video\",\n"
+        "]\n"
+        "fps = 24\n");
+    config::save_user_config(
+        json{{"assembly", {{"off", json::array({"tts"})}, {"fps", 30}}}, {"llm", {{"model", "b"}}}},
+        cfg);
+    const std::string after = slurp(cfg);
+    const auto tbl = toml::parse(after);
+    CHECK(tbl["llm"]["model"].value_or(std::string()) == "b");
+    CHECK(tbl["assembly"]["fps"].value_or(0) == 30);
+    REQUIRE(tbl["assembly"]["off"].as_array() != nullptr);
+    CHECK(tbl["assembly"]["off"].as_array()->size() == 1);
+    // 长字符串原样留着，里面那行 fps = 1 没被当成 [assembly] 的键改掉
+    CHECK(after.find("fps = 1\n") != std::string::npos);
+}
+
+TEST_CASE("编出来读不了就不写：原来那份原样留着") {
+    const fs::path dir = tmp_dir("读不了不写");
+    const fs::path cfg = dir / "changji.toml";
+    // 一个本来就读不了的文件（未收口的数组吞到了文件尾）：写回拒绝，文件不动
+    const std::string bad = "[llm]\nmodel = \"a\"\nx = [1, 2\n";
+    put(cfg, bad);
+    CHECK_THROWS(config::save_user_config(json{{"llm", {{"model", "b"}}}}, cfg));
+    CHECK(slurp(cfg) == bad);
+}
+
+#ifndef _WIN32
+#include <sys/stat.h>
+
+#include "util/atomic_file.hpp"
+
+namespace {
+unsigned mode_of(const fs::path& p) {
+    struct stat st {};
+    ::stat(p.c_str(), &st);
+    return st.st_mode & 0777;
+}
+}  // namespace
+
+TEST_CASE("整份换的文件：私密的一生下来就是 0600，别的沿用原权限，链接不被换掉") {
+    const fs::path d = tmp_dir("atomic");
+    const fs::path secret = d / "lan.json";
+    util::write_file_atomic(secret, "{}\n", true);
+    CHECK(mode_of(secret) == 0600);
+
+    // 人自己 chmod 过的：不私密的那档不给改回去
+    const fs::path film = d / "changji.toml";
+    put(film, "a = 1\n");
+    fs::permissions(film, fs::perms::owner_read | fs::perms::owner_write |
+                              fs::perms::group_read);
+    util::write_file_atomic(film, "a = 2\n", false);
+    CHECK(mode_of(film) == 0640);
+
+    // 链接（dotfiles 那种）：写到它指着的那份上，链接还是链接
+    const fs::path real = d / "real.toml";
+    put(real, "x = 1\n");
+    const fs::path link = d / "config.toml";
+    fs::create_symlink("real.toml", link);
+    util::write_file_atomic(link, "x = 2\n", true);
+    CHECK(fs::is_symlink(link));
+    std::ifstream in(real);
+    std::string got((std::istreambuf_iterator<char>(in)), {});
+    CHECK(got == "x = 2\n");
+}
+
+TEST_CASE("局域网：进程收工只停不落盘（读源码查）") {
+    // sense.cpp 不进测试目标（要 llm 那层的 HTTP），所以读源码：收工那一下
+    // 用 set_on(false) 的话，"关着"被写进 lan.json，人开着的开关下次起来成了关的。
+    const fs::path src{CHANGJI_SRC_DIR};
+    std::ifstream in(src / "http/server.cpp");
+    const std::string s((std::istreambuf_iterator<char>(in)), {});
+    REQUIRE_FALSE(s.empty());
+    CHECK(s.find("Sense::instance().set_on(false)") == std::string::npos);
+    CHECK(s.find("Sense::instance().shutdown()") != std::string::npos);
+    std::ifstream in2(src / "lan/sense.cpp");
+    const std::string sense((std::istreambuf_iterator<char>(in2)), {});
+    // lan.json 里有发出去的票：整份换、0600
+    CHECK(sense.find("write_file_atomic(dir / \"lan.json\", text, /*private_only=*/true)") !=
+          std::string::npos);
+}
+#endif

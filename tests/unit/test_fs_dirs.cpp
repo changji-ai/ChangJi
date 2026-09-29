@@ -142,11 +142,11 @@ TEST_CASE("「不在」和「不是目录」要分开说") {
     try {
         get_dirs(paths::to_utf8(root / "nope"), s);
     } catch (const ApiError& e) {
-        CHECK(std::string(e.what()).find("不在") != std::string::npos);
+        CHECK(std::string(e.what()).find("不存在") != std::string::npos);
     }
     try {
         get_dirs(paths::to_utf8(root / "a.json"), s);
     } catch (const ApiError& e) {
-        CHECK(std::string(e.what()).find("不是一个目录") != std::string::npos);
+        CHECK(std::string(e.what()).find("不是目录") != std::string::npos);
     }
 }

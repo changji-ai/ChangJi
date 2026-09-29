@@ -215,3 +215,23 @@ TEST_CASE("C++ 这边认 LOCALAPPDATA——**而 Python 不认**") {
     CHECK(paths::to_utf8(dir).find("试试看") != std::string::npos);
 #endif
 }
+
+TEST_CASE("dir_key / same_dir：尾巴上的斜杠不算——片子在不在都一样") {
+    // weakly_canonical 对存在的目录会去掉尾巴上的分隔符，对不存在的原样留着。
+    // 删掉了的、还没建出来的片子，`/x/片子/` 和 `/x/片子` 原来是两个键。
+    const fs::path base = fs::temp_directory_path() / changji::paths::from_utf8("changji_dirkey_不在");
+    std::error_code ec;
+    fs::remove_all(base, ec);
+    const std::string a = changji::paths::to_utf8(base);
+    const std::string b = a + "/";
+    CHECK(changji::paths::dir_key(a) == changji::paths::dir_key(b));
+    CHECK(changji::paths::same_dir(a, b));
+
+    fs::create_directories(base, ec);
+    CHECK(changji::paths::dir_key(a) == changji::paths::dir_key(b));
+    fs::remove_all(base, ec);
+
+#ifndef _WIN32
+    CHECK(changji::paths::dir_key("/") == "/");   // 根目录不动
+#endif
+}

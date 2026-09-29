@@ -403,8 +403,31 @@ HttpPostStream default_http_post_stream();
 ///
 /// **正文超过 `kGetBodyMax` 当场断开**，回 `transport_error`：网址是模型、网页、人
 /// 贴进来的，一个回无底正文的地址不该能吃光引擎的内存。
-HttpGet default_http_get();
 inline constexpr std::size_t kGetBodyMax = 32 * 1024 * 1024;
+///
+/// `follow_redirects = false`：3xx 原样交回来（带 location 头），**跟不跟由调用方
+/// 判**。上网那几个工具要这样——每一跳都得重新判一遍是不是指着本机、内网
+/// （stages::web_tools 的 fetch）；让 httplib 自己跟的话，公网上一个 302 就能把请求
+/// 带到 127.0.0.1 或者云厂商的元数据口子上。
+/// `public_only`：**只连外面的机器**（读网页那几个工具用）。先解析主机名，解析出来的
+/// 地址里有一个指着本机 / 内网 / 元数据口子就不连；连的时候钉住判过的那个地址
+/// （不让 httplib 再解析一次——两次之间 DNS 换个答案就是重绑定）。这一档不自己跟跳转
+/// （跳转由调用方一跳一跳地判），`follow_redirects` 给什么都当 false。
+HttpGet default_http_get(bool follow_redirects = true, std::size_t max_body = kGetBodyMax,
+                         bool public_only = false);
+
+/// 跳转后的地址：绝对的原样，`//host/…`、`/path`、相对路径按上一跳补全。
+/// 两个 GET 自己跟跳转、上网工具一跳一跳地判，都用这一份。
+std::string redirect_target(const std::string& base, const std::string& location);
+
+/// 发出去的请求目标（路径 + 查询串）：**只把非 ASCII、空白、控制字符编成 %XX**，
+/// 别的一个字节都不动。
+///
+/// ⚠️ 不交给 httplib 的 url_encode（2026-09-27）：它把 `+ , ; '` 也编掉。那几个在
+/// 网址里是合法的、有意思的字——GitHub 发布文件跳到的那条带签名的地址里有一段
+/// `rscd=attachment%3B+filename%3D…`，`+` 被改成 `%2B` 签名就对不上，回 403。
+/// 表现是设置页「现在查一次」永远「取不到版本信息」，而 curl 一秒就拿到。
+std::string request_target(const std::string& path);
 
 /// 造一个大模型客户端。
 ///

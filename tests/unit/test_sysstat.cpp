@@ -49,6 +49,19 @@ TEST_CASE("sysstat: cgroup 上限，max 和 2^63 那种都算没设") {
     CHECK(*v == 2147483648ULL);
 }
 
+TEST_CASE("sysstat: memory.stat 取一栏（扣页缓存用）") {
+    const std::string v2 = "anon 1048576\nfile 8589934592\ninactive_file 6442450944\nactive_file 1\n";
+    auto v = parse_memory_stat(v2, "inactive_file");
+    REQUIRE(v.has_value());
+    CHECK(*v == 6442450944ULL);
+    // 前缀相同的别的栏不算（v1 的 total_inactive_file 和 inactive_file 都在）。
+    const std::string v1 = "inactive_file 5\ntotal_inactive_file 7\n";
+    CHECK(*parse_memory_stat(v1, "total_inactive_file") == 7ULL);
+    CHECK(*parse_memory_stat(v1, "inactive_file") == 5ULL);
+    CHECK_FALSE(parse_memory_stat(v2, "nope").has_value());
+    CHECK_FALSE(parse_memory_stat("", "inactive_file").has_value());
+}
+
 TEST_CASE("sysstat: nvidia-smi 一张卡一行，MiB 换成 GB，[N/A] 留 -1") {
     const std::string out =
         "0, NVIDIA GeForce RTX 5090, 82, 31500, 32607\n"

@@ -448,3 +448,24 @@ TEST_CASE("认不出的 backend 按远端跑，不当场把流水线堵死") {
     req.prompt = "写一章剧本";
     CHECK(client->complete(req, tok) == "远端答的");
 }
+
+#ifndef _WIN32
+TEST_CASE("命令行后端：stderr 上的横幅、进度不混进回话；结构不对照样拦") {
+    // 原来 stdout 和 stderr 并在一起当回话：`codex exec` 把横幅和进度写 stderr，
+    // 拼在模型的 JSON 前面一起交给下游解析。这条路也不验 schema。
+    config::LLMConfig c = echo_cfg();
+    c.command = "sh";
+    c.command_args = {"-c", "cat >/dev/null; echo 'codex v1 banner' >&2; echo '{\"title\":\"雨夜\"}'"};
+    llm::CommandClient cli(c);
+    pipeline::CancelToken tok;
+    llm::Request req;
+    req.prompt = "写一个标题";
+    CHECK(cli.complete(req, tok) == "{\"title\":\"雨夜\"}");
+
+    req.schema = nlohmann::json::parse(
+        R"({"type":"object","properties":{"title":{"type":"string"},"logline":{"type":"string"}},)"
+        R"("required":["title","logline"]})");
+    req.schema_name = "outline";
+    CHECK_THROWS_AS(cli.complete(req, tok), llm::LlmError);   // 缺了必填的 logline
+}
+#endif

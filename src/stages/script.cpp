@@ -663,8 +663,9 @@ bool parse_act_header(const std::string& line_in, std::string* label,
                    });
         };
         if (!all_digits(a) || !all_digits(b)) return false;
-        from = std::stoi(a);
-        to = std::stoi(b);
+        from = text::parse_int_or(a, -1);
+        to = text::parse_int_or(b, -1);
+        if (from < 0 || to < 0) return false;   // 大到装不下的，当认不出
     }
 
     bool known = false;
@@ -720,7 +721,7 @@ bool parse_scene_header(const std::string& line_in, int* index,
             break;
         }
     }
-    if (index) *index = std::stoi(inner.substr(0, k));
+    if (index) *index = text::parse_int_or(inner.substr(0, k), 0);
     if (body) *body = rest;
     return true;
 }

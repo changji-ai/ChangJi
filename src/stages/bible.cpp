@@ -235,10 +235,21 @@ AssetLibrary parse_bible(const std::string& raw, StyleLine style_line,
             const std::string key = text::slug(raw_key);
             if (key.empty()) continue;
 
-            const std::string char_id = "c_" + key;
+            const std::string name = get_str(item, "name").empty() ? key : get_str(item, "name");
+            // ⚠️ **key 撞了不能覆盖。** key 是模型照中文名写的拼音：王磊和王蕾都是
+            // wang_lei，原来后一个直接把前一个盖掉——少一个人，而照故事定妆那条
+            // 会因为「名单不一致」每次重试都砸（模型每次写的 key 一样）。同名的是
+            // 模型把同一个人写了两遍，留第一份；不同名的挂个 _2、_3。
+            std::string char_id = "c_" + key;
+            if (const auto hit = lib.characters.find(char_id); hit != lib.characters.end()) {
+                if (hit->second.name == name) continue;
+                for (int n = 2; lib.characters.count(char_id); ++n) {
+                    char_id = "c_" + key + "_" + std::to_string(n);
+                }
+            }
             Character c;
             c.char_id = char_id;
-            c.name = get_str(item, "name").empty() ? key : get_str(item, "name");
+            c.name = name;
             // 音色留空，配音时按服务端实际有哪些参考音频再定。
             // 这里写死路径的话，换一台推理服务就可能对不上，
             // 节点校验不过整条流水线直接断在配音这一步。
@@ -267,10 +278,18 @@ AssetLibrary parse_bible(const std::string& raw, StyleLine style_line,
             const std::string key = text::slug(raw_key);
             if (key.empty()) continue;
 
-            const std::string loc_id = "loc_" + key;
+            const std::string name = get_str(item, "name").empty() ? key : get_str(item, "name");
+            // key 撞了同上：同名留第一份，不同名挂 _2、_3。
+            std::string loc_id = "loc_" + key;
+            if (const auto hit = lib.locations.find(loc_id); hit != lib.locations.end()) {
+                if (hit->second.name == name) continue;
+                for (int n = 2; lib.locations.count(loc_id); ++n) {
+                    loc_id = "loc_" + key + "_" + std::to_string(n);
+                }
+            }
             Location l;
             l.location_id = loc_id;
-            l.name = get_str(item, "name").empty() ? key : get_str(item, "name");
+            l.name = name;
             l.space = text::clean_field(get_str(item, "space"));
             l.lighting = text::clean_field(get_str(item, "lighting"));
             l.palette = text::clean_field(get_str(item, "palette"));

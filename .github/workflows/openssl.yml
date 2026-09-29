@@ -95,6 +95,24 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.pick.outputs.matrix) }}
     steps:
+      # ⚠️ **macOS 一律用 Xcode 26**（用户 2026-09-27：「mac 打包使用 xcode 26」）。
+      # runner 镜像默认是 Xcode 16.x；换到 26 挑镜像里装着的最新一份 26.x，**一份都
+      # 没有就当场红**——静悄悄退回 16 的话，编出来的包和说好的不是同一套工具链，
+      # 而一切看起来正常。
+      - name: Use Xcode 26
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          x=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1 || true)
+          if [ -z "$x" ]; then
+            echo "::error::no Xcode 26 on this runner image; installed:"
+            ls -d /Applications/Xcode*.app || true
+            exit 1
+          fi
+          sudo xcode-select -s "$x/Contents/Developer"
+          echo "DEVELOPER_DIR=$x/Contents/Developer" >> "$GITHUB_ENV"
+          xcodebuild -version
+          clang++ --version | head -1
       # The version is part of the cache key, so a bump is simply a different
       # key — nothing to purge by hand.
       - name: Cache

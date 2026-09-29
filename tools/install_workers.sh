@@ -12,7 +12,12 @@
 
 set -eu
 EXE="${1:-/root/changji/build-worker/changji}"
-COUNT="${2:-$(nvidia-smi --query-gpu=name --format=csv,noheader | grep -c . || echo 1)}"
+# 卡数：nvidia-smi 问不到时原来是 `grep -c . || echo 1`——grep 数出 0 行时自己先
+# 印一个 0 再返回 1，于是得到 "0\n1" 两行，下面 $((COUNT-1)) 算不动，一个服务都
+# 没写而脚本照样退出 0。取第一行、不是正整数就当 1。
+COUNT="${2:-$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | grep -c . || true)}"
+COUNT="$(printf '%s\n' "$COUNT" | head -1)"
+case "$COUNT" in ''|*[!0-9]*|0) COUNT=1 ;; esac
 
 [ -x "$EXE" ] || { echo "找不到可执行文件：$EXE" >&2; exit 1; }
 echo "可执行文件：$EXE"

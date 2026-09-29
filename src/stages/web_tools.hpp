@@ -11,6 +11,7 @@
 // 先红。
 
 #include <functional>
+#include <cstddef>
 #include <string>
 #include <vector>
 
@@ -33,6 +34,11 @@ struct SearchHit {
     std::string snippet;
 };
 
+/// 上网那几个工具一页最多收这么多字节。只留六千字给模型，32 MB 的通用上限在这儿是白收。
+inline constexpr std::size_t kWebPageMax = 4 * 1024 * 1024;
+
+/// ⚠️ `get` 要给一个**不自己跟跳转**的（`llm::default_http_get(false, kWebPageMax)`）：
+/// 跳转由 `fetch` 一跳一跳地跟，每一跳都重新判是不是指着本机、内网。
 struct WebTools {
     llm::HttpGet get;
     double timeout_s = 20.0;

@@ -10,6 +10,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "config/runtime.hpp"
@@ -18,9 +19,11 @@
 #include "stages/prompt_compose.hpp"
 #include "models/project.hpp"
 #include "http/offload.hpp"
+#include "http/ref_gen.hpp"
 #include "media/assemble.hpp"
 #include "pipeline/jobs.hpp"
 #include "pipeline/preview.hpp"
+#include "util/chapter_word.hpp"
 #include "util/fs_time.hpp"
 #include "util/human_time.hpp"
 #include "util/paths.hpp"
@@ -105,6 +108,26 @@ Project load_or_400(const ProjectStore& store) {
     }
 }
 
+/// 从排着的请求体里读一格，**类型不对就当没给**。
+///
+/// 队列里存的是原样的请求体（见下面 RunQueue 上那段），而 `json::value` 类型
+/// 不对时是抛的——原来一件 `"all_episodes": "yes"` 排进来，从此每一次
+/// `/api/run` 轮询、每一个页面都是 500，直到它轮上（可能一个钟头），按片子
+/// 清也清不掉（清的那一下同样抛）。进门那道类型检查挡住了新来的，这儿兜住
+/// 已经在里面的。
+std::string q_str(const json& b, const char* k) {
+    const auto it = b.find(k);
+    return it != b.end() && it->is_string() ? it->get<std::string>() : std::string{};
+}
+double q_num(const json& b, const char* k) {
+    const auto it = b.find(k);
+    return it != b.end() && it->is_number() ? it->get<double>() : 0.0;
+}
+bool q_bool(const json& b, const char* k) {
+    const auto it = b.find(k);
+    return it != b.end() && it->is_boolean() && it->get<bool>();
+}
+
 /// 出片那个槽的**等候队列**。
 ///
 /// **点了不该叫人等，该排上。** 2026-09-20 用户定的。原来这条接口在槽忙着
@@ -180,15 +203,15 @@ public:
         std::lock_guard<std::mutex> lg(mu_);
         json items = json::array();
         for (const auto& e : pending_) {
-            const std::string p = e.body.value("project", std::string{});
+            const std::string p = q_str(e.body, "project");
             items.push_back(
-                {{"episode_id", e.body.value("episode_id", std::string{})},
+                {{"episode_id", q_str(e.body, "episode_id")},
                  {"project", p},
                  // 这一件是不是当前这部电影的。**在引擎这头判**：
                  // 路径要规范化才比得对（CLAUDE.md 第十一条）。
                  {"mine", project.empty() ? true : paths::same_dir(p, project)},
-                 {"preview_s", e.body.value("preview_s", 0.0)},
-                 {"all_episodes", e.body.value("all_episodes", false)}});
+                 {"preview_s", q_num(e.body, "preview_s")},
+                 {"all_episodes", q_bool(e.body, "all_episodes")}});
         }
         json out = {{"items", items}, {"total", items.size()}};
         if (!last_error_.empty()) out["error"] = last_error_;
@@ -205,11 +228,16 @@ public:
     }
 
     /// 这部片子、这一道还有排着的吗。
+    bool any() const {
+        std::lock_guard<std::mutex> lg(mu_);
+        return !pending_.empty();
+    }
+
     bool has(const std::string& project, const std::string& lane) const {
         std::lock_guard<std::mutex> lg(mu_);
         for (const auto& e : pending_) {
-            if (paths::same_dir(e.body.value("project", std::string{}), project) &&
-                e.body.value("lane", std::string{}) == lane) {
+            if (paths::same_dir(q_str(e.body, "project"), project) &&
+                q_str(e.body, "lane") == lane) {
                 return true;
             }
         }
@@ -223,13 +251,10 @@ public:
         pending_.erase(
             std::remove_if(pending_.begin(), pending_.end(),
                            [&](const Entry& e) {
-                               if (!paths::same_dir(
-                                       e.body.value("project", std::string{}),
-                                       project)) {
+                               if (!paths::same_dir(q_str(e.body, "project"), project)) {
                                    return false;
                                }
-                               return lane == nullptr ||
-                                      e.body.value("lane", std::string{}) == *lane;
+                               return lane == nullptr || q_str(e.body, "lane") == *lane;
                            }),
             pending_.end());
         return static_cast<int>(before - pending_.size());
@@ -254,7 +279,72 @@ std::string running_episode() {
     return it->get<std::string>();
 }
 
+/// 这一趟**真要跑的那几镜**里，一张参考图都拿不到的（按章找第一章有的）。空 = 没有这回事。
+///
+/// 首帧那一族是图像**编辑**模型，手上没有编辑源时退化成文生图，出来的是彩色噪点——而闸门
+/// 拦不住（方差比真图还大，「不是空图」那条一路绿灯）。**只在收参考图的模型上判**：纯文生图
+/// 的本来就不传参考图，缺不缺一样跑。判据和出图那头是同一个函数（`accepts_reference_images`）。
+///
+/// **只看这一趟真要跑的那几镜。** 抽屉里「重出这一镜」发的是 `shot_ids`，拿整章去判的话同一章
+/// 里另有一镜缺图就把它也挡了；「只做前 n 分钟」同理，按计划口径挑（配音还没跑，时长还可能变），
+/// 真跑时前缀重挑，万一多带进来一镜缺图的，那一镜出的是噪点，闸门会说话。
+struct BareRefs {
+    std::string episode;
+    std::vector<std::string> shots;
+};
+BareRefs shots_missing_refs(const ProjectStore& store, const Project& project,
+                            const std::vector<std::string>& queue,
+                            const std::set<std::string>& only_shots, double preview_s) {
+    const config::Settings s = config::load_settings(store.root());
+    if (!config::ModelsConfig::accepts_reference_images(s.models.image)) return {};
+    const models::AssetLibrary assets = store.load_assets();
+    for (const std::string& id : queue) {
+        const models::Episode* ep = project.episode_by_id(id);
+        if (ep == nullptr) continue;
+        std::set<std::string> want = only_shots;
+        if (preview_s > 0.0 && want.empty()) {
+            want = pipeline::pick_preview_prefix(*ep, preview_s, config::video_limits_for(s),
+                                                 s.assembly.fps)
+                       .id_set();
+        }
+        std::vector<models::Shot> todo;
+        for (const auto& sh : ep->shots) {
+            if (want.empty() || want.count(sh.shot_id)) todo.push_back(sh);
+        }
+        auto bare = stages::shots_without_refs(todo, assets);
+        if (!bare.empty()) return {id, std::move(bare)};
+    }
+    return {};
+}
+
+/// 补画过了还是拿不到图的那句话。名字列前几个就够，二十几个 id 糊一屏没人读。
+std::string bare_refs_message(const BareRefs& b) {
+    std::string ids;
+    for (std::size_t i = 0; i < b.shots.size() && i < 5; ++i) {
+        ids += (i ? SAY("、") : std::string{}) + b.shots[i];
+    }
+    if (b.shots.size() > 5) ids += "…";
+    return SAYN("%1 有 %n 镜一张参考图都拿不到（%2）。当前出图模型是"
+                "图像编辑模型，没有参考图它会退化成文生图、出来是"
+                "噪点，而闸门拦不住。先去设定页把这几镜用到的角色"
+                "定妆、给场景出空景图（「照故事定妆」+「一键出图」），"
+                "再回来跑。",
+                static_cast<long long>(b.shots.size()), b.episode, ids);
+}
+
 }  // namespace
+
+void refuse_replan_while_rendering(const std::string& project,
+                                   const std::string& episode_id) {
+    if (!pipeline::jobs().running(pipeline::JobKind::Run)) return;
+    if (!paths::same_dir(pipeline::jobs().running_project(pipeline::JobKind::Run), project)) {
+        return;
+    }
+    if (running_episode() != episode_id) return;
+    throw ApiError(409, SAYF("%1正在出片，现在重拆分镜会和出片那一轮打架（它手里还是旧的"
+                             "那张表）。先停下出片，或者等它出完再拆。",
+                             util::chapter_word(episode_id, i18n::Audience::human())));
+}
 
 std::vector<pipeline::Stage> parse_stages(
     const std::vector<std::string>& names) {
@@ -281,7 +371,23 @@ std::vector<pipeline::Stage> parse_stages(
 }
 
 ApiResult post_run(const json& body, const RunDeps& deps) {
-    if (!body.is_object()) throw ApiError(400, SAY("请求体要是一个对象"));
+    if (!body.is_object()) throw ApiError(400, SAY("请求体须为 JSON 对象"));
+    // **认识的键类型要对。** 下面 opt_bool 类型不对是静悄悄当默认的，而这份
+    // 请求体会原样排进队列，被轮询那几处按类型读——一个 `"all_episodes": "yes"`
+    // 就能让所有页面的 /api/run 一直 500（2026-09-25 审出来）。进门就挡。
+    for (const char* k : {"project", "episode_id", "order", "lane"}) {
+        if (const auto it = body.find(k); it != body.end() && !it->is_string()) {
+            throw ApiError(400, SAYF("%1 要是字符串", k));
+        }
+    }
+    for (const char* k : {"skip_final", "skip_draft", "force", "all_episodes"}) {
+        if (const auto it = body.find(k); it != body.end() && !it->is_boolean()) {
+            throw ApiError(400, SAYF("%1 要是 true 或 false", k));
+        }
+    }
+    if (const auto it = body.find("preview_s"); it != body.end() && !it->is_number()) {
+        throw ApiError(400, SAYF("%1 要是数字", "preview_s"));
+    }
 
     // **不查多余的键。** RunRequest 是个普通的 BaseModel，
     // pydantic 默认忽略多余字段。这里 forbid 的话，前端多传一个键就 422，
@@ -382,19 +488,23 @@ ApiResult post_run(const json& body, const RunDeps& deps) {
     //
     // 起下一件的钩子在这儿挂：**挂了才有人去起**，而且挂的是这一次带进来
     // 的 deps（测试塞的是假后端，生产是真的）。钩子跑在刚跑完那条工作线程
-    // 上，所以它只把活扔给 Offload——在那条线程上直接 start 会 join 自己。
+    // 上，所以它只把活扔给另一条线程——在那条线程上直接 start 会 join 自己。
+    //
+    // **不排在 Offload 后面**，自己起一条短命的线程：Offload 那八条线程上跑的是一写
+    // 几分钟的大模型活（几部片子、几条对话同时写是常事，见 CLAUDE.md 第十四条），
+    // 起下一件出片排在它们后面，显卡就闲着等写字的。start_next 本身很快（真干活
+    // 的是 JobTable 另起的那条线程）。
+    const auto kick = [] { std::thread([] { RunQueue::instance().start_next(); }).detach(); };
     if (pipeline::jobs().running(pipeline::JobKind::Run)) {
-        pipeline::jobs().set_idle_hook([](pipeline::JobKind kind) {
+        pipeline::jobs().set_idle_hook([kick](pipeline::JobKind kind) {
             if (kind != pipeline::JobKind::Run) return;
-            Offload::instance().post([] { RunQueue::instance().start_next(); });
+            kick();
         });
         const int at = RunQueue::instance().enqueue(body, deps);
         // ⚠️ **排上之后再看一眼。** 上面判"在跑"和排上不是一口气办完的：前面那件
         // 正好在这当口跑完的话，钩子已经响过了（那时队里还没有这一件），这一件
         // 就一直排着而槽闲着。空了就当场起。
-        if (!pipeline::jobs().running(pipeline::JobKind::Run)) {
-            Offload::instance().post([] { RunQueue::instance().start_next(); });
-        }
+        if (!pipeline::jobs().running(pipeline::JobKind::Run)) kick();
         return {202,
                 {{"started", false},
                  {"queued", true},
@@ -430,7 +540,7 @@ ApiResult post_run(const json& body, const RunDeps& deps) {
     if (all_episodes) {
         // 做的就是量产，一章一章手点没有意义。给了这个就忽略 episode_id。
         for (const auto& ep : project.episodes) {
-            if (!ep.shots.empty()) queue.push_back(ep.episode_id);
+            if (ep.has_usable_shots()) queue.push_back(ep.episode_id);
         }
         if (queue.empty()) {
             throw ApiError(400, SAY("这个项目还没有任何一章有分镜表"));
@@ -439,72 +549,19 @@ ApiResult post_run(const json& body, const RunDeps& deps) {
         queue.push_back(episode_id);
     }
 
-    // ---- 一张参考图都拿不到的镜头，不许开跑 ----
+    // ---- 缺参考图的：出片这一件开头先画上 ----
     //
-    // 首帧那一族是图像**编辑**模型，手上没有编辑源时退化成文生图，出来的
-    // 是彩色噪点——而闸门拦不住（方差比真图还大，「不是空图」那条一路绿灯）。
-    // 一镜两分钟、一章二十几镜，跑完再说就太晚了：那时候人已经等了一个钟头，
-    // 拿到的是一章雪花。
-    //
-    // **只在收参考图的模型上判**：纯文生图的本来就不传参考图，缺不缺一样跑。
-    // 判据和出图那头是同一个函数（`accepts_reference_images`，认文件名）。
-    {
-        const config::Settings s = config::load_settings(store.root());
-        if (config::ModelsConfig::accepts_reference_images(s.models.image)) {
-            const models::AssetLibrary assets = store.load_assets();
-            for (const std::string& id : queue) {
-                const models::Episode* ep = project.episode_by_id(id);
-                if (ep == nullptr) continue;
-                // **只看这一趟真要跑的那几镜。**
-                //
-                // 抽屉里「重出这一镜」发的是 `shot_ids`。拿整章去判的话，
-                // 同一章里另有一镜缺图就把它也挡了——而那一镜自己的参考图
-                // 好好的，人想重出的也只有它。挡错的代价比漏挡大：漏挡最多
-                // 是那一镜出张噪点，挡错是**这一镜再也重出不了**，而屏幕上
-                // 说的还是另一镜的事。
-                //
-                // 「只做前 n 分钟」同理，而且更要紧：那条路本来就是"先花
-                // 二十分钟看看这片子长什么样"，第 40 镜缺参考图不该把它挡
-                // 在门外——那一镜这一轮根本不做。**按计划口径挑**（配音还
-                // 没跑，时长还可能变），所以是估的那一批；真跑时前缀重挑，
-                // 万一多带进来一镜缺图的，那一镜出的是噪点，闸门会说话。
-                std::set<std::string> want = only_shots;
-                if (preview_s > 0.0 && want.empty()) {
-                    want = pipeline::pick_preview_prefix(
-                               *ep, preview_s, config::video_limits_for(s),
-                               s.assembly.fps)
-                               .id_set();
-                }
-                std::vector<models::Shot> todo;
-                for (const auto& sh : ep->shots) {
-                    if (want.empty() || want.count(sh.shot_id)) {
-                        todo.push_back(sh);
-                    }
-                }
-                const auto bare = stages::shots_without_refs(todo, assets);
-                if (bare.empty()) continue;
-                // 名字列前几个就够，二十几个 id 糊一屏没人读。
-                std::string ids;
-                for (std::size_t i = 0; i < bare.size() && i < 5; ++i) {
-                    ids += (i ? SAY("、") : std::string{}) + bare[i];
-                }
-                if (bare.size() > 5) ids += "…";
-                throw ApiError(
-                    400,
-                    SAYN("%1 有 %n 镜一张参考图都拿不到（%2）。当前出图模型是"
-                         "图像编辑模型，没有参考图它会退化成文生图、出来是"
-                         "噪点，而闸门拦不住。先去设定页把这几镜用到的角色"
-                         "定妆、给场景出空景图（「照故事定妆」+「一键出图」），"
-                         "再回来跑。",
-                         static_cast<long long>(bare.size()), id, ids));
-            }
-        }
-    }
+    // 原来这儿直接 400「先去设定页……再回来跑」，于是场记把「画参考图」排在写剧本、拆分镜
+    // 前面——纯文字的活中间插一件显卡活。现在画图跟首帧、成片一起做（用户 2026-09-27：「画图
+    // 应该和后面首帧成片一起做，前面是单纯 llm 内容」）：这儿只记下「要补」，任务开头
+    // `ensure_refs` 画齐了再往下走；补画完还是拿不到的照旧停下、说清哪几镜（见 BareRefs）。
+    const bool need_refs =
+        !shots_missing_refs(store, project, queue, only_shots, preview_s).shots.empty();
 
     const bool started = pipeline::jobs().start(
         pipeline::JobKind::Run, queue[0],
         [store, queue, skip_final, skip_draft, only_shots, force, stage_names,
-         order, preview_s,
+         order, preview_s, need_refs,
          deps](pipeline::JobProgress& p) {
             // 配置和后端在**任务开始时**取一次，不是注册时。
             // 用户改完模型文件不用重启，但一次跑的中途不会换——
@@ -518,6 +575,9 @@ ApiResult post_run(const json& body, const RunDeps& deps) {
             // 挂一个），各认各的 tag。
             infer::PreviewSinkHandle preview_sink(
                 [&p](const std::string& tag, int step, std::string data_url) {
+                    // 只认本机自己的活：替别的机器跑的那几件（tag 带前缀）也是
+                    // `ep01_sh001` 这种名字，收进来就画在自己同名那一格上。
+                    if (!infer::preview_tag_is_local(tag)) return;
                     pipeline::Event e;
                     e.kind = "preview";
                     e.shot_id = tag;
@@ -552,6 +612,25 @@ ApiResult post_run(const json& body, const RunDeps& deps) {
                     only = parse_stages(*stage_names);
                 } catch (const std::exception& e) {
                     p.set_error(e.what());
+                    return;
+                }
+            }
+
+            // ---- 先把缺的参考图画齐（画图是显卡活，跟首帧、成片一起做） ----
+            if (need_refs) {
+                const std::string step = SAY("把缺的参考图画齐");
+                p.set_message(step);
+                if (!ensure_refs(
+                        paths::to_utf8(store.root()), p.lane(),
+                        [&p] { return p.cancelled(); },
+                        [&p, &step](const std::string& m) { p.set_message(SAYF("%1：%2", step, m)); })) {
+                    return;
+                }
+                // 画完再按同一个判据看一遍：还有拿不到图的就停，别出一章噪点
+                const BareRefs still =
+                    shots_missing_refs(store, store.load_project(), queue, only_shots, preview_s);
+                if (!still.shots.empty()) {
+                    p.set_error(bare_refs_message(still));
                     return;
                 }
             }
@@ -656,7 +735,7 @@ ApiResult post_run(const json& body, const RunDeps& deps) {
         : queue.size() == 1
             ? SAYF("出片 · %1", queue[0])
             : SAYF("出片 · %1 章", std::to_string(queue.size())),
-        body.value("lane", std::string{}));
+        field_str(body, "lane"));
 
     // start() 只在同种任务已经在跑时返回 false，而上面刚判过。
     // 还是要判：那两步之间没有锁，两个请求同时进来时后一个要拿到 409，
@@ -690,7 +769,7 @@ ApiResult get_run_status(const std::string& project) {
 
 ApiResult post_run_queue_clear(const json& body) {
     const std::string project =
-        body.is_object() ? body.value("project", std::string{}) : std::string{};
+        field_str(body, "project");
     if (project.empty()) return {200, {{"cleared", RunQueue::instance().clear()}}};
     std::string lane;
     const bool has_lane = body.contains("lane") && body.at("lane").is_string();
@@ -703,9 +782,11 @@ bool run_queued_for(const std::string& project, const std::string& lane) {
     return RunQueue::instance().has(project, lane);
 }
 
+bool run_queued_any() { return RunQueue::instance().any(); }
+
 ApiResult post_run_stop(const json& body) {
     const std::string project =
-        body.is_object() ? body.value("project", std::string{}) : std::string{};
+        field_str(body, "project");
     // 没在跑时回 {"stopped": false} 而不是报错。
     // 前端的停止按钮是无条件可点的，重复点不该弹错误框。
     if (project.empty()) {
@@ -736,7 +817,7 @@ ApiResult get_run_preview(const std::string& path,
     std::vector<const Episode*> episodes;
     if (all_episodes) {
         for (const auto& e : project.episodes) {
-            if (!e.shots.empty()) episodes.push_back(&e);
+            if (e.has_usable_shots()) episodes.push_back(&e);
         }
     } else if (const Episode* ep = project.episode_by_id(episode_id)) {
         episodes.push_back(ep);
@@ -865,9 +946,9 @@ ApiResult get_run_preview(const std::string& path,
     json ids = json::array();
     for (const Episode* ep : episodes) ids.push_back(ep->episode_id);
 
-    // 拿不到参考图的那几镜。**预览要和真按下去那一下说同一件事**——
-    // `post_run` 见到它就 400，这儿先报出来，界面才能在按之前就把按钮关掉、
-    // 把原因写清楚。判据同那边：只在收参考图的模型上算。
+    // 拿不到参考图的那几镜。`post_run` 见到它会在出片那一件开头先补画（`ensure_refs`），
+    // 这儿先报出来，界面能在按之前说一声「要先画几张参考图」。判据同那边：只在收参考图的
+    // 模型上算。
     json bare_shots = json::array();
     if (config::ModelsConfig::accepts_reference_images(proj_settings.models.image)) {
         const models::AssetLibrary assets = store.load_assets();
@@ -886,7 +967,7 @@ ApiResult get_run_preview(const std::string& path,
         {"episodes", ids},
         {"shots", total_shots},
         {"stages", stages},
-        // 这几镜拿不到参考图，按下去会被 post_run 挡住。空数组 = 没有这回事。
+        // 这几镜现在拿不到参考图，按下去会先补画。空数组 = 没有这回事。
         {"shots_without_refs", bare_shots},
         {"idle", !any},
         // Python 的 round() 回的是 int，不是保留零位小数的浮点。
