@@ -17,6 +17,7 @@
 #include "pipeline/task_board.hpp"  // task_facts
 #include "util/paths.hpp"
 #include "util/text.hpp"
+#include "telemetry/telemetry.hpp"
 
 // 记录器本体。形状和"为什么是这个形状"写在 call_log.hpp 上，这儿只补实现上
 // 踩得着的几处。
@@ -659,6 +660,9 @@ CallLog::CallLog(std::string backend, std::string kind, const Request& req,
     impl_->kind = std::move(kind);
     impl_->schema_name = req.schema_name;
     impl_->t0 = std::chrono::steady_clock::now();
+    // 匿名使用统计：一天调了几次大模型（只数次数，提示词一个字都不碰）。放在「不记就不动手」
+    // 前面：提示词日志关着，这一笔照样要数
+    telemetry::count("llm_calls");
     if (!impl_->opt.enabled) return;   // 不记就整个不动手
 
     const Stamp s = make_stamp();
@@ -903,6 +907,9 @@ void note_gate(const GateVerdict& v, const CallLogOptions& opt) {
     // `catch` 里（打回的那一支），在那儿再抛一次就把真正的那句错误话盖掉了，
     // 界面上显示的会是"磁盘满"而不是"整章几乎没有对白"。
     try {
+        // 匿名使用统计：打回一次记一笔闸门代号（`too_short` 这种，那句原话不交出去）。
+        // 放在「日志关着就不记」前面：提示词日志关着，这一笔照样要数
+        if (!v.ok && !v.gate.empty() && !v.call_id.empty()) telemetry::gate(v.gate);
         if (!opt.enabled) return;
         if (v.call_id.empty()) return;   // 没有调用的裁决不记，见 call_log.hpp
 

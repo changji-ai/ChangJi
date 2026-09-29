@@ -9,6 +9,7 @@
 #include "util/paths.hpp"
 #include "util/say.hpp"
 #include "util/text.hpp"
+#include "telemetry/telemetry.hpp"
 
 namespace fs = std::filesystem;
 using json = nlohmann::json;
@@ -151,6 +152,7 @@ ApiResult post_new_project(const json& body, const config::Settings& settings) {
             assets.style.aspect_ratio = video.aspect_ratio();
             store.save_assets(assets);
         }
+        telemetry::count("project_new");   // 匿名使用统计：新建一部片子（只数，不带名字）
         return {200, {{"root", paths::to_utf8(store.root())}}};
     } catch (const fs::filesystem_error& e) {
         throw ApiError(400, SAYF("创建目录失败：%1", e.what()));

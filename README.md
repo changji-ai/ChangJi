@@ -461,6 +461,23 @@ hidden:
 
 ---
 
+## Anonymous usage statistics
+
+changji sends anonymous usage statistics to changji.xyz: a random install ID
+generated on your machine, the version and system, whether it is idle, writing
+or rendering, daily counts (chapters, shots, how each step went) and the
+hardware tier. It never sends prompts, story or script text, file names,
+images, keys or server addresses; your IP address is used only to look up the
+city and is not stored.
+
+It is on by default, and the app says so the first time it starts. Turn it off
+in **Settings → General**, or set `CHANGJI_TELEMETRY=0` or `DO_NOT_TRACK=1`.
+**Settings → General → What gets sent** shows the exact text, and the
+[privacy policy](https://changji.xyz/privacy#stats) lists every field. Builds
+you compile yourself send nothing.
+
+---
+
 ## Getting help
 
 | | |

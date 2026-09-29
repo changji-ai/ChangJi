@@ -18,6 +18,7 @@
 #include "util/human_time.hpp"
 #include "util/paths.hpp"
 #include "util/say.hpp"
+#include "telemetry/telemetry.hpp"
 
 namespace changji::pipeline {
 
@@ -292,6 +293,14 @@ FilmJoinReport join_film(const ProjectStore& store,
             ? SAYF("合成好了：%1", util::human_time(*report.total_s))
             : SAY("合成好了。时长没量出来（ffprobe 没给）"));
     progress.set_done(2);
+    // 匿名使用统计：接成一部片子（带成片分钟，地图上那座城市闪一下）
+    telemetry::count("film_joined");
+    if (report.total_s) {
+        telemetry::count("film_minutes", *report.total_s / 60.0);
+        telemetry::event("film_joined", *report.total_s / 60.0);
+    } else {
+        telemetry::event("film_joined");
+    }
     return report;
 }
 

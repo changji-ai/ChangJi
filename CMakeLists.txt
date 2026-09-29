@@ -956,6 +956,7 @@ add_library(changji_core STATIC
     src/pipeline/jobs.cpp
     src/pipeline/activity.cpp
     src/pipeline/task_board.cpp
+    src/telemetry/telemetry.cpp
     src/pipeline/episode.cpp
     src/pipeline/preview.cpp
     src/pipeline/storyboard_run.cpp
@@ -1182,6 +1183,16 @@ target_compile_definitions(changji_core PUBLIC
     CPPHTTPLIB_BROTLI_SUPPORT
     CHANGJI_VERSION="${CHANGJI_VERSION}"
 )
+# 这一份是哪种显卡版本（匿名使用统计里报，见 src/telemetry/）：CUDA / Vulkan / HIP / SYCL 看上面那个
+# 互斥的开关；都没开而编进了 sd.cpp 的 Apple 芯片是 Metal（ggml 在 Apple 上默认开）；别的是 CPU。
+if(CHANGJI_GPU_BACKEND)
+    string(TOLOWER "${CHANGJI_GPU_BACKEND}" _changji_gpu_build)
+elseif(APPLE AND CHANGJI_SD AND CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
+    set(_changji_gpu_build "metal")
+else()
+    set(_changji_gpu_build "cpu")
+endif()
+target_compile_definitions(changji_core PRIVATE CHANGJI_GPU_BUILD="${_changji_gpu_build}")
 
 if(CHANGJI_SSL)
     target_link_libraries(changji_core PUBLIC OpenSSL::SSL OpenSSL::Crypto)
@@ -1542,6 +1553,7 @@ if(CHANGJI_BUILD_TESTS)
         tests/unit/test_film_join.cpp
         tests/unit/test_finish.cpp
         tests/unit/test_watermark.cpp
+        tests/unit/test_telemetry.cpp
         tests/unit/test_product_tags.cpp
         tests/unit/test_scenes.cpp
         tests/unit/test_upscale.cpp
@@ -1672,6 +1684,7 @@ if(CHANGJI_BUILD_TESTS)
         src/pipeline/jobs.cpp
         src/pipeline/activity.cpp
         src/pipeline/task_board.cpp
+        src/telemetry/telemetry.cpp
         src/pipeline/episode.cpp
         src/pipeline/preview.cpp
         src/pipeline/storyboard_run.cpp

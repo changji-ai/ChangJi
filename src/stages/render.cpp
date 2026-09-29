@@ -19,6 +19,7 @@
 #include "util/say.hpp"
 #include "util/text.hpp"
 #include "infer/scheduler.hpp"
+#include "telemetry/telemetry.hpp"
 
 namespace fs = std::filesystem;
 
@@ -591,6 +592,10 @@ std::vector<RenderOutcome> render_batch(std::vector<Shot*>& shots,
 
                 const gates::Verdict verdict = gate.decide(res, local);
                 local.gate_notes = res.reasons;
+                // 匿名使用统计：出片闸门那一套的 `gate` 是本地化的字、没有代号，按判下来的结果记
+                telemetry::gate(verdict == gates::Verdict::Retry      ? "shot_retry"
+                                : verdict == gates::Verdict::Fallback ? "shot_fallback"
+                                                                      : "shot_regress");
                 // 没过的也把运动量带上：亮度跳变 / 纯色那几条常常和「中途
                 // 硬切」「几乎不动」是同一件事，两个数放一起才看得出来。
                 say("gate", res.describe() + gates::motion_note(res));

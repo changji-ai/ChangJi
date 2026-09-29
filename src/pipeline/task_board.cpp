@@ -6,6 +6,7 @@
 #include "util/say.hpp"
 
 #include "util/text.hpp"   // utf8_len：思考那个数报字，不报字节
+#include "telemetry/telemetry.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -228,6 +229,7 @@ Task::~Task() {
     auto row = it->second;
     b.live.erase(it);
     row->ended_at = Clock::now();
+    const bool begun = row->state == TaskState::Running;
     if (row->state == TaskState::Running) {
         // **令牌立着就是被取消的，不是失败的。** 「人按的停不是失败」这条
         // 规矩在引擎里到处都写着（ref_gen.cpp、util/cancel_words.hpp），
@@ -244,6 +246,14 @@ Task::~Task() {
         // 没 begin 过就没了 = 排着的时候被取消了。
         row->state = TaskState::Cancelled;
     }
+    // 匿名使用统计：哪一类活、成没成、多久（telemetry/）。**只交这三样**——项目、标题、
+    // 章号都留在账本里，不往外交。
+    telemetry::task_ended(
+        row->kind, row->slot, begun,
+        row->state == TaskState::Done     ? telemetry::End::ok
+        : row->state == TaskState::Failed ? telemetry::End::fail
+                                          : telemetry::End::cancel,
+        begun ? std::chrono::duration<double, std::milli>(row->ended_at - row->started_at).count() : 0.0);
     // **退休之前先和上一级脱钩。**
     //
     // 一件活的令牌可以挂在整批那个令牌上（`CancelToken::link`，"停一件"和
@@ -267,6 +277,8 @@ void Task::begin(bool working) {
     std::lock_guard lg(b.mu);
     auto it = b.live.find(id_);
     if (it == b.live.end()) return;
+    // 心跳里的「在干什么」按开着的活算：只在头一回开工时记一笔（再 begin 一次不重记）
+    if (it->second->state != TaskState::Running) telemetry::task_begun(it->second->kind);
     it->second->state = TaskState::Running;
     it->second->started_at = Clock::now();
     it->second->note.clear();

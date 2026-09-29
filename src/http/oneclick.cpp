@@ -22,6 +22,7 @@
 #include "util/paths.hpp"
 #include "util/say.hpp"
 #include "util/text.hpp"
+#include "telemetry/telemetry.hpp"
 
 using json = nlohmann::json;
 
@@ -253,6 +254,7 @@ ApiResult post_oneclick(const json& body, std::shared_ptr<llm::Client> client,
         SAYF("一键成片 · 前 %1", util::human_time(preview_s)),
         field_str(body, "lane"));
     if (!started) throw ApiError(409, SAY("剧本那边还在忙"));
+    telemetry::count("oneclick");   // 匿名使用统计：点了一次「一键成片」
     return {202,
             {{"started", true},
              // 这一栏画在页面上，翻。

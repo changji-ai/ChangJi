@@ -1124,6 +1124,11 @@ void apply_table(const toml::table& doc, Settings& s) {
         take(t, "repo", s.update.repo);
         take(t, "every_hours", s.update.every_hours);
     }
+    if (auto t = doc["telemetry"].as_table()) {
+        take(t, "enabled", s.telemetry.enabled);
+        take(t, "notice_shown", s.telemetry.notice_shown);
+        take(t, "endpoint", s.telemetry.endpoint);
+    }
     if (auto t = doc["preview"].as_table()) {
         take(t, "seconds", s.preview.seconds);
     }

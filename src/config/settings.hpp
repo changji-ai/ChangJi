@@ -1275,6 +1275,18 @@ struct UpdateConfig {
     double every_hours = 24.0;
 };
 
+/// 匿名使用统计（cpp/src/telemetry/）。**机器的设置**，不进片子里那份 changji.toml
+///（`keep_film_settings_only` 本来就只认电影那几节）。
+struct TelemetryConfig {
+    /// 2026-09-29 用户定：**默认开**，首次启动明示、设置 ▸ 通用里一键关。
+    /// 环境变量 `CHANGJI_TELEMETRY=0`、`DO_NOT_TRACK=1` 和本机编的版本另外挡着，这一栏开着也不发。
+    bool enabled = true;
+    /// 首次启动那条说明看过没有（点过「知道了」或者扳过开关）。
+    bool notice_shown = false;
+    /// 发到哪儿。空 = 场记云那个地址（`[cloud] url`，默认 https://changji.xyz）。
+    std::string endpoint;
+};
+
 struct Settings {
     LLMConfig llm;
     TiersConfig tiers;
@@ -1291,6 +1303,7 @@ struct Settings {
     PeerConfig peer;
     UpdateConfig update;
     CloudConfig cloud;
+    TelemetryConfig telemetry;
 
     /// 显存覆盖。推理服务在别的机器上时本机探测不到，用它手动指定
     std::optional<double> vram_gb_override;

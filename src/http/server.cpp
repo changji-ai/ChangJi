@@ -64,6 +64,7 @@
 #include "http/flow.hpp"
 #include "util/paths.hpp"
 #include "util/sysstat.hpp"
+#include "telemetry/telemetry.hpp"
 #include "http/webapp.hpp"
 #include "http/ws.hpp"
 #include "infer/worker_server.hpp"
@@ -398,6 +399,75 @@ void settle_machine_token(config::Settings& s, const std::string& bind_host) {
     s.peer.token = t.value;
 }
 
+/// 匿名使用统计的收发（telemetry/）：发到哪儿、开没开、硬件档位、用的什么，都现问配置。
+/// 桌面端里的引擎和命令行引擎都走这儿；工作进程（`--worker`）不走 `run()`，不发。
+static telemetry::Options telemetry_options() {
+    telemetry::Options o;
+    o.dir = paths::user_data_dir(config::kAppName);
+    o.version = CHANGJI_VERSION;
+#ifdef CHANGJI_GPU_BUILD
+    o.gpu_build = CHANGJI_GPU_BUILD;
+#endif
+    o.io.now = [] { return std::chrono::system_clock::now(); };
+    o.io.env = [](const char* k) {
+        const char* v = std::getenv(k);
+        return std::string(v ? v : "");
+    };
+    o.io.configured = [] { return config::runtime().snapshot().telemetry.enabled; };
+    o.io.endpoint = [] {
+        if (const char* e = std::getenv("CHANGJI_TELEMETRY_URL"); e != nullptr && *e != '\0') return std::string(e);
+        const auto s = config::runtime().snapshot();
+        return s.telemetry.endpoint.empty() ? s.cloud.url : s.telemetry.endpoint;
+    };
+    const auto post = llm::default_http_post();
+    o.io.post = [post](const std::string& url, const std::string& body) -> std::pair<int, std::string> {
+        try {
+            const auto r = post(url, body,
+                                {{"Content-Type", "application/json"},
+                                 {"User-Agent", std::string("changji/") + CHANGJI_VERSION}},
+                                5.0);
+            if (r.transport_error) return {0, ""};
+            return {r.status, r.body};
+        } catch (...) {
+            return {0, ""};   // 本机编的没有 TLS 时 httplib 当场抛：当成没连上
+        }
+    };
+    // 硬件档位：取采样线程攒好的那份（问卡在满负荷时能挂好几秒）；采样里没有卡（Mac）再退回探测那一份
+    o.io.hw = [] {
+        const auto load = sysstat::latest();
+        json j{{"ram_gb", std::round(load.mem_total_gb * 10.0) / 10.0}};
+        std::string name;
+        double vram = 0.0;
+        if (!load.gpus.empty()) {
+            name = load.gpus.front().name;
+            vram = load.gpus.front().vram_total_gb;
+        } else if (const auto prof = config::runtime().profile(); prof.gpu) {
+            name = prof.gpu->name;
+            vram = prof.gpu->unified() ? prof.gpu->unified_mb / 1024.0 : prof.gpu->vram_gb();
+        }
+        j["gpu_vendor"] = telemetry::gpu_vendor_of(name);
+        if (const std::string n = telemetry::clean_gpu_name(name); !n.empty()) j["gpu_name"] = n;
+        if (vram > 0) j["vram_gb"] = std::round(vram * 10.0) / 10.0;
+        return j;
+    };
+    // 用的什么：大模型只说本地 / 远程 / 命令行，远程只说是哪一家（不说地址、不带密钥）；模型只报文件名
+    o.io.setup = [] {
+        const auto s = config::runtime().snapshot();
+        json j{{"peers", static_cast<int>(s.peer.nodes.size())}};
+        const std::string& b = s.llm.backend;
+        if (b == "remote" || b == "local" || b == "command") j["llm"] = b;
+        if (b == "remote") {
+            if (const std::string h = telemetry::host_class(s.llm.base_url); !h.empty()) j["llm_host"] = h;
+        }
+        if (const auto v = telemetry::model_name(s.models.video); !v.empty()) j["video_model"] = v;
+        if (const auto v = telemetry::model_name(s.models.image.empty() ? s.models.image_base : s.models.image); !v.empty())
+            j["image_model"] = v;
+        if (const auto v = telemetry::model_name(s.models.tts); !v.empty()) j["tts_model"] = v;
+        return j;
+    };
+    return o;
+}
+
 void run(const config::Settings& settings_in, const Options& opts) {
     // **端口有人在听就别起**（2026-09-28 实测）：Crow 的 acceptor 设了 SO_REUSEADDR，Windows 上它的
     // 意思是「别人正听着也让我绑上」——同一个端口起第二个引擎照样「起来了」、照样在终端上说
@@ -535,6 +605,13 @@ void run(const config::Settings& settings_in, const Options& opts) {
     // 采归采、推归推之后，推送永远准时，数据顶多旧几秒，而旧了多少
     // 界面上说得出来（age_s）。
     sysstat::start_sampler();
+
+    // 匿名使用统计：后台一条线程，五秒看一眼（心跳、事件、一天一次的汇总）。关着就什么都不做。
+    // 停在 `run()` 回来的那一刻（先停线程再把今天的账落盘）。
+    telemetry::start(telemetry_options());
+    struct TelemetryAtExit {
+        ~TelemetryAtExit() { telemetry::stop(); }
+    } telemetry_at_exit;
 
     // 机器表也在起服务时先问一遍。**关着的那台要走满探活超时**（实测
     // 3.2 秒），不预热的话第一个打开设置页的人就得等它——而那一页恰恰是
@@ -975,6 +1052,44 @@ void run(const config::Settings& settings_in, const Options& opts) {
         });
         return json_response(r.body, r.status);
     });
+
+    // ---- 匿名使用统计 ----
+    //
+    // GET：开没开、为什么被挡着（环境变量 / DO_NOT_TRACK / 本机编的）、首次说明看过没有、
+    // 会发出去的原文（按眼下的数据现拼）。POST {enabled?, notice_shown?}：改开关、记下看过说明，
+    // 写进 config.toml 的 [telemetry]，当场生效（发送线程每一拍现问配置）。
+    CROW_ROUTE(app, "/api/telemetry")
+        .methods(crow::HTTPMethod::GET, crow::HTTPMethod::POST)([](const crow::request& req) {
+            auto r = guard([&]() -> ApiResult {
+                if (req.method == crow::HTTPMethod::POST) {
+                    static std::mutex edit;   // 读→改→存一把锁
+                    const std::lock_guard<std::mutex> lg{edit};
+                    const json body = parse_body(req.body);
+                    json patch = json::object();
+                    auto s = config::runtime().snapshot();
+                    if (body.contains("enabled") && body["enabled"].is_boolean()) {
+                        s.telemetry.enabled = body["enabled"].get<bool>();
+                        patch["enabled"] = s.telemetry.enabled;
+                    }
+                    if (body.contains("notice_shown") && body["notice_shown"].is_boolean()) {
+                        s.telemetry.notice_shown = body["notice_shown"].get<bool>();
+                        patch["notice_shown"] = s.telemetry.notice_shown;
+                    }
+                    if (!patch.empty()) {
+                        try {
+                            config::save_user_config({{"telemetry", patch}});
+                        } catch (const std::exception& e) {
+                            throw ApiError(500, e.what());
+                        }
+                        config::runtime().replace(s);
+                    }
+                }
+                json out = telemetry::status();
+                out["notice_shown"] = config::runtime().snapshot().telemetry.notice_shown;
+                return {200, out};
+            });
+            return json_response(r.body, r.status);
+        });
 
     // ---- 随系统启动 ----
     //
