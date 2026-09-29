@@ -1,0 +1,89 @@
+name: Bug report · 问题反馈
+description: Something is broken, crashes, or produces the wrong result. · 跑不起来、崩溃、结果不对。
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Three things answer most reports in one round: the version, the package, and the output of `changji --doctor`.
+        谢谢反馈。大多数问题一轮就能答，靠的是这三样：版本、装的哪个包、`changji --doctor` 的输出。
+
+  - type: input
+    id: version
+    attributes:
+      label: Version · 版本
+      description: Output of `changji --version`. For the desktop app, the tag you downloaded it from (`desktop-v2.2.N`). · `changji --version` 的输出；桌面端写你下载时的标签（`desktop-v2.2.N`）。
+      placeholder: v2.2.123 / desktop-v2.2.123
+    validations:
+      required: true
+
+  - type: dropdown
+    id: package
+    attributes:
+      label: Package · 装的哪个包
+      options:
+        - Desktop app — Windows installer
+        - Desktop app — macOS .dmg
+        - Desktop app — Linux tarball
+        - changji-windows-x64-cuda.zip
+        - changji-windows-x64-vulkan.zip
+        - changji-windows-x64.zip (CPU)
+        - changji-windows-arm64.zip (CPU)
+        - changji-macos-arm64.tar.gz (Apple silicon)
+        - changji-macos-x64.tar.gz (Intel, CPU)
+        - changji-linux-x64-cuda.tar.gz
+        - changji-linux-x64-vulkan.tar.gz
+        - changji-linux-x64.tar.gz (CPU)
+        - changji-linux-arm64.tar.gz (CPU)
+        - Built from source · 自己编的
+        - Not sure · 不确定
+    validations:
+      required: true
+
+  - type: input
+    id: system
+    attributes:
+      label: OS and GPU · 系统和显卡
+      description: OS with version, GPU model and VRAM. · 系统和版本号、显卡型号和显存。
+      placeholder: Windows 11 24H2 · RTX 4070 12 GB
+    validations:
+      required: true
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of `changji --doctor` · `changji --doctor` 的输出
+      description: Paste the whole thing; it names the card, the models, the speech backend and what this machine can produce. · 整段贴上来，它会说找到了哪张卡、哪些模型、配音后端，以及这台机器现在能做什么。
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: What you did · 做了什么
+      description: What you said in the conversation or which button you pressed, in order. · 在对话里说了什么，或者按顺序点了哪些按钮。
+      placeholder: |
+        1. New project, anime, vertical
+        2. "Make a five-minute story about …"
+        3. Pressed "Render chapter 1"
+    validations:
+      required: true
+
+  - type: textarea
+    id: result
+    attributes:
+      label: What happened, and what you expected · 发生了什么，期望是什么
+      description: Paste the error text as shown. If you started it from a terminal, include the terminal output. Screenshots help. · 报错原文贴上来；从终端启动的把终端输出也贴上；截图也有用。
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting · 提交前
+      options:
+        - label: I searched existing issues. · 搜过已有的 issue 了。
+          required: true
+        - label: This report contains no API keys, tokens or passwords. · 里面没有 API Key、口令或密码。
+          required: true

@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and "is this possible?" · 提问、能不能做到
+    url: https://github.com/changji-ai/ChangJi/discussions
+    about: Ask in Discussions. Show what you made there too. · 去 Discussions 问；做出来的片子也发在那儿。
+  - name: Help center · 帮助中心
+    url: https://changji.xyz/help
+    about: Installing, choosing models, the first film, troubleshooting. · 安装、选模型、第一部片子、排障。
+  - name: Security issue · 安全问题
+    url: https://github.com/changji-ai/ChangJi/blob/main/SECURITY.md
+    about: Not in a public issue — see SECURITY.md for how to report privately. · 别开公开 issue，看 SECURITY.md 里的私下报告方式。

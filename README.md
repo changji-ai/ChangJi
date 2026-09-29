@@ -226,7 +226,8 @@ changji --version              # which build this is
 changji --doctor               # health check; non-zero exit means fix something
 changji --init-config          # write an annotated configuration template
 changji --port 8080            # serve on localhost
-changji --host 0.0.0.0 --port 8080   # serve to the LAN
+changji --host 0.0.0.0 --port 8080   # serve to the LAN — a token is then required;
+                                     # the startup log prints the address with it
 changji --worker --gpu 1       # a worker process for one card (started for you)
 ```
 
@@ -451,6 +452,20 @@ hidden:
 | Consistency across shots | Reference images plus assembled appearance text hold a character together far better than prompting alone, but they do not make it certain |
 | macOS / arm64 | CI builds it and the desktop app runs there; a full chapter has not been rendered on Apple silicon |
 | Model choice moves | The catalogue tracks what is worth running today, and today changes |
+
+---
+
+## Getting help
+
+| | |
+|---|---|
+| [changji.xyz/help](https://changji.xyz/help) | Installing, choosing models, the first film, changji Cloud, more than one machine, where the files are, troubleshooting |
+| [Discussions](https://github.com/changji-ai/ChangJi/discussions) | Questions, "is this possible", and what you made with it |
+| [Issues](https://github.com/changji-ai/ChangJi/issues/new/choose) | Something broken. The template asks for `changji --version`, the package name and the output of `changji --doctor` — with those three, most reports are answered in one round |
+| [SECURITY.md](SECURITY.md) | Security problems: privately, not in a public issue |
+
+Before reporting, run `changji --doctor`. It names what is missing, and its
+output is the first thing anyone will ask for.
 
 ---
 

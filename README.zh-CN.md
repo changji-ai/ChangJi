@@ -189,7 +189,7 @@ changji --version              # 这是哪一版
 changji --doctor               # 体检，退非零码就是有要修的
 changji --init-config          # 写一份带注释的配置模板
 changji --port 8080            # 只在本机上服务
-changji --host 0.0.0.0 --port 8080   # 开给局域网
+changji --host 0.0.0.0 --port 8080   # 开给局域网——进来要口令，带口令的地址打在启动日志里
 changji --worker --gpu 1       # 单卡工作进程（平时它自己拉，不用你起）
 ```
 
@@ -388,6 +388,20 @@ ctest --test-dir build           # 同一件事，走 ctest
 | 跨镜头的一致性 | 参考图加程序拼的外观描述，比光靠提示词稳得多，但还做不到「一定是同一个人」 |
 | macOS / arm64 | CI 编得出来，桌面端也在上面跑；但还没在苹果芯片上渲完一整章 |
 | 选型一直在动 | 模型目录跟着「今天值得跑什么」走，而今天一直在变 |
+
+---
+
+## 遇到问题
+
+| | |
+|---|---|
+| [changji.xyz/help](https://changji.xyz/help) | 安装、选模型、第一部片子、场记云、多机、文件在哪、排障 |
+| [Discussions](https://github.com/changji-ai/ChangJi/discussions) | 提问、「能不能做到」，以及你用它拍出来的片子 |
+| [Issues](https://github.com/changji-ai/ChangJi/issues/new/choose) | 出了故障。模板会要 `changji --version`、装的哪个包和 `changji --doctor` 的输出——有这三样，大多数问题一轮就能答 |
+| [SECURITY.md](SECURITY.md) | 安全问题：私下报告，别开公开的 issue |
+
+报告之前先跑一遍 `changji --doctor`。缺什么它会说，而且它的输出是别人第一个
+会问你要的东西。
 
 ---
 
