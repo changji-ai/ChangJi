@@ -4,7 +4,13 @@
 
 **Say what film you want. It writes the chapters, breaks them into shots, draws
 every first frame, renders the video, speaks the lines, and cuts the result into
-one film — on your own machine, out of one binary.**
+one film — on your own machine, out of one binary. No API key needed.**
+
+**No API key, no account, no subscription.** The language, image, video and
+speech models can all run inside the one binary, on your own GPU: nothing to
+sign up for, nothing to top up, and your film never leaves your machine. The
+software is Apache-2.0, so commercial use needs nobody's permission; the model
+weights you download carry their own terms (see [License](#license)).
 
 changji is not a generative model. It is the production line that drives a pile
 of them: the shot table, the asset library, the scheduling, the quality gates,
